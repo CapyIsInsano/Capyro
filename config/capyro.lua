@@ -5,8 +5,7 @@
 --  Capyro busca este archivo en este orden:
 --    1. la ruta en la variable de entorno CAPYRO_CONFIG
 --    2. $XDG_CONFIG_HOME/capyro/capyro.lua   (o ~/.config/capyro/capyro.lua)
---    3. %APPDATA%\capyro\capyro.lua          (Windows)
---    4. ./config/capyro.lua                  (junto al binario o en el cwd)
+--    3. ./config/capyro.lua                  (junto al binario o en el cwd)
 --  Si no encuentra ninguno usa esta misma configuración, que va embebida
 --  en el binario. No hace falta recompilar para cambiarla: editás y
 --  reabrís Capyro.
@@ -24,7 +23,8 @@
 --  Acciones disponibles:
 --    play_pause, stop, seek_forward, seek_backward,
 --    volume_up, volume_down, mute,
---    next_file, prev_file, toggle_playlist, fullscreen, open_files, quit
+--    next_file, prev_file, toggle_playlist, fullscreen, open_files,
+--    toggle_shuffle, cycle_repeat, speed_up, speed_down, speed_reset, quit
 -- ------------------------------------------------------------
 local keys = {
     play_pause      = { "Space", "K" },
@@ -39,6 +39,11 @@ local keys = {
     toggle_playlist = "Ctrl+L",
     fullscreen      = { "F", "F11" },
     open_files      = "Ctrl+O",
+    toggle_shuffle  = "Ctrl+S",
+    cycle_repeat    = "Ctrl+R",        -- no repetir → repetir lista → repetir uno
+    speed_down      = "[",
+    speed_up        = "]",
+    speed_reset     = "Backspace",
     quit            = "Ctrl+Q",
 }
 
@@ -50,6 +55,9 @@ local options = {
     volume_step  = 5,          -- porcentaje por cada volume_up/volume_down
     start_volume = 100,        -- volumen al abrir Capyro (0..100)
     auto_next    = true,       -- al terminar un archivo, pasar al siguiente de la lista
+    speed        = 1.0,        -- velocidad inicial (0.5 .. 2.0), sin cambiar el tono
+    shuffle      = false,      -- aleatorio al abrir
+    ["repeat"]   = "off",      -- "off", "all" (toda la lista) u "one" (el actual)
     accent       = "#FF7417",  -- color de acento (botón play, barra de progreso)
 
     -- Solo Linux: "auto", "x11" o "wayland" (hay que reabrir Capyro).

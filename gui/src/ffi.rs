@@ -35,6 +35,12 @@ extern "C" {
     fn capyro_core_version() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
     fn capyro_core_update(core: *mut CapyroCore);
+    fn capyro_core_set_speed(core: *mut CapyroCore, speed: f64);
+    fn capyro_core_get_speed(core: *mut CapyroCore) -> f64;
+    fn capyro_core_set_repeat(core: *mut CapyroCore, mode: c_int);
+    fn capyro_core_get_repeat(core: *mut CapyroCore) -> c_int;
+    fn capyro_core_set_shuffle(core: *mut CapyroCore, enabled: bool);
+    fn capyro_core_get_shuffle(core: *mut CapyroCore) -> bool;
     fn capyro_core_set_auto_next(core: *mut CapyroCore, enabled: bool);
     fn capyro_core_audio_backend(core: *mut CapyroCore) -> *const c_char;
     fn capyro_core_get_title(core: *mut CapyroCore) -> *const c_char;
@@ -80,6 +86,24 @@ pub enum State {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Repeat {
+    Off,
+    All,
+    One,
+}
+
+impl Repeat {
+    /// Off → All → One → Off (el ciclo del botón).
+    pub fn next(self) -> Self {
+        match self {
+            Repeat::Off => Repeat::All,
+            Repeat::All => Repeat::One,
+            Repeat::One => Repeat::Off,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaKind {
     None,
     Video,
@@ -109,17 +133,9 @@ fn check(code: c_int) -> Result<(), CoreError> {
 }
 
 fn path_to_cstring(path: &Path) -> Option<CString> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        CString::new(path.as_os_str().as_bytes()).ok()
-    }
-    #[cfg(not(unix))]
-    {
-        // TODO(windows): el núcleo usa fopen(); para rutas con caracteres no
-        // ASCII habría que pasar a _wfopen con UTF-16.
-        CString::new(path.to_string_lossy().as_bytes()).ok()
-    }
+    use std::os::unix::ffi::OsStrExt;
+    // En Linux una ruta son bytes: se pasan tal cual (aunque no sean UTF-8).
+    CString::new(path.as_os_str().as_bytes()).ok()
 }
 
 pub fn version() -> String {
@@ -148,6 +164,33 @@ impl Core {
     }
     pub fn set_auto_next(&self, enabled: bool) {
         unsafe { capyro_core_set_auto_next(self.ptr, enabled) }
+    }
+    pub fn speed(&self) -> f64 {
+        unsafe { capyro_core_get_speed(self.ptr) }
+    }
+    pub fn set_speed(&self, speed: f64) {
+        unsafe { capyro_core_set_speed(self.ptr, speed) }
+    }
+    pub fn repeat(&self) -> Repeat {
+        match unsafe { capyro_core_get_repeat(self.ptr) } {
+            1 => Repeat::All,
+            2 => Repeat::One,
+            _ => Repeat::Off,
+        }
+    }
+    pub fn set_repeat(&self, r: Repeat) {
+        let mode = match r {
+            Repeat::Off => 0,
+            Repeat::All => 1,
+            Repeat::One => 2,
+        };
+        unsafe { capyro_core_set_repeat(self.ptr, mode) }
+    }
+    pub fn shuffle(&self) -> bool {
+        unsafe { capyro_core_get_shuffle(self.ptr) }
+    }
+    pub fn set_shuffle(&self, on: bool) {
+        unsafe { capyro_core_set_shuffle(self.ptr, on) }
     }
     pub fn audio_backend(&self) -> String {
         cstr_to_string(unsafe { capyro_core_audio_backend(self.ptr) })

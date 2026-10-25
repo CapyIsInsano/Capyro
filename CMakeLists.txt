@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.2.1
+    VERSION 0.3.0
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -8,6 +8,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "Capyro por ahora solo se puede compilar en Linux.")
+endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Tipo de build" FORCE)
@@ -36,19 +40,11 @@ add_subdirectory(gui)
 add_executable(capyro core/src/main.c)
 target_link_libraries(capyro PRIVATE capyro_core capyro_gui)
 
-if(WIN32)
-    # Sin consola negra detrás de la ventana en builds Release.
-    set_target_properties(capyro PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>)
-endif()
-
 # --- pruebas ------------------------------------------------------------
 if(CAPYRO_BUILD_TESTS)
     enable_testing()
     add_executable(test_core tests/test_core.c)
-    target_link_libraries(test_core PRIVATE capyro_core)
-    if(NOT MSVC)
-        target_link_libraries(test_core PRIVATE m)
-    endif()
+    target_link_libraries(test_core PRIVATE capyro_core m)
 
     # Media de prueba generada con el ffmpeg de línea de comandos (opcional).
     # Se genera al correr ctest, nunca durante el build.
@@ -71,9 +67,7 @@ endif()
 include(GNUInstallDirs)
 install(TARGETS capyro RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES config/capyro.lua DESTINATION ${CMAKE_INSTALL_DATADIR}/capyro)
-if(UNIX AND NOT APPLE)
-    install(FILES packaging/capyro.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-    install(FILES assets/capyro_logo_256.png
-            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps
-            RENAME capyro.png)
-endif()
+install(FILES packaging/capyro.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES assets/capyro_logo_256.png
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps
+        RENAME capyro.png)

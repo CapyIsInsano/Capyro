@@ -51,13 +51,11 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
         viewport = viewport.with_icon(Arc::new(icon));
     }
 
-    #[allow(unused_mut)] // solo se modifica en Linux
     let mut options = eframe::NativeOptions {
         viewport,
         centered: true,
         ..Default::default()
     };
-    #[cfg(all(unix, not(target_os = "macos")))]
     {
         use winit::platform::{wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11};
         match cfg.backend {

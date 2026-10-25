@@ -1,18 +1,13 @@
-/* Capyro — capa mínima de plataforma: hilos, mutex, reloj y sleep.
- * POSIX (Linux/BSD/macOS) usa pthreads; Windows usa la API Win32. */
+/* Capyro — capa mínima de plataforma: hilos, mutex, reloj y sleep (POSIX).
+ * Capyro por ahora es solo para Linux; si algún día se porta, esto es lo
+ * único del núcleo que hay que reimplementar. */
 #ifndef CAPYRO_PLATFORM_H
 #define CAPYRO_PLATFORM_H
 
-#ifdef _WIN32
-#  define WIN32_LEAN_AND_MEAN
-#  include <windows.h>
-typedef HANDLE           cp_thread;
-typedef CRITICAL_SECTION cp_mutex;
-#else
-#  include <pthread.h>
+#include <pthread.h>
+
 typedef pthread_t       cp_thread;
 typedef pthread_mutex_t cp_mutex;
-#endif
 
 typedef void (*cp_thread_fn)(void *arg);
 

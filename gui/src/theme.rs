@@ -12,7 +12,6 @@ pub const TEXT_DIM: Color32 = Color32::from_rgb(0xA8, 0xA9, 0xAE);
 pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6E, 0x6F, 0x75);
 pub const ICON: Color32 = Color32::from_rgb(0xD6, 0xD7, 0xDB);
 pub const ICON_DIM: Color32 = Color32::from_rgb(0xA0, 0xA1, 0xA7);
-pub const HOVER_BG: Color32 = Color32::from_rgba_premultiplied(18, 18, 20, 18);
 pub const ERROR: Color32 = Color32::from_rgb(0xF0, 0x5A, 0x4F);
 
 pub const WINDOW_RADIUS: u8 = 14;
@@ -39,7 +38,7 @@ pub fn apply_visuals(ctx: &egui::Context, accent: Color32) {
     ctx.set_theme(egui::Theme::Dark);
 }
 
-/// Si el sistema tiene DejaVu Sans / Segoe UI la usamos (se parece más al
+/// Si el sistema tiene DejaVu Sans la usamos (se parece más al
 /// mockup y trae negrita). Si no, quedan las fuentes que trae egui.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -48,13 +47,11 @@ pub fn install_fonts(ctx: &egui::Context) {
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",          // Gentoo
         "/usr/share/fonts/TTF/DejaVuSans.ttf",             // Arch / Artix
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // Debian / Devuan / Ubuntu
-        "C:\\Windows\\Fonts\\segoeui.ttf",
     ];
     const BOLD: &[&str] = &[
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "C:\\Windows\\Fonts\\segoeuib.ttf",
     ];
 
     let load = |list: &[&str]| list.iter().find_map(|p| std::fs::read(p).ok());

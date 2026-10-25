@@ -12,7 +12,8 @@ struct AVFormatContext;
 struct AVCodecContext;
 struct AVFrame;
 struct AVPacket;
-struct SwrContext;
+struct AVFilterGraph;
+struct AVFilterContext;
 struct SwsContext;
 struct ma_device;
 
@@ -44,7 +45,11 @@ typedef struct {
     struct AVFormatContext *fmt;
     struct AVCodecContext  *actx, *vctx;
     int                     aidx, vidx;  /* -1 = no se decodifica */
-    struct SwrContext      *swr;
+    struct AVFilterGraph   *agraph;   /* atempo + aresample + aformat */
+    struct AVFilterContext *asrc, *asink;
+    struct AVFrame         *afilt;
+    bool                    af_flushed;
+    double                  speed;    /* velocidad con la que se armó agraph */
     struct SwsContext      *sws;
     struct AVFrame         *frame;
     struct AVPacket        *pkt;
@@ -52,8 +57,6 @@ typedef struct {
     bool                    demux_eof, a_flushed, v_flushed, a_done, v_done;
     double                  start_time;
     double                  a_drop_until, v_drop_until; /* < 0 = no descartar */
-    float                  *abuf;
-    int                     abuf_frames;
     uint64_t                seek_serial_done;
     cp_thread               thread;
     bool                    thread_running;
@@ -72,6 +75,7 @@ struct CapyroCore {
     double   clock_base;
     double   wall_started;
     uint64_t audio_consumed;
+    double   speed;
 
     /* audio */
     struct ma_device *device;
@@ -111,6 +115,10 @@ struct CapyroCore {
     size_t  playlist_len;
     size_t  playlist_cap;
     long    playlist_current;
+    size_t *order;          /* orden de reproducción (mezclado si shuffle) */
+    int     repeat;
+    bool    shuffle;
+    uint64_t rng;
 };
 
 /* player.c */

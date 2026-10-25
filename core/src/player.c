@@ -7,10 +7,13 @@
  *   - audio:          callback de miniaudio; consume el ring de audio y es el
  *                     reloj maestro (la posición sale de las muestras que sonaron).
  *
+ * El audio pasa por un grafo de libavfilter: atempo (velocidad sin cambiar el
+ * tono) → aresample (a la frecuencia del dispositivo) → aformat (float estéreo).
+ *
  * Un solo mutex (core->lock) protege todo lo compartido. Nunca se llama a
  * FFmpeg ni a miniaudio con el lock tomado.
  */
-#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#ifndef _POSIX_C_SOURCE
 #  define _POSIX_C_SOURCE 200809L
 #endif
 
@@ -20,7 +23,9 @@
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/imgutils.h>
-#include <libswresample/swresample.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 #include <libswscale/swscale.h>
 
 #include "miniaudio.h"
@@ -188,8 +193,6 @@ void player_global_shutdown(CapyroCore *core) {
         core->slots[i].data = NULL;
         core->slots[i].cap  = 0;
     }
-    free(core->player.abuf);
-    core->player.abuf = NULL;
 }
 
 /* El dispositivo se arranca recién en el primer play (y nunca con el lock
@@ -213,10 +216,10 @@ void player_ensure_device_started(CapyroCore *core) {
 
 double player_clock_locked(CapyroCore *core) {
     if (core->clock_audio) {
-        return core->clock_base + (double)core->audio_consumed / (double)core->out_rate;
+        return core->clock_base + (double)core->audio_consumed / (double)core->out_rate * core->speed;
     }
     if (core->state == CAPYRO_STATE_PLAYING) {
-        return core->clock_base + (cp_now() - core->wall_started);
+        return core->clock_base + (cp_now() - core->wall_started) * core->speed;
     }
     return core->clock_base;
 }
@@ -406,48 +409,127 @@ static int pull_frame(AVCodecContext *ctx, PktQueue *q, AVFrame *frame,
     return -1;
 }
 
-static bool audio_step(CapyroCore *core) {
+/* Arma el grafo de audio a partir del formato real del primer frame. */
+static bool build_audio_graph(CapyroCore *core, const AVFrame *f, double speed) {
+    Player *p = &core->player;
+    avfilter_graph_free(&p->agraph);
+    p->asrc = p->asink = NULL;
+    p->af_flushed = false;
+
+    AVChannelLayout layout;
+    if (f->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC || f->ch_layout.nb_channels == 0) {
+        av_channel_layout_default(&layout, f->ch_layout.nb_channels > 0 ? f->ch_layout.nb_channels : 2);
+    } else if (av_channel_layout_copy(&layout, &f->ch_layout) < 0) {
+        return false;
+    }
+    char layout_str[128];
+    av_channel_layout_describe(&layout, layout_str, sizeof(layout_str));
+    av_channel_layout_uninit(&layout);
+
+    const char *fmt_name = av_get_sample_fmt_name((enum AVSampleFormat)f->format);
+    if (!fmt_name || f->sample_rate <= 0) {
+        return false;
+    }
+    char src_args[256];
+    snprintf(src_args, sizeof(src_args),
+             "time_base=1/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s",
+             f->sample_rate, f->sample_rate, fmt_name, layout_str);
+
+    char tempo[48] = "";
+    if (speed < 0.999 || speed > 1.001) {
+        snprintf(tempo, sizeof(tempo), "atempo=%.4f,", speed);
+    }
+    char chain[256];
+    snprintf(chain, sizeof(chain), "%saresample=%u,aformat=sample_fmts=flt:channel_layouts=stereo",
+             tempo, core->out_rate);
+
+    AVFilterInOut *outputs = avfilter_inout_alloc();
+    AVFilterInOut *inputs  = avfilter_inout_alloc();
+    p->agraph = avfilter_graph_alloc();
+    bool ok = outputs && inputs && p->agraph;
+    if (ok) {
+        p->agraph->nb_threads = 1;
+        ok = avfilter_graph_create_filter(&p->asrc, avfilter_get_by_name("abuffer"), "in",
+                                          src_args, NULL, p->agraph) >= 0 &&
+             avfilter_graph_create_filter(&p->asink, avfilter_get_by_name("abuffersink"), "out",
+                                          NULL, NULL, p->agraph) >= 0;
+    }
+    if (ok) {
+        outputs->name       = av_strdup("in");
+        outputs->filter_ctx = p->asrc;
+        outputs->pad_idx    = 0;
+        outputs->next       = NULL;
+        inputs->name        = av_strdup("out");
+        inputs->filter_ctx  = p->asink;
+        inputs->pad_idx     = 0;
+        inputs->next        = NULL;
+        ok = avfilter_graph_parse_ptr(p->agraph, chain, &inputs, &outputs, NULL) >= 0 &&
+             avfilter_graph_config(p->agraph, NULL) >= 0;
+    }
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    if (!ok) {
+        avfilter_graph_free(&p->agraph);
+        p->asrc = p->asink = NULL;
+        fprintf(stderr, "capyro: no se pudo armar el filtro de audio (%s)\n", chain);
+        return false;
+    }
+    p->speed = speed;
+    return true;
+}
+
+/* Saca del grafo todo lo que esté listo y lo pone en el ring. */
+static void drain_audio_graph(CapyroCore *core) {
+    Player *p = &core->player;
+    while (av_buffersink_get_frame(p->asink, p->afilt) >= 0) {
+        cp_mutex_lock(&core->lock);
+        if (!core->seek_req) {
+            ring_push_locked(core, (const float *)p->afilt->data[0], (size_t)p->afilt->nb_samples);
+        }
+        cp_mutex_unlock(&core->lock);
+        av_frame_unref(p->afilt);
+    }
+}
+
+static bool audio_step(CapyroCore *core, double speed) {
     Player *p = &core->player;
     int r = pull_frame(p->actx, &p->aq, p->frame, p->demux_eof, &p->a_flushed, &p->a_done);
     if (r < 1) {
+        /* Fin del audio: vaciar lo que atempo tenga guardado. */
+        if (p->a_done && p->agraph && !p->af_flushed) {
+            p->af_flushed = true;
+            if (av_buffersrc_add_frame(p->asrc, NULL) >= 0) {
+                drain_audio_graph(core);
+            }
+            return true;
+        }
         return r == 0;
     }
 
     AVFrame *f = p->frame;
     double t = frame_time(p, p->aidx, f);
-    int out_max = swr_get_out_samples(p->swr, f->nb_samples);
-    if (out_max > p->abuf_frames) {
-        float *grown = realloc(p->abuf, (size_t)out_max * 2 * sizeof(float));
-        if (!grown) {
+
+    /* Después de un seek: tirar los frames que terminan antes del punto pedido. */
+    if (p->a_drop_until >= 0.0 && t >= 0.0 && f->sample_rate > 0) {
+        double dur = (double)f->nb_samples / f->sample_rate;
+        if (t + dur <= p->a_drop_until) {
             av_frame_unref(f);
             return true;
         }
-        p->abuf        = grown;
-        p->abuf_frames = out_max;
-    }
-    uint8_t *out[1] = { (uint8_t *)p->abuf };
-    int n = swr_convert(p->swr, out, out_max, (const uint8_t **)f->extended_data, f->nb_samples);
-    av_frame_unref(f);
-    if (n <= 0) {
-        return true;
-    }
-
-    /* Después de un seek: tirar lo que quedó antes del punto pedido. */
-    int skip = 0;
-    if (p->a_drop_until >= 0.0 && t >= 0.0) {
-        double s = (p->a_drop_until - t) * core->out_rate;
-        if (s >= n) {
-            return true;
-        }
-        skip = s > 0 ? (int)s : 0;
         p->a_drop_until = -1.0;
     }
 
-    cp_mutex_lock(&core->lock);
-    if (!core->seek_req) {
-        ring_push_locked(core, p->abuf + (size_t)skip * 2, (size_t)(n - skip));
+    if (!p->agraph || p->speed != speed) {
+        if (!build_audio_graph(core, f, speed)) {
+            av_frame_unref(f);
+            return true;
+        }
     }
-    cp_mutex_unlock(&core->lock);
+    if (av_buffersrc_add_frame(p->asrc, f) < 0) { /* se queda con la referencia del frame */
+        av_frame_unref(f);
+        return true;
+    }
+    drain_audio_graph(core);
     return true;
 }
 
@@ -506,8 +588,8 @@ static void do_seek(CapyroCore *core, double target, uint64_t serial) {
     pq_clear(&p->vq);
     if (p->actx) {
         avcodec_flush_buffers(p->actx);
-        swr_close(p->swr);
-        swr_init(p->swr);
+        avfilter_graph_free(&p->agraph); /* se rearma con el próximo frame */
+        p->asrc = p->asink = NULL;
     }
     if (p->vctx) {
         avcodec_flush_buffers(p->vctx);
@@ -537,6 +619,7 @@ static void decode_thread(void *arg) {
         double   target  = core->seek_target;
         uint64_t serial  = core->seek_serial;
         size_t   ring    = core->ring_len;
+        double   speed   = core->speed;
         int      vq_len  = core->vq_len;
         /* Si la GUI no está pidiendo frames (ventana minimizada), igual hay
          * que dejar pasar los viejos: si no, el video frena al audio. */
@@ -568,7 +651,7 @@ static void decode_thread(void *arg) {
             worked |= demux_one(core);
         }
         if (want_audio) {
-            worked |= audio_step(core);
+            worked |= audio_step(core, speed);
         }
         if (want_video) {
             worked |= video_step(core);
@@ -620,31 +703,14 @@ static AVCodecContext *open_decoder(AVStream *st, bool threads) {
     return ctx;
 }
 
-static SwrContext *open_resampler(AVCodecContext *actx, unsigned out_rate) {
-    AVChannelLayout in_layout;
-    if (actx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC) {
-        av_channel_layout_default(&in_layout, actx->ch_layout.nb_channels);
-    } else if (av_channel_layout_copy(&in_layout, &actx->ch_layout) < 0) {
-        return NULL;
-    }
-    AVChannelLayout out_layout = AV_CHANNEL_LAYOUT_STEREO;
-    SwrContext *swr = NULL;
-    int ret = swr_alloc_set_opts2(&swr, &out_layout, AV_SAMPLE_FMT_FLT, (int)out_rate,
-                                  &in_layout, actx->sample_fmt, actx->sample_rate, 0, NULL);
-    av_channel_layout_uninit(&in_layout);
-    if (ret < 0 || swr_init(swr) < 0) {
-        swr_free(&swr);
-        return NULL;
-    }
-    return swr;
-}
-
 static void free_player(Player *p) {
     pq_clear(&p->aq);
     pq_clear(&p->vq);
     avcodec_free_context(&p->actx);
     avcodec_free_context(&p->vctx);
-    swr_free(&p->swr);
+    avfilter_graph_free(&p->agraph);
+    p->asrc = p->asink = NULL;
+    av_frame_free(&p->afilt);
     sws_freeContext(p->sws);
     p->sws = NULL;
     av_frame_free(&p->frame);
@@ -687,7 +753,7 @@ void player_close(CapyroCore *core) {
 int player_open(CapyroCore *core, const char *path) {
     player_close(core);
     Player *p = &core->player;
-    memset(p, 0, offsetof(Player, abuf)); /* conserva el buffer de audio */
+    memset(p, 0, sizeof(*p));
     p->aidx = p->vidx = -1;
 
     if (avformat_open_input(&p->fmt, path, NULL, NULL) < 0) {
@@ -706,8 +772,9 @@ int player_open(CapyroCore *core, const char *path) {
     }
 
     p->frame = av_frame_alloc();
+    p->afilt = av_frame_alloc();
     p->pkt   = av_packet_alloc();
-    if (!p->frame || !p->pkt) {
+    if (!p->frame || !p->afilt || !p->pkt) {
         free_player(p);
         return CAPYRO_ERR_NO_MEMORY;
     }
@@ -716,13 +783,8 @@ int player_open(CapyroCore *core, const char *path) {
     if (aidx >= 0 && core->audio_ok) {
         p->actx = open_decoder(p->fmt->streams[aidx], false);
         if (p->actx) {
-            p->swr = open_resampler(p->actx, core->out_rate);
-        }
-        if (p->actx && p->swr) {
-            p->aidx = aidx;
+            p->aidx = aidx; /* el grafo de audio se arma con el primer frame */
         } else {
-            avcodec_free_context(&p->actx);
-            swr_free(&p->swr);
             fprintf(stderr, "capyro: %s: no se pudo abrir el audio\n", path);
         }
     }

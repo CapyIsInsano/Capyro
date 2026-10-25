@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.1-alpha"
+#define CAPYRO_VERSION "0.3.0-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -48,6 +48,15 @@ typedef enum {
     CAPYRO_ERR_NO_STREAMS   = 7, /* el archivo no tiene audio ni video */
     CAPYRO_ERR_THREAD       = 8  /* no se pudo crear el hilo de decodificación */
 } CapyroError;
+
+typedef enum {
+    CAPYRO_REPEAT_OFF = 0, /* al terminar la lista, para */
+    CAPYRO_REPEAT_ALL = 1, /* al terminar la lista, vuelve a empezar */
+    CAPYRO_REPEAT_ONE = 2  /* repite el archivo actual */
+} CapyroRepeat;
+
+#define CAPYRO_SPEED_MIN 0.5
+#define CAPYRO_SPEED_MAX 2.0
 
 /* Último frame de video listo para mostrar (RGBA8, sin premultiplicar). */
 typedef struct {
@@ -88,6 +97,11 @@ void capyro_core_stop(CapyroCore *core);
 void capyro_core_seek(CapyroCore *core, double seconds);
 void capyro_core_seek_relative(CapyroCore *core, double delta);
 
+/* Velocidad de reproducción (0.5 .. 2.0). Cambia el tempo sin cambiar el
+ * tono (filtro atempo de FFmpeg). */
+void   capyro_core_set_speed(CapyroCore *core, double speed);
+double capyro_core_get_speed(CapyroCore *core);
+
 /* ---------- volumen ---------- */
 void  capyro_core_set_volume(CapyroCore *core, float volume); /* 0.0 .. 1.0 */
 float capyro_core_get_volume(CapyroCore *core);
@@ -121,6 +135,13 @@ int         capyro_core_playlist_next(CapyroCore *core);
 int         capyro_core_playlist_prev(CapyroCore *core);
 void        capyro_core_playlist_remove(CapyroCore *core, size_t index);
 void        capyro_core_playlist_clear(CapyroCore *core);
+
+/* Repetir (CapyroRepeat) y aleatorio. Con aleatorio, siguiente/anterior
+ * siguen un orden mezclado que no repite archivos hasta recorrer la lista. */
+void capyro_core_set_repeat(CapyroCore *core, int mode);
+int  capyro_core_get_repeat(CapyroCore *core);
+void capyro_core_set_shuffle(CapyroCore *core, bool enabled);
+bool capyro_core_get_shuffle(CapyroCore *core);
 
 #ifdef __cplusplus
 }

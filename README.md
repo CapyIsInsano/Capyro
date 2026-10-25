@@ -6,7 +6,7 @@
 <p align="center"><b>Just press play.</b></p>
 
 <p align="center">
-  Reproductor multimedia liviano para <code>.mp4</code> y <code>.mp3</code>.<br>
+  Reproductor multimedia liviano para <code>.mp4</code> y <code>.mp3</code>, para <b>Linux</b>.<br>
   Núcleo en <b>C</b> · interfaz en <b>Rust</b> · compilado con <b>CMake</b> · configurable en <b>Lua</b>.
 </p>
 
@@ -16,9 +16,12 @@
 
 ---
 
-## Estado: `v0.2.1-alpha`
+## Estado: `v0.3.0-alpha`
 
-**Ya reproduce de verdad**: audio y video, con seek, carátulas y metadatos.
+Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **aleatorio** y
+**repetir**, **velocidad** de 0.5× a 2× sin cambiar el tono, y animaciones en los botones.
+
+> Por ahora Capyro es **solo para Linux**.
 
 <p align="center">
   <img src="docs/screenshot-audio.png" width="420" alt="mp3 con carátula">
@@ -29,10 +32,12 @@
 |---|---|
 | Reproducción de `.mp3` y `.mp4` (FFmpeg + miniaudio) | Subtítulos |
 | Botón **+ Agregar archivo(s)** con el selector de archivos del sistema | Arrastrar archivos en Wayland nativo (limitación de winit) |
-| Video sincronizado con el audio (el audio es el reloj maestro) | Panel de ajustes dentro de la app |
-| Seek preciso (clic/arrastre en la barra, flechas) | Aceleración por hardware (VA-API / D3D11) |
-| Carátula del mp3 y metadatos (título, artista) | Probar en Windows y macOS |
-| Lista de reproducción con paso automático al siguiente | Recordar posición / archivos recientes |
+| Video sincronizado con el audio (el audio es el reloj maestro) | Más opciones en el menú de ajustes |
+| Seek preciso (clic/arrastre en la barra, flechas) | Aceleración por hardware (VA-API) |
+| Carátula del mp3 y metadatos (título, artista) | Recordar posición / archivos recientes |
+| Lista con aleatorio, repetir (lista / uno) y paso automático | Otras plataformas (más adelante) |
+| Velocidad 0.5×–2× sin cambiar el tono (menú ⚙ o `[` `]`) | |
+| Botones animados (hover, clic, transiciones) | |
 | Volumen, silencio, pausa, stop, pantalla completa | |
 | Atajos y opciones en `capyro.lua` (recarga en caliente) | |
 | Sigue andando sin placa de sonido (reloj de pared, sin audio) | |
@@ -47,7 +52,7 @@
   (arranca)     │                                              │
                 │  hilo de decodificación ─ FFmpeg             │
                 │    demux → colas de paquetes → decode        │
-                │      audio → swresample → ring (float, 2 s) ─┼──▶ miniaudio ──▶ 🔊
+                │      audio → atempo/aresample → ring (2 s) ──┼──▶ miniaudio ──▶ 🔊
                 │      video → swscale → cola RGBA (3 frames)  │    (callback = reloj)
                 └──────────────────────▲───────────────────────┘
                                        │ FFI: capyro_core.h
@@ -67,6 +72,10 @@
 - **Reloj maestro = audio**: la posición sale de las muestras que realmente sonaron, y el
   video muestra el frame más nuevo cuyo tiempo ya llegó. Si no hay audio (o se terminó
   antes que el video) el reloj pasa a ser de pared sin saltos.
+- **Velocidad**: el audio pasa por el filtro `atempo` de libavfilter (cambia el tempo sin
+  cambiar el tono) y el reloj avanza `velocidad` segundos por segundo, así el video lo sigue.
+- **La lista vive en el núcleo**: el orden de reproducción (mezclado si hay aleatorio),
+  repetir y el paso al siguiente se deciden en C; la GUI solo muestra y manda comandos.
 - **Rust se compila como `staticlib`** y expone una sola función: `capyro_gui_run()`.
 - **CMake** compila todo con un solo comando; el crate entra como un target más gracias a
   [Corrosion](https://github.com/corrosion-rs/corrosion).
@@ -87,9 +96,10 @@ Reglas de la frontera C ↔ Rust:
 | Herramienta | Versión |
 |---|---|
 | CMake | ≥ 3.22 |
-| Compilador C | C11 (GCC, Clang o MSVC) |
+| Sistema | **Linux** (X11 o Wayland) |
+| Compilador C | C11 (GCC o Clang) |
 | Rust + Cargo | **≥ 1.95** (egui 0.37 lo pide) |
-| FFmpeg (librerías) | **≥ 5.1** (`libavformat`, `libavcodec`, `libavutil`, `libswresample`, `libswscale`) |
+| FFmpeg (librerías) | **≥ 5.1** (`libavformat`, `libavcodec`, `libavutil`, `libavfilter`, `libswscale`) |
 | pkg-config / pkgconf | para encontrar FFmpeg |
 | Git | CMake baja Corrosion y miniaudio la primera vez |
 | `ffmpeg` (CLI) | opcional: solo para generar la media de las pruebas |
@@ -97,12 +107,12 @@ Reglas de la frontera C ↔ Rust:
 [miniaudio](https://miniaud.io/) es un header único: si tenés `miniaudio.h` en el sistema
 se usa ese, si no CMake lo baja solo (versión fija 0.11.25).
 
-El selector de archivos en Linux usa el **portal de escritorio** (`xdg-desktop-portal` con
+El selector de archivos usa el **portal de escritorio** (`xdg-desktop-portal` con
 un backend que tenga *FileChooser*: gtk, gnome o kde). Si no hay portal, usa `zenity` o
 `kdialog` si están instalados. En Gentoo: `sys-apps/xdg-desktop-portal` +
 `sys-apps/xdg-desktop-portal-gtk` (o `gnome-extra/zenity`).
 
-En Linux el audio sale por PulseAudio/PipeWire, ALSA o JACK (miniaudio los carga en tiempo
+El audio sale por PulseAudio/PipeWire, ALSA o JACK (miniaudio los carga en tiempo
 de ejecución) y la ventana por X11 o Wayland: no hace falta ninguna librería `-dev` de eso.
 
 ### Instalar dependencias
@@ -122,16 +132,10 @@ rustup default stable
 **Devuan / Debian / Ubuntu** — el Rust de `apt` es demasiado viejo, usá rustup:
 ```sh
 sudo apt install build-essential cmake git curl pkg-config ffmpeg \
-    libavformat-dev libavcodec-dev libavutil-dev libswresample-dev libswscale-dev
+    libavformat-dev libavcodec-dev libavutil-dev libavfilter-dev libswscale-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
-
-**Windows (sin probar todavía)** — lo más simple es [MSYS2](https://www.msys2.org/), terminal *UCRT64*:
-```sh
-pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,ffmpeg}
-```
-y [rustup](https://rustup.rs/) con `rustup default stable-x86_64-pc-windows-gnu`.
 
 ---
 
@@ -145,14 +149,12 @@ cmake --build build -j"$(nproc)"
 ./build/capyro
 ```
 
-En MSYS2 agregá `-G Ninja` al primer comando.
-
 > La primera compilación tarda unos minutos: Cargo baja las dependencias y el perfil
 > Release usa LTO. Las siguientes son incrementales.
 >
 > Para un build de desarrollo más rápido: `-DCMAKE_BUILD_TYPE=Debug`.
 
-### Instalar (Linux)
+### Instalar
 
 ```sh
 sudo cmake --install build          # por defecto en /usr/local
@@ -174,7 +176,7 @@ Para otro prefijo: `cmake --install build --prefix ~/.local`.
 ## Uso
 
 ```sh
-capyro                                  # abre vacío, arrastrá archivos a la ventana
+capyro                                  # abre vacío; usá "+ Agregar archivo(s)"
 capyro cancion.mp3 video.mp4            # carga la lista y arranca a reproducir
 capyro --help
 capyro --version
@@ -186,10 +188,17 @@ capyro --version
 - **Arrastrar y soltar** uno o varios archivos: se agregan a la lista y arranca el primero
   (ver la nota sobre Wayland más abajo).
 - Al terminar un archivo pasa solo al siguiente (`auto_next` en la config).
+- **Aleatorio** (botón a la izquierda de los controles): mezcla la lista sin repetir
+  archivos hasta recorrerla toda.
+- **Repetir** (botón a la derecha de los controles): cada clic cambia entre *no repetir* →
+  *repetir lista* → *repetir este archivo* (muestra un "1").
+- **Lista**: clic en un archivo para reproducirlo; pasá el mouse y tocá la **✕** para
+  quitarlo. Si quitás el que está sonando, sigue con el próximo.
 - **Clic** en el área de video: play/pausa. **Doble clic**: pantalla completa.
 - **Barra de progreso**: clic o arrastrar para saltar.
 - **Volumen**: clic para silenciar, rueda del mouse encima para subir/bajar.
-- **⚙**: recarga `capyro.lua` sin reiniciar.
+- **⚙ Ajustes**: velocidad (0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×) y recargar `capyro.lua` sin
+  reiniciar. Se cierra con un clic afuera o `Esc`.
 - **Header**: arrastrar para mover, doble clic para maximizar. Los bordes redimensionan.
 
 ### Atajos por defecto
@@ -203,6 +212,10 @@ capyro --version
 | Silenciar | `M` |
 | Siguiente / anterior | `N` / `P` |
 | Mostrar lista | `Ctrl+L` |
+| Agregar archivos | `Ctrl+O` |
+| Aleatorio | `Ctrl+S` |
+| Repetir (no → lista → uno) | `Ctrl+R` |
+| Velocidad − / + / normal | `[` / `]` / `Backspace` |
 | Pantalla completa | `F`, `F11` (salir: `Esc`) |
 | Salir | `Ctrl+Q` |
 
@@ -214,8 +227,7 @@ Capyro busca `capyro.lua` en este orden y usa el primero que encuentra:
 
 1. la ruta en `CAPYRO_CONFIG`
 2. `$XDG_CONFIG_HOME/capyro/capyro.lua` → `~/.config/capyro/capyro.lua`
-3. `%APPDATA%\capyro\capyro.lua` (Windows)
-4. `./config/capyro.lua`, junto al binario, o `../share/capyro/capyro.lua`
+3. `./config/capyro.lua`, junto al binario, o `../share/capyro/capyro.lua`
 
 Si no hay ninguno, usa la configuración por defecto que va **embebida en el binario**.
 Si el archivo tiene un error, lo avisa en la terminal y también cae a la embebida.
@@ -241,7 +253,10 @@ return {
         volume_step  = 5,          -- %
         start_volume = 80,         -- %
         auto_next    = true,       -- pasar al siguiente al terminar
-        backend      = "auto",     -- Linux: "auto", "x11" o "wayland"
+        speed        = 1.0,        -- velocidad inicial (0.5 .. 2.0)
+        shuffle      = false,      -- aleatorio al abrir
+        ["repeat"]   = "off",      -- "off", "all" u "one" (repeat es palabra reservada de Lua)
+        backend      = "auto",     -- "auto", "x11" o "wayland"
         accent       = "#FF7417",  -- color del botón play y la barra
     },
 }
@@ -249,7 +264,7 @@ return {
 
 Acciones disponibles: `play_pause`, `stop`, `seek_forward`, `seek_backward`, `volume_up`,
 `volume_down`, `mute`, `next_file`, `prev_file`, `toggle_playlist`, `fullscreen`,
-`open_files`, `quit`.
+`open_files`, `toggle_shuffle`, `cycle_repeat`, `speed_up`, `speed_down`, `speed_reset`, `quit`.
 La lista completa de nombres de teclas está comentada en [`config/capyro.lua`](config/capyro.lua).
 
 ---
@@ -263,8 +278,9 @@ cd gui && cargo test                         # parser de config Lua y de atajos
 
 Si está el `ffmpeg` de línea de comandos, `ctest` genera primero un mp3, un mp3 con carátula
 y un mp4 de prueba (nunca durante el build) y después prueba de punta a punta: duración, metadatos, reproducción, pausa,
-seek (también en pausa), fin del archivo, carátula, frames de video y paso automático al
-siguiente. Sin `ffmpeg` solo corren las pruebas que no decodifican.
+seek (también en pausa), fin del archivo, carátula, frames de video, paso automático al
+siguiente, velocidad (0.5× y 2×), repetir lista/uno, aleatorio sin repetidos y quitar
+archivos de la lista (incluido el que está sonando). Sin `ffmpeg` solo corren las pruebas que no decodifican.
 
 Para generar los mp3 de prueba tu `ffmpeg` necesita un encoder de mp3 (LAME); si no lo
 tiene, esas pruebas se saltean. En Gentoo se activa con el USE `lame` de
@@ -286,7 +302,7 @@ capyro/
 │   └── src/
 │       ├── core.c            #    API, transporte, lista de reproducción
 │       ├── player.c          #    FFmpeg + miniaudio: hilos, colas, reloj
-│       ├── platform.c/.h     #    hilos y mutex (pthreads / Win32)
+│       ├── platform.c/.h     #    hilos y mutex (pthreads)
 │       ├── internal.h        #    estructuras internas
 │       ├── miniaudio_impl.c  #    implementación de miniaudio
 │       └── main.c            #    entry point
@@ -302,7 +318,7 @@ capyro/
 ├── config/capyro.lua         # configuración por defecto
 ├── assets/                   # logo en 128/256/512 px
 ├── packaging/capyro.desktop  # lanzador para Linux
-├── tests/test_core.c
+├── tests/                    # test_core.c + gen_media.cmake
 └── docs/                     # capturas para este README
 ```
 
@@ -315,12 +331,14 @@ capyro/
 - [x] Frames de video → textura en egui, sincronizados con el audio
 - [x] Carátulas y metadatos de mp3
 - [x] Paso automático al siguiente de la lista
+- [x] Aleatorio y repetir (lista / uno)
+- [x] Menú de ajustes con velocidad de reproducción
+- [x] Animaciones en los botones
 - [ ] Subtítulos `.srt`
-- [ ] Panel de ajustes dentro de la app
+- [ ] Más opciones en el menú de ajustes
 - [ ] Hooks en Lua (`on_open`, `on_end`, acciones personalizadas)
 - [ ] Decodificación por hardware para video 4K
-- [ ] Rutas Unicode en Windows (`_wfopen`)
-- [ ] Probar en Windows y macOS
+- [ ] Otras plataformas (más adelante)
 
 ---
 
@@ -335,8 +353,8 @@ capyro/
   transparencia las esquinas se ven negras; es solo estético.
 - El video se escala a como mucho 1920×1080 antes de subirlo a la GPU y se decodifica por
   software (con hilos). Para 4K a 60 fps hará falta decodificación por hardware.
-- Probado compilando y corriendo en Linux x86_64 (X11, FFmpeg 6.1). Windows y macOS
-  deberían compilar, pero todavía no se probaron.
+- Probado en Linux x86_64 (Ubuntu en X11 con FFmpeg 6.1, y Gentoo). Por ahora Capyro es
+  solo para Linux: CMake se niega a configurar en otros sistemas.
 
 ---
 

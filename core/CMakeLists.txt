@@ -2,13 +2,13 @@
 # Núcleo de Capyro (C11): FFmpeg para leer/decodificar, miniaudio para sonar.
 # ---------------------------------------------------------------------------
 
-# FFmpeg >= 5.1 (API de AVChannelLayout)
+# FFmpeg >= 5.1 (API de AVChannelLayout). libavfilter: atempo para la velocidad.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat>=59.27
     libavcodec>=59.37
     libavutil>=57.28
-    libswresample>=4.7
+    libavfilter>=8.44
     libswscale>=6.7)
 
 # miniaudio: header único. Usa el del sistema si existe; si no, lo baja.
@@ -43,14 +43,8 @@ target_compile_definitions(capyro_core PRIVATE
     MA_NO_RESOURCE_MANAGER MA_NO_NODE_GRAPH MA_NO_ENGINE)
 target_link_libraries(capyro_core PUBLIC PkgConfig::FFMPEG Threads::Threads ${CMAKE_DL_LIBS})
 
-if(UNIX AND NOT APPLE)
-    target_link_libraries(capyro_core PUBLIC m)
-elseif(APPLE)
-    target_link_libraries(capyro_core PUBLIC
-        "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
-endif()
+target_link_libraries(capyro_core PUBLIC m)
 
 # Warnings solo para nuestro código (miniaudio va aparte).
-set(CAPYRO_WARN $<IF:$<C_COMPILER_ID:MSVC>,/W4,-Wall -Wextra -Wpedantic>)
 set_source_files_properties(src/core.c src/player.c src/platform.c
-    PROPERTIES COMPILE_OPTIONS "${CAPYRO_WARN}")
+    PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic")

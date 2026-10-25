@@ -23,6 +23,11 @@ pub enum Action {
     TogglePlaylist,
     Fullscreen,
     OpenFiles,
+    ToggleShuffle,
+    CycleRepeat,
+    SpeedUp,
+    SpeedDown,
+    SpeedReset,
     Quit,
 }
 
@@ -50,6 +55,11 @@ impl Action {
             "toggle_playlist" => Self::TogglePlaylist,
             "fullscreen" => Self::Fullscreen,
             "open_files" => Self::OpenFiles,
+            "toggle_shuffle" => Self::ToggleShuffle,
+            "cycle_repeat" => Self::CycleRepeat,
+            "speed_up" => Self::SpeedUp,
+            "speed_down" => Self::SpeedDown,
+            "speed_reset" => Self::SpeedReset,
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -72,6 +82,10 @@ pub struct Config {
     pub accent: Color32,
     pub auto_next: bool,
     pub backend: Backend,
+    /// Valores con los que arranca Capyro.
+    pub start_speed: f64,
+    pub start_shuffle: bool,
+    pub start_repeat: crate::ffi::Repeat,
     /// De dónde salió (para el log): ruta o "embebida".
     pub source: String,
 }
@@ -108,9 +122,6 @@ fn candidate_paths() -> Vec<PathBuf> {
     if let Some(home) = std::env::var_os("HOME") {
         out.push(PathBuf::from(home).join(".config/capyro/capyro.lua"));
     }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        out.push(PathBuf::from(appdata).join("capyro").join("capyro.lua"));
-    }
     out.push(PathBuf::from("config/capyro.lua"));
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -133,6 +144,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         accent: Color32::from_rgb(0xFF, 0x74, 0x17),
         auto_next: true,
         backend: Backend::Auto,
+        start_speed: 1.0,
+        start_shuffle: false,
+        start_repeat: crate::ffi::Repeat::Off,
         source: name.to_owned(),
     };
 
@@ -170,6 +184,23 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                 other => {
                     eprintln!("capyro: {name}: backend desconocido '{other}' (auto, x11 o wayland)");
                     Backend::Auto
+                }
+            };
+        }
+        if let Some(v) = opts.get::<Option<f64>>("speed")? {
+            cfg.start_speed = v.clamp(0.5, 2.0);
+        }
+        if let Some(v) = opts.get::<Option<bool>>("shuffle")? {
+            cfg.start_shuffle = v;
+        }
+        if let Some(r) = opts.get::<Option<String>>("repeat")? {
+            cfg.start_repeat = match r.to_ascii_lowercase().as_str() {
+                "all" | "todo" | "lista" => crate::ffi::Repeat::All,
+                "one" | "uno" => crate::ffi::Repeat::One,
+                "off" | "no" => crate::ffi::Repeat::Off,
+                other => {
+                    eprintln!("capyro: {name}: repeat desconocido '{other}' (off, all u one)");
+                    crate::ffi::Repeat::Off
                 }
             };
         }
@@ -216,7 +247,7 @@ pub fn parse_key_spec(spec: &str) -> Option<(Modifiers, Key)> {
     let key_name = parts.pop()?;
     for m in parts {
         match m.to_ascii_lowercase().as_str() {
-            // COMMAND = Ctrl en Linux/Windows y Cmd en macOS
+            // COMMAND = la tecla Ctrl en Linux
             "ctrl" | "control" | "cmd" | "command" => modifiers = modifiers | Modifiers::COMMAND,
             "shift" => modifiers = modifiers | Modifiers::SHIFT,
             "alt" | "option" => modifiers = modifiers | Modifiers::ALT,
@@ -242,7 +273,7 @@ mod tests {
     #[test]
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
-        assert!(cfg.bindings.len() >= 13);
+        assert!(cfg.bindings.len() >= 18);
         assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);
         // Ctrl+L tiene que quedar antes que cualquier binding sin modificadores

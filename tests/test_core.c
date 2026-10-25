@@ -5,7 +5,7 @@
  * La carpeta la genera CMake con el ffmpeg de línea de comandos (si está
  * instalado). Sin ella solo se corren las pruebas que no decodifican.
  */
-#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#ifndef _POSIX_C_SOURCE
 #  define _POSIX_C_SOURCE 200809L
 #endif
 
@@ -16,16 +16,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#  include <windows.h>
-static void sleep_ms(int ms) { Sleep((DWORD)ms); }
-#else
-#  include <time.h>
+#include <time.h>
+
 static void sleep_ms(int ms) {
     struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
     nanosleep(&ts, NULL);
 }
-#endif
 
 static int failures = 0;
 
@@ -222,6 +218,86 @@ static void test_media(const char *dir) {
     pump(core, 1200);
     CHECK(capyro_core_playlist_current(core) == 1);
     CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PLAYING);
+
+    /* --- velocidad: a 2x el reloj avanza el doble, sin saltos al cambiarla --- */
+    capyro_core_playlist_clear(core);
+    CHECK(capyro_core_open(core, has_tone ? tone : clip) == CAPYRO_OK);
+    capyro_core_set_speed(core, 5.0);
+    CHECK(capyro_core_get_speed(core) == CAPYRO_SPEED_MAX);
+    capyro_core_set_speed(core, 2.0);
+    capyro_core_play(core);
+    pump(core, 500);
+    double fast = capyro_core_get_position(core);
+    printf("posición tras 0.5 s a 2x: %.3f\n", fast);
+    CHECK(fast > 0.7 && fast < 1.3);
+    double before = capyro_core_get_position(core);
+    capyro_core_set_speed(core, 1.0);
+    CHECK(NEAR(capyro_core_get_position(core), before, 0.05));
+    capyro_core_set_speed(core, 0.5);
+    double slow_start = capyro_core_get_position(core);
+    pump(core, 600);
+    double slow = capyro_core_get_position(core) - slow_start;
+    printf("avance en 0.6 s a 0.5x: %.3f\n", slow);
+    CHECK(slow > 0.15 && slow < 0.45);
+    capyro_core_set_speed(core, 1.0);
+
+    /* --- repetir y aleatorio (misma media 4 veces: importa el índice) --- */
+    capyro_core_playlist_clear(core);
+    for (int i = 0; i < 4; i++) {
+        CHECK(capyro_core_playlist_add(core, clip) == CAPYRO_OK);
+    }
+    CHECK(capyro_core_playlist_select(core, 3) == CAPYRO_OK);
+    CHECK(capyro_core_playlist_next(core) == CAPYRO_ERR_OUT_OF_RANGE); /* repeat off */
+    capyro_core_set_repeat(core, CAPYRO_REPEAT_ALL);
+    CHECK(capyro_core_get_repeat(core) == CAPYRO_REPEAT_ALL);
+    CHECK(capyro_core_playlist_next(core) == CAPYRO_OK);
+    CHECK(capyro_core_playlist_current(core) == 0);              /* dio la vuelta */
+    CHECK(capyro_core_playlist_prev(core) == CAPYRO_OK);
+    CHECK(capyro_core_playlist_current(core) == 3);              /* y para atrás también */
+
+    capyro_core_set_shuffle(core, true);
+    CHECK(capyro_core_get_shuffle(core));
+    int seen[4] = {0, 0, 0, 0};
+    seen[capyro_core_playlist_current(core)]++;
+    for (int i = 0; i < 3; i++) {
+        CHECK(capyro_core_playlist_next(core) == CAPYRO_OK);
+        long c = capyro_core_playlist_current(core);
+        if (c >= 0 && c < 4) {
+            seen[c]++;
+        }
+    }
+    CHECK(seen[0] == 1 && seen[1] == 1 && seen[2] == 1 && seen[3] == 1); /* todos, sin repetir */
+    capyro_core_set_shuffle(core, false);
+    capyro_core_set_repeat(core, CAPYRO_REPEAT_OFF);
+
+    /* --- eliminar de la lista --- */
+    CHECK(capyro_core_playlist_select(core, 1) == CAPYRO_OK);
+    capyro_core_play(core);
+    capyro_core_playlist_remove(core, 0);                  /* otro: corre el índice */
+    CHECK(capyro_core_playlist_count(core) == 3);
+    CHECK(capyro_core_playlist_current(core) == 0);
+    capyro_core_playlist_remove(core, 0);                  /* el actual: pasa al siguiente */
+    CHECK(capyro_core_playlist_count(core) == 2);
+    CHECK(capyro_core_playlist_current(core) == 0);
+    CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PLAYING);
+    CHECK(capyro_core_playlist_select(core, 1) == CAPYRO_OK);
+    capyro_core_playlist_remove(core, 1);                  /* el actual y último */
+    CHECK(capyro_core_playlist_current(core) == 0);
+    capyro_core_playlist_remove(core, 0);                  /* lista vacía */
+    CHECK(capyro_core_playlist_count(core) == 0);
+    CHECK(capyro_core_get_state(core) == CAPYRO_STATE_IDLE);
+
+    /* --- repetir uno: al terminar vuelve a empezar el mismo --- */
+    CHECK(capyro_core_playlist_add(core, clip) == CAPYRO_OK);
+    CHECK(capyro_core_playlist_add(core, clip) == CAPYRO_OK);
+    CHECK(capyro_core_playlist_select(core, 0) == CAPYRO_OK);
+    capyro_core_set_repeat(core, CAPYRO_REPEAT_ONE);
+    capyro_core_seek(core, 1.7);
+    capyro_core_play(core);
+    pump(core, 900);
+    CHECK(capyro_core_playlist_current(core) == 0);
+    CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PLAYING);
+    CHECK(capyro_core_get_position(core) < 1.0);
 
     capyro_core_shutdown(core);
 }

@@ -202,3 +202,71 @@ pub fn music_note(pt: &Painter, c: Pos2, s: f32, col: Color32) {
         Stroke::NONE,
     ));
 }
+
+/// Convierte coordenadas de una caja de 24×24 (estilo lucide) a la caja `s`.
+fn l(c: Pos2, s: f32, x: f32, y: f32) -> Pos2 {
+    pos2(c.x + (x - 12.0) / 20.0 * s, c.y + (y - 12.0) / 20.0 * s)
+}
+
+fn l_arc(c: Pos2, s: f32, cx: f32, cy: f32, r: f32, from: f32, to: f32) -> Vec<Pos2> {
+    arc(l(c, s, cx, cy), r / 20.0 * s, from, to)
+}
+
+pub fn shuffle(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    // flechas de la derecha
+    pt.add(Shape::line(vec![l(c, s, 18.0, 2.5), l(c, s, 21.5, 6.0), l(c, s, 18.0, 9.5)], st));
+    pt.add(Shape::line(vec![l(c, s, 18.0, 14.5), l(c, s, 21.5, 18.0), l(c, s, 18.0, 21.5)], st));
+    // cruce: abajo-izquierda → arriba-derecha
+    pt.add(Shape::line(
+        vec![
+            l(c, s, 2.5, 18.0),
+            l(c, s, 4.5, 17.8),
+            l(c, s, 6.6, 16.6),
+            l(c, s, 12.6, 8.0),
+            l(c, s, 14.8, 6.4),
+            l(c, s, 16.8, 6.0),
+            l(c, s, 21.0, 6.0),
+        ],
+        st,
+    ));
+    // arriba-izquierda → (por debajo del cruce) → abajo-derecha
+    pt.add(Shape::line(
+        vec![l(c, s, 2.5, 6.0), l(c, s, 4.6, 6.1), l(c, s, 6.6, 7.2), l(c, s, 8.0, 9.0)],
+        st,
+    ));
+    pt.add(Shape::line(
+        vec![l(c, s, 11.6, 14.6), l(c, s, 13.0, 16.6), l(c, s, 15.0, 17.8), l(c, s, 17.0, 18.0), l(c, s, 21.0, 18.0)],
+        st,
+    ));
+}
+
+pub fn repeat(pt: &Painter, c: Pos2, s: f32, col: Color32, one: bool) {
+    let st = Stroke::new(W, col);
+    pt.add(Shape::line(vec![l(c, s, 17.0, 2.5), l(c, s, 20.5, 6.0), l(c, s, 17.0, 9.5)], st));
+    let mut top = vec![l(c, s, 3.5, 11.0)];
+    top.extend(l_arc(c, s, 7.5, 10.0, 4.0, PI, 1.5 * PI));
+    top.push(l(c, s, 20.5, 6.0));
+    pt.add(Shape::line(top, st));
+
+    pt.add(Shape::line(vec![l(c, s, 7.0, 14.5), l(c, s, 3.5, 18.0), l(c, s, 7.0, 21.5)], st));
+    let mut bottom = vec![l(c, s, 20.5, 13.0)];
+    bottom.extend(l_arc(c, s, 16.5, 14.0, 4.0, 0.0, 0.5 * PI));
+    bottom.push(l(c, s, 3.5, 18.0));
+    pt.add(Shape::line(bottom, st));
+
+    if one {
+        let fid = eframe::egui::FontId::new(s * 0.42, eframe::egui::FontFamily::Name("bold".into()));
+        pt.text(l(c, s, 12.0, 12.2), eframe::egui::Align2::CENTER_CENTER, "1", fid, col);
+    }
+}
+
+/// "+" que puede girar (animación del botón Agregar).
+pub fn plus(pt: &Painter, c: Pos2, s: f32, col: Color32, angle: f32, width: f32) {
+    let st = Stroke::new(width, col);
+    let h = s * 0.5;
+    let (sin, cos) = angle.sin_cos();
+    let rot = |x: f32, y: f32| pos2(c.x + x * cos - y * sin, c.y + x * sin + y * cos);
+    pt.line_segment([rot(-h, 0.0), rot(h, 0.0)], st);
+    pt.line_segment([rot(0.0, -h), rot(0.0, h)], st);
+}
