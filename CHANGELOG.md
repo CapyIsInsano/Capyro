@@ -8,6 +8,21 @@
 
 ---
 
+## v0.2.7-alpha · Se actualiza solo
+
+- **Buscar actualizaciones** en el menú ⓘ:
+  - se fija si hay commits nuevos en el repo de GitHub;
+  - si hay, baja el código, lo compila y lo instala solo (con `pkexec` si se instaló en el sistema);
+  - suena el aviso de actualización y aparece **el parche**, con los commits nuevos;
+  - un botón **Reiniciar** abre la versión nueva, con tu lista y tu posición.
+- Sin conexión, repo equivocado o falta de herramientas: mensaje claro y sonido de error.
+- La primera actualización compila todo. Las siguientes tardan segundos, porque reutiliza lo compilado.
+- **Pantalla de carga** al abrir: logo, "Cargando…" y un ecualizador animado. Después la interfaz
+  entra por partes y el logo vuela a su lugar. Al terminar de cargar suena el inicio.
+- `capyro --version` muestra el commit y dónde está instalado.
+- Opciones nuevas: `splash`, `startup_sound`, `update_repo` y `update_branch`.
+- Los avisos ahora se ven por encima de los menús abiertos.
+
 ## v0.2.6-alpha · Efectos de audio
 
 - **Menú de efectos de audio** (botón ≡ al lado del volumen, <kbd>Ctrl</kbd>+<kbd>E</kbd>):

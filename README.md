@@ -230,8 +230,8 @@ La ventana carga OpenGL, Wayland y xkbcommon en tiempo de ejecución: si no abre
 ### 2. Compilar
 
 ```sh
-git clone https://github.com/TU_USUARIO/capyro.git
-cd capyro
+git clone https://github.com/CapyIsInsano/capyro.git
+cd Capyro
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ./build/capyro
