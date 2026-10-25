@@ -8,6 +8,7 @@
 //!   └ ☰ Lista                                       🔊  cc  ⚙  ⛶  ┘
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use eframe::egui::{
@@ -56,6 +57,8 @@ pub struct CapyroApp {
     video_aspect: f32,
     /// Toast que hay que mostrar en el primer frame (todavía no hay `ctx.time`).
     startup_notice: Option<String>,
+    /// Diálogo de "Agregar archivos" abierto en otro hilo; llega el resultado acá.
+    dialog: Option<Receiver<Vec<PathBuf>>>,
 }
 
 fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -127,6 +130,7 @@ impl CapyroApp {
             video_serial: 0,
             video_aspect: 16.0 / 9.0,
             startup_notice,
+            dialog: None,
         }
     }
 
@@ -170,6 +174,7 @@ impl CapyroApp {
                 let fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
                 ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!fs));
             }
+            Action::OpenFiles => self.open_file_dialog(ctx),
             Action::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
         }
     }
@@ -195,15 +200,19 @@ impl CapyroApp {
         self.toast(ctx, format!("Config recargada ({src})"), false);
     }
 
-    fn open_paths(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>) {
+    /// Agrega archivos a la lista. Si `play_now` (arrastrar y soltar) o si no
+    /// había nada cargado, arranca el primero nuevo; si no, solo los encola.
+    fn add_paths(&mut self, ctx: &egui::Context, paths: Vec<PathBuf>, play_now: bool) {
         let first_new = self.core.playlist_len();
+        let was_idle = self.core.state() == State::Idle;
         let mut errors = Vec::new();
         for path in &paths {
             if let Err(e) = self.core.playlist_add(path) {
                 errors.push(format!("{}: {}", file_name(&path.to_string_lossy()), e.0));
             }
         }
-        if self.core.playlist_len() > first_new {
+        let added = self.core.playlist_len() - first_new;
+        if added > 0 && (play_now || was_idle) {
             match self.core.playlist_select(first_new) {
                 Ok(()) => {
                     if self.core.state() != State::Playing {
@@ -220,6 +229,55 @@ impl CapyroApp {
                 String::new()
             };
             self.toast(ctx, format!("{first}{more}"), true);
+        } else if added > 0 && !(play_now || was_idle) {
+            let msg = if added == 1 {
+                "1 archivo agregado a la lista".to_owned()
+            } else {
+                format!("{added} archivos agregados a la lista")
+            };
+            self.toast(ctx, msg, false);
+        }
+    }
+
+    /// Abre el selector de archivos del sistema (portal de escritorio en Linux,
+    /// diálogo nativo en Windows/macOS) sin congelar la interfaz.
+    fn open_file_dialog(&mut self, ctx: &egui::Context) {
+        if self.dialog.is_some() {
+            return; // ya hay uno abierto
+        }
+        // El diálogo se crea en este hilo (macOS lo exige) y se espera en otro.
+        let pending = rfd::AsyncFileDialog::new()
+            .set_title("Agregar archivos a Capyro")
+            .add_filter("Audio y video (mp4, mp3)", &["mp4", "mp3", "MP4", "MP3"])
+            .pick_files();
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let files = pollster::block_on(pending)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| f.path().to_path_buf())
+                .collect::<Vec<_>>();
+            let _ = tx.send(files);
+            ctx.request_repaint();
+        });
+        self.dialog = Some(rx);
+    }
+
+    fn poll_file_dialog(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.dialog else { return };
+        match rx.try_recv() {
+            Ok(files) => {
+                self.dialog = None;
+                if !files.is_empty() {
+                    self.add_paths(ctx, files, false);
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.dialog = None;
+                self.toast(ctx, "No se pudo abrir el selector de archivos", true);
+            }
         }
     }
 
@@ -228,7 +286,7 @@ impl CapyroApp {
         let dropped: Vec<PathBuf> =
             ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
         if !dropped.is_empty() {
-            self.open_paths(ctx, dropped);
+            self.add_paths(ctx, dropped, true);
         }
 
         // Atajos definidos en capyro.lua (ya ordenados: más modificadores primero).
@@ -352,8 +410,12 @@ impl CapyroApp {
         let resp = ui.interact(rect, Id::unique("capyro-video"), Sense::click());
         if resp.double_clicked() {
             self.run_action(&ctx, Action::Fullscreen);
-        } else if resp.clicked() && self.core.state() != State::Idle {
-            self.core.toggle();
+        } else if resp.clicked() {
+            if self.core.state() == State::Idle {
+                self.open_file_dialog(&ctx); // área vacía: clic = elegir archivos
+            } else {
+                self.core.toggle();
+            }
         }
 
         let hovering_files = ctx.input(|i| !i.raw.hovered_files.is_empty());
@@ -373,7 +435,7 @@ impl CapyroApp {
                     painter.text(
                         c + vec2(0.0, 27.0),
                         Align2::CENTER_CENTER,
-                        "Arrastra un archivo para abrirlo",
+                        "Arrastra un archivo o haz clic para elegirlo",
                         regular(12.0),
                         TEXT_FAINT,
                     );
@@ -667,6 +729,41 @@ impl CapyroApp {
         }
         icons::next(&painter, next_c, 16.0, ICON);
 
+        /* --- botón "+ Agregar archivo(s)" (sobre los íconos de la derecha) --- */
+        let pending = self.dialog.is_some();
+        let label = if pending { "Abriendo…" } else { "+  Agregar archivo(s)" };
+        let galley = painter.layout_no_wrap(label.to_owned(), bold(13.0), Color32::WHITE);
+        let full_w = galley.size().x + 28.0;
+        let controls_right = next_c.x + 22.0;
+        // Si la ventana es angosta y no entra el texto, queda solo el "+".
+        let compact = right - full_w < controls_right;
+        let size = if compact { vec2(34.0, 34.0) } else { vec2(full_w, 34.0) };
+        let add_rect = Rect::from_min_size(pos2(right - size.x, cy - size.y / 2.0), size);
+        let add = ui.interact(add_rect, Id::unique("capyro-add-files"), Sense::click());
+        let fill = if pending {
+            accent.gamma_multiply(0.6)
+        } else if add.is_pointer_button_down_on() {
+            accent.gamma_multiply(0.85)
+        } else if add.hovered() {
+            ctx.set_cursor_icon(CursorIcon::PointingHand);
+            accent.lerp_to_gamma(Color32::WHITE, 0.12)
+        } else {
+            accent
+        };
+        painter.rect_filled(add_rect, size.y / 2.0, fill);
+        if compact {
+            let c = add_rect.center();
+            let st = Stroke::new(2.0, Color32::WHITE);
+            painter.line_segment([c - vec2(7.0, 0.0), c + vec2(7.0, 0.0)], st);
+            painter.line_segment([c - vec2(0.0, 7.0), c + vec2(0.0, 7.0)], st);
+        } else {
+            painter.galley(add_rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
+        }
+        if add.clicked() {
+            self.open_file_dialog(&ctx);
+        }
+        add.on_hover_text("Agregar archivos .mp4 o .mp3 a la lista (Ctrl+O)");
+
         /* --- fila inferior --- */
         let by = video_bottom + BOTTOM_ROW_Y;
 
@@ -785,6 +882,7 @@ impl eframe::App for CapyroApp {
         self.handle_input(&ctx);
         self.update_title(&ctx);
         self.sync_video_texture(&ctx);
+        self.poll_file_dialog(&ctx);
 
         let (maximized, fullscreen) = ctx.input(|i| {
             (

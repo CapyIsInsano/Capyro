@@ -22,7 +22,17 @@ pub enum Action {
     PrevFile,
     TogglePlaylist,
     Fullscreen,
+    OpenFiles,
     Quit,
+}
+
+/// Backend de ventana en Linux. Con Wayland nativo winit todavía no recibe
+/// archivos arrastrados; con X11 (vía XWayland) sí.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Auto,
+    X11,
+    Wayland,
 }
 
 impl Action {
@@ -39,6 +49,7 @@ impl Action {
             "prev_file" => Self::PrevFile,
             "toggle_playlist" => Self::TogglePlaylist,
             "fullscreen" => Self::Fullscreen,
+            "open_files" => Self::OpenFiles,
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -60,6 +71,7 @@ pub struct Config {
     pub start_volume: f32,
     pub accent: Color32,
     pub auto_next: bool,
+    pub backend: Backend,
     /// De dónde salió (para el log): ruta o "embebida".
     pub source: String,
 }
@@ -120,6 +132,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         start_volume: 1.0,
         accent: Color32::from_rgb(0xFF, 0x74, 0x17),
         auto_next: true,
+        backend: Backend::Auto,
         source: name.to_owned(),
     };
 
@@ -148,6 +161,17 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<f64>>("start_volume")? {
             cfg.start_volume = (v as f32 / 100.0).clamp(0.0, 1.0);
+        }
+        if let Some(b) = opts.get::<Option<String>>("backend")? {
+            cfg.backend = match b.to_ascii_lowercase().as_str() {
+                "x11" => Backend::X11,
+                "wayland" => Backend::Wayland,
+                "auto" => Backend::Auto,
+                other => {
+                    eprintln!("capyro: {name}: backend desconocido '{other}' (auto, x11 o wayland)");
+                    Backend::Auto
+                }
+            };
         }
         if let Some(v) = opts.get::<Option<bool>>("auto_next")? {
             cfg.auto_next = v;
@@ -218,7 +242,8 @@ mod tests {
     #[test]
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
-        assert!(cfg.bindings.len() >= 12);
+        assert!(cfg.bindings.len() >= 13);
+        assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);
         // Ctrl+L tiene que quedar antes que cualquier binding sin modificadores
         assert!(!cfg.bindings.first().unwrap().modifiers.is_none());

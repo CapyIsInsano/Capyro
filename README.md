@@ -16,7 +16,7 @@
 
 ---
 
-## Estado: `v0.2.0-alpha`
+## Estado: `v0.2.1-alpha`
 
 **Ya reproduce de verdad**: audio y video, con seek, carátulas y metadatos.
 
@@ -28,6 +28,7 @@
 | Funciona ✅ | Pendiente 🚧 |
 |---|---|
 | Reproducción de `.mp3` y `.mp4` (FFmpeg + miniaudio) | Subtítulos |
+| Botón **+ Agregar archivo(s)** con el selector de archivos del sistema | Arrastrar archivos en Wayland nativo (limitación de winit) |
 | Video sincronizado con el audio (el audio es el reloj maestro) | Panel de ajustes dentro de la app |
 | Seek preciso (clic/arrastre en la barra, flechas) | Aceleración por hardware (VA-API / D3D11) |
 | Carátula del mp3 y metadatos (título, artista) | Probar en Windows y macOS |
@@ -96,6 +97,11 @@ Reglas de la frontera C ↔ Rust:
 [miniaudio](https://miniaud.io/) es un header único: si tenés `miniaudio.h` en el sistema
 se usa ese, si no CMake lo baja solo (versión fija 0.11.25).
 
+El selector de archivos en Linux usa el **portal de escritorio** (`xdg-desktop-portal` con
+un backend que tenga *FileChooser*: gtk, gnome o kde). Si no hay portal, usa `zenity` o
+`kdialog` si están instalados. En Gentoo: `sys-apps/xdg-desktop-portal` +
+`sys-apps/xdg-desktop-portal-gtk` (o `gnome-extra/zenity`).
+
 En Linux el audio sale por PulseAudio/PipeWire, ALSA o JACK (miniaudio los carga en tiempo
 de ejecución) y la ventana por X11 o Wayland: no hace falta ninguna librería `-dev` de eso.
 
@@ -132,8 +138,8 @@ y [rustup](https://rustup.rs/) con `rustup default stable-x86_64-pc-windows-gnu`
 ## Compilar
 
 ```sh
-git clone https://github.com/CapyIsInsano/capyro.git
-cd capyro
+git clone https://github.com/CapyIsInsano/Capyro.git
+cd Capyro
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ./build/capyro
@@ -174,7 +180,11 @@ capyro --help
 capyro --version
 ```
 
-- **Arrastrar y soltar** uno o varios archivos: se agregan a la lista y arranca el primero.
+- **+ Agregar archivo(s)** (el botón naranja de la derecha, `Ctrl+O`, o clic en el área de
+  video vacía): abre el selector de archivos del sistema y permite elegir varios a la vez.
+  Si no hay nada sonando arranca el primero; si ya hay algo, los agrega al final de la lista.
+- **Arrastrar y soltar** uno o varios archivos: se agregan a la lista y arranca el primero
+  (ver la nota sobre Wayland más abajo).
 - Al terminar un archivo pasa solo al siguiente (`auto_next` en la config).
 - **Clic** en el área de video: play/pausa. **Doble clic**: pantalla completa.
 - **Barra de progreso**: clic o arrastrar para saltar.
@@ -231,13 +241,15 @@ return {
         volume_step  = 5,          -- %
         start_volume = 80,         -- %
         auto_next    = true,       -- pasar al siguiente al terminar
+        backend      = "auto",     -- Linux: "auto", "x11" o "wayland"
         accent       = "#FF7417",  -- color del botón play y la barra
     },
 }
 ```
 
 Acciones disponibles: `play_pause`, `stop`, `seek_forward`, `seek_backward`, `volume_up`,
-`volume_down`, `mute`, `next_file`, `prev_file`, `toggle_playlist`, `fullscreen`, `quit`.
+`volume_down`, `mute`, `next_file`, `prev_file`, `toggle_playlist`, `fullscreen`,
+`open_files`, `quit`.
 La lista completa de nombres de teclas está comentada en [`config/capyro.lua`](config/capyro.lua).
 
 ---
@@ -314,6 +326,11 @@ capyro/
 
 ## Notas
 
+- **Arrastrar archivos en Wayland**: winit (la librería de ventanas que usa egui) todavía
+  no recibe archivos soltados en Wayland nativo, así que en Niri, Sway, Hyprland, GNOME o
+  KDE sobre Wayland el arrastre no hace nada. Usá el botón **+ Agregar**, o poné
+  `backend = "x11"` en `capyro.lua` para correr por XWayland, donde el arrastre funciona
+  si tu compositor pasa el drag & drop entre Wayland y X11.
 - La ventana usa esquinas redondeadas con fondo transparente. En un WM/compositor sin
   transparencia las esquinas se ven negras; es solo estético.
 - El video se escala a como mucho 1920×1080 antes de subirlo a la GPU y se decodifica por

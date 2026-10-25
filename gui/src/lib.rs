@@ -37,7 +37,7 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
     // recién después de que esta función retorna.
     let core = unsafe { ffi::Core::from_raw(core) };
     let cfg = config::Config::load();
-    eprintln!("capyro {} · config: {}", ffi::version(), cfg.source);
+    eprintln!("capyro {} · config: {} · backend: {:?}", ffi::version(), cfg.source, cfg.backend);
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Capyro")
@@ -51,11 +51,29 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
         viewport = viewport.with_icon(Arc::new(icon));
     }
 
-    let options = eframe::NativeOptions {
+    #[allow(unused_mut)] // solo se modifica en Linux
+    let mut options = eframe::NativeOptions {
         viewport,
         centered: true,
         ..Default::default()
     };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use winit::platform::{wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11};
+        match cfg.backend {
+            config::Backend::X11 => {
+                options.event_loop_builder = Some(Box::new(|b| {
+                    b.with_x11();
+                }))
+            }
+            config::Backend::Wayland => {
+                options.event_loop_builder = Some(Box::new(|b| {
+                    b.with_wayland();
+                }))
+            }
+            config::Backend::Auto => {}
+        }
+    }
 
     let result = eframe::run_native(
         "Capyro",

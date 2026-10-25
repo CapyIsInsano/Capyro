@@ -24,7 +24,7 @@
 --  Acciones disponibles:
 --    play_pause, stop, seek_forward, seek_backward,
 --    volume_up, volume_down, mute,
---    next_file, prev_file, toggle_playlist, fullscreen, quit
+--    next_file, prev_file, toggle_playlist, fullscreen, open_files, quit
 -- ------------------------------------------------------------
 local keys = {
     play_pause      = { "Space", "K" },
@@ -38,6 +38,7 @@ local keys = {
     prev_file       = "P",
     toggle_playlist = "Ctrl+L",
     fullscreen      = { "F", "F11" },
+    open_files      = "Ctrl+O",
     quit            = "Ctrl+Q",
 }
 
@@ -50,6 +51,12 @@ local options = {
     start_volume = 100,        -- volumen al abrir Capyro (0..100)
     auto_next    = true,       -- al terminar un archivo, pasar al siguiente de la lista
     accent       = "#FF7417",  -- color de acento (botón play, barra de progreso)
+
+    -- Solo Linux: "auto", "x11" o "wayland" (hay que reabrir Capyro).
+    -- En Wayland nativo todavía no se pueden arrastrar archivos a la ventana
+    -- (limitación de winit); con "x11" corre por XWayland y el arrastre sí
+    -- funciona si tu compositor lo soporta. El botón "+ Agregar" anda siempre.
+    backend      = "auto",
 }
 
 return {
