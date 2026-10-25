@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.3-alpha"
+#define CAPYRO_VERSION "0.2.4-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -33,8 +33,8 @@ typedef enum {
 
 typedef enum {
     CAPYRO_MEDIA_NONE  = 0,
-    CAPYRO_MEDIA_VIDEO = 1, /* .mp4, .mov */
-    CAPYRO_MEDIA_AUDIO = 2  /* .mp3, .wav, .ogg */
+    CAPYRO_MEDIA_VIDEO = 1, /* .mp4, .mov, .avi */
+    CAPYRO_MEDIA_AUDIO = 2  /* .mp3, .wav, .ogg, .aac */
 } CapyroMediaKind;
 
 typedef enum {
@@ -90,7 +90,7 @@ int  capyro_core_open(CapyroCore *core, const char *path);
  * real se decide al abrir: un .ogg puede traer video). No toca el disco. */
 int  capyro_core_probe_extension(const char *path);
 /* Extensiones soportadas, en minúscula y separadas por comas, sin punto.
- * Video: "mp4,mov"   Audio: "mp3,wav,ogg". Son la única fuente de verdad:
+ * Video: "mp4,mov,avi"   Audio: "mp3,wav,ogg,aac". Son la única fuente de verdad:
  * la GUI arma con esto el filtro del selector y el menú de información. */
 const char *capyro_core_supported_video(void);
 const char *capyro_core_supported_audio(void);
@@ -107,6 +107,14 @@ void capyro_core_seek_relative(CapyroCore *core, double delta);
  * tono (filtro atempo de FFmpeg). */
 void   capyro_core_set_speed(CapyroCore *core, double speed);
 double capyro_core_get_speed(CapyroCore *core);
+
+/* ---------- efectos de sonido ----------
+ * Sonidos cortos (logo, error...) que se mezclan encima de lo que esté
+ * sonando. `data` es el archivo entero en memoria (mp3, wav, ogg...): se
+ * decodifica al cargar. Slots 0..7. Suenan con el volumen y el silencio
+ * generales. Si no hay dispositivo de audio no hacen nada. */
+int  capyro_core_sfx_load(CapyroCore *core, int slot, const uint8_t *data, size_t size);
+void capyro_core_sfx_play(CapyroCore *core, int slot);
 
 /* ---------- volumen ---------- */
 void  capyro_core_set_volume(CapyroCore *core, float volume); /* 0.0 .. 1.0 */

@@ -53,6 +53,7 @@ local keys = {
 local options = {
     seek_step    = 5,          -- segundos que avanza/retrocede seek_forward/backward
     volume_step  = 5,          -- porcentaje por cada volume_up/volume_down
+    wheel_step   = 5,          -- porcentaje por cada "muesca" de la rueda sobre el volumen
     start_volume = 100,        -- volumen al abrir Capyro (0..100)
     auto_next    = true,       -- al terminar un archivo, pasar al siguiente de la lista
     speed        = 1.0,        -- velocidad inicial (0.5 .. 2.0), sin cambiar el tono

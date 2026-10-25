@@ -18,6 +18,7 @@ struct SwsContext;
 struct ma_device;
 
 #define VQ_MAX   3              /* frames decodificados por delante */
+#define CAPYRO_SFX_SLOTS 8      /* efectos de sonido cargados a la vez */
 #define VQ_SLOTS (VQ_MAX + 2)   /* + el que se está mostrando + uno de repuesto */
 
 typedef struct {
@@ -90,6 +91,12 @@ struct CapyroCore {
     float             volume;
     bool              muted;
 
+    /* efectos de sonido: PCM float estéreo a out_rate, ya decodificados */
+    float            *sfx[CAPYRO_SFX_SLOTS];
+    size_t            sfx_len[CAPYRO_SFX_SLOTS]; /* en frames */
+    int               sfx_playing;               /* -1 = ninguno */
+    size_t            sfx_pos;
+
     /* video */
     VideoSlot slots[VQ_SLOTS];
     int       vq[VQ_SLOTS];
@@ -130,5 +137,8 @@ double player_clock_locked(CapyroCore *core);
 bool   player_ended_locked(CapyroCore *core);
 void   player_request_seek_locked(CapyroCore *core, double target);
 void   player_ensure_device_started(CapyroCore *core); /* sin el lock tomado */
+bool   audio_graph_create(const struct AVFrame *f, double speed, unsigned out_rate,
+                          struct AVFilterGraph **graph, struct AVFilterContext **src,
+                          struct AVFilterContext **sink);
 
 #endif /* CAPYRO_INTERNAL_H */

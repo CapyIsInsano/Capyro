@@ -118,9 +118,9 @@ static void audio_callback(ma_device *dev, void *output, const void *input, ma_u
     ma_uint32 done = 0;
 
     cp_mutex_lock(&core->lock);
+    /* curva cuadrática: el control de volumen se siente más natural */
+    float gain = core->muted ? 0.0f : core->volume * core->volume;
     if (core->state == CAPYRO_STATE_PLAYING && core->clock_audio && !core->seek_req) {
-        /* curva cuadrática: el control de volumen se siente más natural */
-        float gain = core->muted ? 0.0f : core->volume * core->volume;
         while (done < frames && core->ring_len > 0) {
             size_t chunk = frames - done;
             size_t until_wrap = core->ring_cap - core->ring_read;
@@ -137,11 +137,26 @@ static void audio_callback(ma_device *dev, void *output, const void *input, ma_u
         }
         core->audio_consumed += done;
     }
-    cp_mutex_unlock(&core->lock);
-
     if (done < frames) {
         memset(out + (size_t)done * 2, 0, (size_t)(frames - done) * 2 * sizeof(float));
     }
+
+    /* Efecto de sonido encima de lo que esté sonando (o del silencio). */
+    int slot = core->sfx_playing;
+    if (slot >= 0 && core->sfx[slot]) {
+        size_t left = core->sfx_len[slot] - core->sfx_pos;
+        size_t n    = left < frames ? left : frames;
+        const float *src = core->sfx[slot] + core->sfx_pos * 2;
+        for (size_t i = 0; i < n * 2; i++) {
+            float v = out[i] + src[i] * gain;
+            out[i] = v > 1.0f ? 1.0f : (v < -1.0f ? -1.0f : v);
+        }
+        core->sfx_pos += n;
+        if (core->sfx_pos >= core->sfx_len[slot]) {
+            core->sfx_playing = -1;
+        }
+    }
+    cp_mutex_unlock(&core->lock);
 }
 
 int player_global_init(CapyroCore *core) {
@@ -188,6 +203,10 @@ void player_global_shutdown(CapyroCore *core) {
     }
     free(core->ring);
     core->ring = NULL;
+    for (int i = 0; i < CAPYRO_SFX_SLOTS; i++) {
+        free(core->sfx[i]);
+        core->sfx[i] = NULL;
+    }
     for (int i = 0; i < VQ_SLOTS; i++) {
         free(core->slots[i].data);
         core->slots[i].data = NULL;
@@ -409,12 +428,12 @@ static int pull_frame(AVCodecContext *ctx, PktQueue *q, AVFrame *frame,
     return -1;
 }
 
-/* Arma el grafo de audio a partir del formato real del primer frame. */
-static bool build_audio_graph(CapyroCore *core, const AVFrame *f, double speed) {
-    Player *p = &core->player;
-    avfilter_graph_free(&p->agraph);
-    p->asrc = p->asink = NULL;
-    p->af_flushed = false;
+/* Grafo de audio genérico: [atempo] → aresample → aformat (float estéreo a
+ * out_rate). Lo usan la reproducción y los efectos de sonido. */
+bool audio_graph_create(const AVFrame *f, double speed, unsigned out_rate,
+                        AVFilterGraph **graph, AVFilterContext **src, AVFilterContext **sink) {
+    *graph = NULL;
+    *src = *sink = NULL;
 
     AVChannelLayout layout;
     if (f->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC || f->ch_layout.nb_channels == 0) {
@@ -441,37 +460,50 @@ static bool build_audio_graph(CapyroCore *core, const AVFrame *f, double speed) 
     }
     char chain[256];
     snprintf(chain, sizeof(chain), "%saresample=%u,aformat=sample_fmts=flt:channel_layouts=stereo",
-             tempo, core->out_rate);
+             tempo, out_rate);
 
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
-    p->agraph = avfilter_graph_alloc();
-    bool ok = outputs && inputs && p->agraph;
+    AVFilterGraph *g = avfilter_graph_alloc();
+    bool ok = outputs && inputs && g;
     if (ok) {
-        p->agraph->nb_threads = 1;
-        ok = avfilter_graph_create_filter(&p->asrc, avfilter_get_by_name("abuffer"), "in",
-                                          src_args, NULL, p->agraph) >= 0 &&
-             avfilter_graph_create_filter(&p->asink, avfilter_get_by_name("abuffersink"), "out",
-                                          NULL, NULL, p->agraph) >= 0;
+        g->nb_threads = 1;
+        ok = avfilter_graph_create_filter(src, avfilter_get_by_name("abuffer"), "in",
+                                          src_args, NULL, g) >= 0 &&
+             avfilter_graph_create_filter(sink, avfilter_get_by_name("abuffersink"), "out",
+                                          NULL, NULL, g) >= 0;
     }
     if (ok) {
         outputs->name       = av_strdup("in");
-        outputs->filter_ctx = p->asrc;
+        outputs->filter_ctx = *src;
         outputs->pad_idx    = 0;
         outputs->next       = NULL;
         inputs->name        = av_strdup("out");
-        inputs->filter_ctx  = p->asink;
+        inputs->filter_ctx  = *sink;
         inputs->pad_idx     = 0;
         inputs->next        = NULL;
-        ok = avfilter_graph_parse_ptr(p->agraph, chain, &inputs, &outputs, NULL) >= 0 &&
-             avfilter_graph_config(p->agraph, NULL) >= 0;
+        ok = avfilter_graph_parse_ptr(g, chain, &inputs, &outputs, NULL) >= 0 &&
+             avfilter_graph_config(g, NULL) >= 0;
     }
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
     if (!ok) {
-        avfilter_graph_free(&p->agraph);
-        p->asrc = p->asink = NULL;
+        avfilter_graph_free(&g);
+        *src = *sink = NULL;
         fprintf(stderr, "capyro: no se pudo armar el filtro de audio (%s)\n", chain);
+        return false;
+    }
+    *graph = g;
+    return true;
+}
+
+/* Arma el grafo de reproducción a partir del formato real del primer frame. */
+static bool build_audio_graph(CapyroCore *core, const AVFrame *f, double speed) {
+    Player *p = &core->player;
+    avfilter_graph_free(&p->agraph);
+    p->asrc = p->asink = NULL;
+    p->af_flushed = false;
+    if (!audio_graph_create(f, speed, core->out_rate, &p->agraph, &p->asrc, &p->asink)) {
         return false;
     }
     p->speed = speed;
