@@ -625,8 +625,11 @@ static void decode_thread(void *arg) {
          * que dejar pasar los viejos: si no, el video frena al audio. */
         advance_video_locked(core);
         vq_len = core->vq_len;
-        /* El audio terminó pero el video sigue: el reloj pasa a ser de pared. */
-        if (core->clock_audio && p->a_done && ring == 0) {
+        /* El audio terminó pero el video sigue: el reloj pasa a ser de pared.
+         * Nunca con un seek pendiente: a_done todavía es del tramo anterior
+         * (p. ej. al repetir una canción, el seek a 0 llega con a_done=true),
+         * y pasar a reloj de pared ahí dejaba el audio mudo para siempre. */
+        if (!core->seek_req && core->clock_audio && p->a_done && ring == 0) {
             clock_to_wall_locked(core);
         }
         cp_mutex_unlock(&core->lock);

@@ -270,3 +270,11 @@ pub fn plus(pt: &Painter, c: Pos2, s: f32, col: Color32, angle: f32, width: f32)
     pt.line_segment([rot(-h, 0.0), rot(h, 0.0)], st);
     pt.line_segment([rot(0.0, -h), rot(0.0, h)], st);
 }
+
+/// Círculo con una "i" (botón de información).
+pub fn info(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    pt.circle_stroke(c, 0.42 * s, st);
+    pt.circle_filled(p(c, s, 0.0, -0.19), 0.06 * s + 0.4, col);
+    pt.line_segment([p(c, s, 0.0, -0.04), p(c, s, 0.0, 0.22)], Stroke::new(W + 0.2, col));
+}

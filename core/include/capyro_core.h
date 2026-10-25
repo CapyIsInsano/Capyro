@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.3.0-alpha"
+#define CAPYRO_VERSION "0.2.3-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -33,14 +33,14 @@ typedef enum {
 
 typedef enum {
     CAPYRO_MEDIA_NONE  = 0,
-    CAPYRO_MEDIA_VIDEO = 1, /* .mp4 */
-    CAPYRO_MEDIA_AUDIO = 2  /* .mp3 */
+    CAPYRO_MEDIA_VIDEO = 1, /* .mp4, .mov */
+    CAPYRO_MEDIA_AUDIO = 2  /* .mp3, .wav, .ogg */
 } CapyroMediaKind;
 
 typedef enum {
     CAPYRO_OK               = 0,
     CAPYRO_ERR_INVALID_ARG  = 1,
-    CAPYRO_ERR_UNSUPPORTED  = 2, /* extensión distinta de mp4/mp3 */
+    CAPYRO_ERR_UNSUPPORTED  = 2, /* extensión que Capyro no abre (ver supported_*) */
     CAPYRO_ERR_NOT_FOUND    = 3, /* no se pudo abrir el archivo */
     CAPYRO_ERR_NO_MEMORY    = 4,
     CAPYRO_ERR_OUT_OF_RANGE = 5, /* índice de lista inválido / fin de lista */
@@ -86,8 +86,14 @@ const char *capyro_core_audio_backend(CapyroCore *core);
 /* ---------- abrir / formato ---------- */
 /* Agrega el archivo a la lista y lo deja cargado (estado STOPPED). */
 int  capyro_core_open(CapyroCore *core, const char *path);
-/* 0 = no soportado, si no un CapyroMediaKind. No toca el disco. */
+/* 0 = no soportado, si no un CapyroMediaKind según la extensión (el tipo
+ * real se decide al abrir: un .ogg puede traer video). No toca el disco. */
 int  capyro_core_probe_extension(const char *path);
+/* Extensiones soportadas, en minúscula y separadas por comas, sin punto.
+ * Video: "mp4,mov"   Audio: "mp3,wav,ogg". Son la única fuente de verdad:
+ * la GUI arma con esto el filtro del selector y el menú de información. */
+const char *capyro_core_supported_video(void);
+const char *capyro_core_supported_audio(void);
 
 /* ---------- transporte ---------- */
 void capyro_core_play(CapyroCore *core);
@@ -121,7 +127,7 @@ const char *capyro_core_get_artist(CapyroCore *core); /* metadato o "" */
  * Si devuelve true, `out` apunta a memoria del núcleo y el núcleo queda
  * bloqueado hasta capyro_core_unlock_video_frame(): copiá rápido y soltá.
  * Si devuelve false no hay frame (y no hay que llamar a unlock).
- * En un .mp3 con carátula, el frame es la carátula. */
+ * En un audio con carátula (mp3, ogg...), el frame es la carátula. */
 bool capyro_core_lock_video_frame(CapyroCore *core, CapyroVideoFrame *out);
 void capyro_core_unlock_video_frame(CapyroCore *core);
 

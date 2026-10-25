@@ -6,7 +6,7 @@
 <p align="center"><b>Just press play.</b></p>
 
 <p align="center">
-  Reproductor multimedia liviano para <code>.mp4</code> y <code>.mp3</code>, para <b>Linux</b>.<br>
+  Reproductor multimedia liviano para <b>Linux</b>: video <code>mp4</code> y <code>mov</code>, audio <code>mp3</code>, <code>wav</code> y <code>ogg</code>.<br>
   Núcleo en <b>C</b> · interfaz en <b>Rust</b> · compilado con <b>CMake</b> · configurable en <b>Lua</b>.
 </p>
 
@@ -16,7 +16,7 @@
 
 ---
 
-## Estado: `v0.3.0-alpha`
+## Estado: `v0.2.3-alpha`
 
 Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **aleatorio** y
 **repetir**, **velocidad** de 0.5× a 2× sin cambiar el tono, y animaciones en los botones.
@@ -30,14 +30,15 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
 
 | Funciona ✅ | Pendiente 🚧 |
 |---|---|
-| Reproducción de `.mp3` y `.mp4` (FFmpeg + miniaudio) | Subtítulos |
+| Video `.mp4` `.mov` y audio `.mp3` `.wav` `.ogg` (FFmpeg + miniaudio) | Subtítulos |
 | Botón **+ Agregar archivo(s)** con el selector de archivos del sistema | Arrastrar archivos en Wayland nativo (limitación de winit) |
 | Video sincronizado con el audio (el audio es el reloj maestro) | Más opciones en el menú de ajustes |
 | Seek preciso (clic/arrastre en la barra, flechas) | Aceleración por hardware (VA-API) |
-| Carátula del mp3 y metadatos (título, artista) | Recordar posición / archivos recientes |
+| Carátulas y metadatos (título, artista) | Recordar posición / archivos recientes |
 | Lista con aleatorio, repetir (lista / uno) y paso automático | Otras plataformas (más adelante) |
 | Velocidad 0.5×–2× sin cambiar el tono (menú ⚙ o `[` `]`) | |
 | Botones animados (hover, clic, transiciones) | |
+| Menú ⓘ con la versión y los formatos soportados | |
 | Volumen, silencio, pausa, stop, pantalla completa | |
 | Atajos y opciones en `capyro.lua` (recarga en caliente) | |
 | Sigue andando sin placa de sonido (reloj de pared, sin audio) | |
@@ -177,7 +178,7 @@ Para otro prefijo: `cmake --install build --prefix ~/.local`.
 
 ```sh
 capyro                                  # abre vacío; usá "+ Agregar archivo(s)"
-capyro cancion.mp3 video.mp4            # carga la lista y arranca a reproducir
+capyro cancion.mp3 video.mov tema.ogg   # carga la lista y arranca a reproducir
 capyro --help
 capyro --version
 ```
@@ -197,6 +198,8 @@ capyro --version
 - **Clic** en el área de video: play/pausa. **Doble clic**: pantalla completa.
 - **Barra de progreso**: clic o arrastrar para saltar.
 - **Volumen**: clic para silenciar, rueda del mouse encima para subir/bajar.
+- **ⓘ Acerca de** (arriba de "Lista"): versión de Capyro, formatos soportados y backend de
+  audio en uso.
 - **⚙ Ajustes**: velocidad (0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×) y recargar `capyro.lua` sin
   reiniciar. Se cierra con un clic afuera o `Esc`.
 - **Header**: arrastrar para mover, doble clic para maximizar. Los bordes redimensionan.
@@ -276,11 +279,13 @@ ctest --test-dir build --output-on-failure   # núcleo en C
 cd gui && cargo test                         # parser de config Lua y de atajos
 ```
 
-Si está el `ffmpeg` de línea de comandos, `ctest` genera primero un mp3, un mp3 con carátula
-y un mp4 de prueba (nunca durante el build) y después prueba de punta a punta: duración, metadatos, reproducción, pausa,
+Si está el `ffmpeg` de línea de comandos, `ctest` genera primero archivos de prueba en todos
+los formatos (mp3, mp3 con carátula, wav, ogg, mp4 y mov; nunca durante el build) y después
+prueba de punta a punta: duración, metadatos, reproducción, pausa,
 seek (también en pausa), fin del archivo, carátula, frames de video, paso automático al
 siguiente, velocidad (0.5× y 2×), repetir lista/uno, aleatorio sin repetidos y quitar
-archivos de la lista (incluido el que está sonando). Sin `ffmpeg` solo corren las pruebas que no decodifican.
+archivos de la lista (incluido el que está sonando). También verifica que al repetir un
+archivo el audio vuelva a sonar (el bug de la v0.2.2). Sin `ffmpeg` solo corren las pruebas que no decodifican.
 
 Para generar los mp3 de prueba tu `ffmpeg` necesita un encoder de mp3 (LAME); si no lo
 tiene, esas pruebas se saltean. En Gentoo se activa con el USE `lame` de
@@ -329,7 +334,8 @@ capyro/
 - [x] FFmpeg en el núcleo: abrir, duración, seek, decodificar audio y video
 - [x] miniaudio para la salida de audio
 - [x] Frames de video → textura en egui, sincronizados con el audio
-- [x] Carátulas y metadatos de mp3
+- [x] Carátulas y metadatos
+- [x] wav, ogg y mov
 - [x] Paso automático al siguiente de la lista
 - [x] Aleatorio y repetir (lista / uno)
 - [x] Menú de ajustes con velocidad de reproducción

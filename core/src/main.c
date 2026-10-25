@@ -15,7 +15,8 @@ extern int capyro_gui_run(CapyroCore *core);
 
 static void print_help(const char *argv0) {
     printf("Capyro %s — Just press play.\n\n", capyro_core_version());
-    printf("Uso: %s [archivo.mp4 | archivo.mp3 ...]\n\n", argv0);
+    printf("Uso: %s [archivo ...]\n", argv0);
+    printf("Formatos: video %s · audio %s\n\n", capyro_core_supported_video(), capyro_core_supported_audio());
     printf("  -h, --help       muestra esta ayuda\n");
     printf("  -v, --version    muestra la versión\n\n");
     printf("Los archivos pasados se agregan a la lista; el primero queda cargado.\n");

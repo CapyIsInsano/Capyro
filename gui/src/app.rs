@@ -18,7 +18,7 @@ use eframe::egui::{
 };
 
 use crate::config::{Action, Config};
-use crate::ffi::{Core, MediaKind, Repeat, State};
+use crate::ffi::{self, Core, MediaKind, Repeat, State};
 use crate::icons;
 use crate::theme::{self, *};
 
@@ -101,6 +101,11 @@ pub struct CapyroApp {
     /// Menú del engranaje abierto, y dónde está el engranaje (para anclarlo).
     show_settings: bool,
     gear_rect: Rect,
+    /// Menú de información (versión y formatos), sobre "Lista".
+    show_info: bool,
+    info_rect: Rect,
+    /// Formatos que acepta el núcleo, en minúscula: (video, audio).
+    formats: (Vec<String>, Vec<String>),
 }
 
 fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -203,6 +208,9 @@ impl CapyroApp {
             dialog: None,
             show_settings: false,
             gear_rect: Rect::NOTHING,
+            show_info: false,
+            info_rect: Rect::NOTHING,
+            formats: (ffi::supported_video(), ffi::supported_audio()),
         }
     }
 
@@ -222,7 +230,7 @@ impl CapyroApp {
                 if loaded {
                     self.core.toggle();
                 } else {
-                    self.toast(ctx, "Arrastra un archivo .mp4 o .mp3 para empezar", false);
+                    self.toast(ctx, "Agrega un archivo con \"+ Agregar archivo(s)\" para empezar", false);
                 }
             }
             Action::Stop => self.core.stop(),
@@ -357,9 +365,18 @@ impl CapyroApp {
             return; // ya hay uno abierto
         }
         // El diálogo se crea acá y se espera en otro hilo.
+        // Filtro armado con la lista del núcleo (más las variantes en mayúscula,
+        // porque algunos selectores distinguen .MP4 de .mp4).
+        let (video, audio) = &self.formats;
+        let with_upper = |list: &[String]| -> Vec<String> {
+            list.iter().flat_map(|e| [e.clone(), e.to_uppercase()]).collect()
+        };
+        let all: Vec<String> = with_upper(video).into_iter().chain(with_upper(audio)).collect();
         let pending = rfd::AsyncFileDialog::new()
             .set_title("Agregar archivos a Capyro")
-            .add_filter("Audio y video (mp4, mp3)", &["mp4", "mp3", "MP4", "MP3"])
+            .add_filter(format!("Audio y video ({})", self.formats_label(", ")), &all)
+            .add_filter(format!("Video ({})", video.join(", ")), &with_upper(video))
+            .add_filter(format!("Audio ({})", audio.join(", ")), &with_upper(audio))
             .pick_files();
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
@@ -373,6 +390,12 @@ impl CapyroApp {
             ctx.request_repaint();
         });
         self.dialog = Some(rx);
+    }
+
+    /// "mp4, mov, mp3, wav, ogg"
+    fn formats_label(&self, sep: &str) -> String {
+        let (v, a) = &self.formats;
+        v.iter().chain(a.iter()).cloned().collect::<Vec<_>>().join(sep)
     }
 
     fn poll_file_dialog(&mut self, ctx: &egui::Context) {
@@ -552,7 +575,8 @@ impl CapyroApp {
             painter.rect_stroke(rect.shrink(1.0), 10.0, Stroke::new(2.0, accent), StrokeKind::Inside);
             icons::film(&painter, c - vec2(0.0, 30.0), 28.0, accent);
             painter.text(c + vec2(0.0, 4.0), Align2::CENTER_CENTER, "Suelta para abrir", regular(14.0), TEXT);
-            painter.text(c + vec2(0.0, 26.0), Align2::CENTER_CENTER, "Solo .mp4 y .mp3", regular(12.0), TEXT_FAINT);
+            let formats = self.formats_label(" · ").to_uppercase();
+            painter.text(c + vec2(0.0, 26.0), Align2::CENTER_CENTER, formats, regular(12.0), TEXT_FAINT);
         } else {
             match self.core.media_kind() {
                 MediaKind::None => {
@@ -999,7 +1023,22 @@ impl CapyroApp {
         if add.resp.clicked() {
             self.open_file_dialog(&ctx);
         }
-        add.resp.on_hover_text("Agregar archivos .mp4 o .mp3 a la lista (Ctrl+O)");
+        add.resp.on_hover_text(format!("Agregar archivos ({}) a la lista (Ctrl+O)", self.formats_label(", ")));
+
+        /* --- botón de información (arriba de "Lista", a la izquierda) --- */
+        let info_c = pos2(left + 9.0, cy);
+        let info = Self::icon_button(ui, "info", info_c, 30.0);
+        let info_on = ctx.animate_bool_with_time(Id::unique("capyro-info-on"), self.show_info, 0.15);
+        let info_col = info.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, info_on);
+        icons::info(&painter, info_c, 17.0 * info.scale(), info_col);
+        self.info_rect = Rect::from_center_size(info_c, Vec2::splat(30.0));
+        if info.resp.clicked() {
+            self.show_info = !self.show_info;
+            self.show_settings = false;
+        }
+        if !self.show_info {
+            info.resp.on_hover_text("Acerca de Capyro");
+        }
 
         /* --- fila inferior --- */
         let by = video_bottom + BOTTOM_ROW_Y;
@@ -1062,6 +1101,7 @@ impl CapyroApp {
         self.gear_rect = Rect::from_center_size(gear_c, Vec2::splat(26.0));
         if gear.resp.clicked() {
             self.show_settings = !self.show_settings;
+            self.show_info = false;
         }
         if !self.show_settings {
             gear.resp.on_hover_text("Ajustes");
@@ -1073,6 +1113,101 @@ impl CapyroApp {
         icons::fullscreen(&painter, fs_c, 14.0 * fsb.scale(), fsb.tint(ICON_DIM, Color32::WHITE), fs);
         if fsb.resp.clicked() {
             ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!fs));
+        }
+    }
+
+    /// Menú de información: versión, formatos soportados y algunos datos.
+    /// Crece desde el botón ⓘ (abajo a la izquierda), igual que el de ajustes.
+    fn info_menu(&mut self, ui: &mut Ui) {
+        let ctx = ui.ctx().clone();
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, 0.15);
+        if t <= 0.001 {
+            return;
+        }
+        let ease = 1.0 - (1.0 - t).powi(3);
+        let accent = self.cfg.accent;
+        let size = vec2(286.0, 196.0);
+        let anchor = pos2(self.info_rect.left() - 6.0, self.info_rect.top() - 10.0);
+        let full = Rect::from_min_size(pos2(anchor.x, anchor.y - size.y), size);
+        let grown = size * (0.85 + 0.15 * ease);
+        let panel = Rect::from_min_size(pos2(anchor.x, anchor.y - grown.y), grown);
+        let interactive = self.show_info && t > 0.6;
+
+        let mut painter = ui.painter().clone();
+        painter.set_opacity(ease);
+        if interactive {
+            let outside = ui.interact(ui.max_rect(), Id::unique("capyro-info-outside"), Sense::click());
+            if outside.clicked() {
+                self.show_info = false;
+            }
+            ui.interact(full, Id::unique("capyro-info-bg"), Sense::click());
+        }
+        painter.rect_filled(panel.translate(vec2(0.0, 4.0)), 12.0, Color32::from_black_alpha(70));
+        painter.rect_filled(panel, 12.0, BG_PANEL);
+        painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
+        if ease < 0.98 {
+            ctx.request_repaint();
+            return;
+        }
+
+        let x0 = panel.left() + 14.0;
+        let x1 = panel.right() - 14.0;
+        let mut y = panel.top() + 14.0;
+
+        // encabezado: logo + nombre + versión
+        let logo_rect = Rect::from_min_size(pos2(x0, y), vec2(40.0, 40.0));
+        if let Some(logo) = &self.logo {
+            painter.image(logo.id(), logo_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        let tx = logo_rect.right() + 10.0;
+        let name = painter.text(pos2(tx, y + 11.0), Align2::LEFT_CENTER, "Capyro", bold(15.0), TEXT);
+        let ver = format!("v{}", ffi::version());
+        let g = painter.layout_no_wrap(ver, bold(11.0), accent);
+        let chip = Rect::from_min_size(pos2(name.right() + 8.0, y + 11.0 - g.size().y / 2.0 - 3.0), g.size() + vec2(12.0, 6.0));
+        painter.rect_filled(chip, chip.height() / 2.0, accent.gamma_multiply(0.16));
+        painter.galley(chip.center() - g.size() / 2.0, g, accent);
+        painter.text(pos2(tx, y + 30.0), Align2::LEFT_CENTER, "Just press play.", regular(12.0), TEXT_DIM);
+
+        // formatos
+        y = logo_rect.bottom() + 18.0;
+        painter.line_segment([pos2(x0, y - 8.0), pos2(x1, y - 8.0)], Stroke::new(1.0, Color32::from_white_alpha(14)));
+        painter.text(pos2(x0, y + 6.0), Align2::LEFT_CENTER, "Formatos soportados", bold(12.5), TEXT);
+        y += 30.0;
+        let formats = self.formats.clone();
+        for (label, list, is_video) in [("Video", &formats.0, true), ("Audio", &formats.1, false)] {
+            let ic = pos2(x0 + 8.0, y);
+            if is_video {
+                icons::film(&painter, ic, 14.0, TEXT_DIM);
+            } else {
+                icons::music_note(&painter, ic, 14.0, TEXT_DIM);
+            }
+            painter.text(pos2(x0 + 22.0, y), Align2::LEFT_CENTER, label, regular(12.0), TEXT_DIM);
+            let mut cx = x0 + 74.0;
+            for ext in list {
+                let g = painter.layout_no_wrap(ext.to_uppercase(), bold(11.0), TEXT);
+                let r = Rect::from_min_size(pos2(cx, y - 11.0), vec2(g.size().x + 14.0, 22.0));
+                let hover = ui.rect_contains_pointer(r) && interactive;
+                let h = ctx.animate_bool_with_time(Id::unique(("capyro-fmt", ext.as_str())), hover, 0.12);
+                painter.rect_filled(r, 6.0, Color32::from_white_alpha((10.0 + 10.0 * h) as u8));
+                painter.galley(r.center() - g.size() / 2.0, g, TEXT);
+                cx = r.right() + 6.0;
+            }
+            y += 30.0;
+        }
+
+        // pie: backend de audio y licencia
+        let backend = self.core.audio_backend();
+        let audio = if backend.is_empty() { "sin dispositivo".to_owned() } else { backend };
+        painter.text(
+            pos2(x0, panel.bottom() - 16.0),
+            Align2::LEFT_CENTER,
+            format!("Audio: {audio}  ·  GPL-3.0  ·  Linux"),
+            regular(10.5),
+            TEXT_FAINT,
+        );
+
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.show_info = false;
         }
     }
 
@@ -1257,6 +1392,7 @@ impl eframe::App for CapyroApp {
         self.video_area(ui, video);
         self.transport(ui, video_bottom, inner);
         self.settings_menu(ui);
+        self.info_menu(ui);
         if !square {
             Self::resize_handles(ui, full);
         }

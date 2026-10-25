@@ -10,6 +10,7 @@
 #endif
 
 #include "capyro_core.h"
+#include "internal.h" /* caja blanca: para ver si el reloj sigue al audio */
 
 #include <math.h>
 #include <stdio.h>
@@ -54,6 +55,12 @@ static void test_basics(void) {
     CHECK(capyro_core_probe_extension("a.mp4") == CAPYRO_MEDIA_VIDEO);
     CHECK(capyro_core_probe_extension("A.MP3") == CAPYRO_MEDIA_AUDIO);
     CHECK(capyro_core_probe_extension("a.mkv") == CAPYRO_MEDIA_NONE);
+    CHECK(capyro_core_probe_extension("clip.MOV") == CAPYRO_MEDIA_VIDEO);
+    CHECK(capyro_core_probe_extension("tono.wav") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("tono.Ogg") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("tono.flac") == CAPYRO_MEDIA_NONE);
+    CHECK(strcmp(capyro_core_supported_video(), "mp4,mov") == 0);
+    CHECK(strcmp(capyro_core_supported_audio(), "mp3,wav,ogg") == 0);
     CHECK(capyro_core_probe_extension("mp4") == CAPYRO_MEDIA_NONE);
     CHECK(capyro_core_probe_extension(NULL) == CAPYRO_MEDIA_NONE);
 
@@ -287,7 +294,9 @@ static void test_media(const char *dir) {
     CHECK(capyro_core_playlist_count(core) == 0);
     CHECK(capyro_core_get_state(core) == CAPYRO_STATE_IDLE);
 
-    /* --- repetir uno: al terminar vuelve a empezar el mismo --- */
+    /* --- repetir uno: al terminar vuelve a empezar el mismo, Y SE ESCUCHA ---
+     * Bug de la v0.2.2: al volver a empezar, el reloj pasaba a ser "de pared"
+     * y el callback de audio dejaba de sacar sonido. */
     CHECK(capyro_core_playlist_add(core, clip) == CAPYRO_OK);
     CHECK(capyro_core_playlist_add(core, clip) == CAPYRO_OK);
     CHECK(capyro_core_playlist_select(core, 0) == CAPYRO_OK);
@@ -297,7 +306,37 @@ static void test_media(const char *dir) {
     pump(core, 900);
     CHECK(capyro_core_playlist_current(core) == 0);
     CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PLAYING);
-    CHECK(capyro_core_get_position(core) < 1.0);
+    pump(core, 400);
+    double looped = capyro_core_get_position(core);
+    printf("repetir uno: posición tras volver a empezar: %.3f\n", looped);
+    CHECK(looped > 0.1 && looped < 1.2);
+    if (core->audio_ok) {
+        cp_mutex_lock(&core->lock);
+        bool audio_clock = core->clock_audio;
+        cp_mutex_unlock(&core->lock);
+        CHECK(audio_clock); /* el reloj sigue al audio = el audio está sonando */
+    }
+    capyro_core_set_repeat(core, CAPYRO_REPEAT_OFF);
+
+    /* --- formatos nuevos: wav, ogg y mov --- */
+    const char *extra[] = { "tono.wav", "tono.ogg", "clip.mov" };
+    const int   kinds[] = { CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO };
+    for (int i = 0; i < 3; i++) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", dir, extra[i]);
+        if (!exists(path)) {
+            continue;
+        }
+        capyro_core_playlist_clear(core);
+        CHECK(capyro_core_open(core, path) == CAPYRO_OK);
+        CHECK(capyro_core_get_media_kind(core) == kinds[i]);
+        CHECK(NEAR(capyro_core_get_duration(core), 2.0, 0.2));
+        capyro_core_play(core);
+        pump(core, 400);
+        double p = capyro_core_get_position(core);
+        printf("%s: posición tras 0.4 s: %.3f\n", extra[i], p);
+        CHECK(p > 0.2 && p < 0.7);
+    }
 
     capyro_core_shutdown(core);
 }

@@ -16,6 +16,12 @@
 #define CAPYRO_PLAYLIST_INITIAL_CAP 16
 #define PREV_RESTART_THRESHOLD      3.0 /* "anterior" con más de 3 s reinicia */
 
+/* Formatos que Capyro acepta. FFmpeg decodifica todos sin nada extra:
+ * mp4/mov (H.264, HEVC, MPEG-4, AAC...), mp3, wav (PCM) y ogg (Vorbis, Opus,
+ * FLAC). Mantener sincronizado con capyro_core_supported_*(). */
+static const char *const VIDEO_EXTS[] = { "mp4", "mov" };
+static const char *const AUDIO_EXTS[] = { "mp3", "wav", "ogg" };
+
 /* ------------------------------------------------------------------ */
 /* utilidades                                                          */
 /* ------------------------------------------------------------------ */
@@ -242,7 +248,7 @@ const char *capyro_core_error_string(int err) {
     switch (err) {
     case CAPYRO_OK:               return "ok";
     case CAPYRO_ERR_INVALID_ARG:  return "argumento inválido";
-    case CAPYRO_ERR_UNSUPPORTED:  return "formato no soportado (solo .mp4 y .mp3)";
+    case CAPYRO_ERR_UNSUPPORTED:  return "formato no soportado (mp4, mov, mp3, wav u ogg)";
     case CAPYRO_ERR_NOT_FOUND:    return "no se pudo abrir el archivo";
     case CAPYRO_ERR_NO_MEMORY:    return "sin memoria";
     case CAPYRO_ERR_OUT_OF_RANGE: return "fuera de rango";
@@ -306,13 +312,25 @@ int capyro_core_probe_extension(const char *path) {
     if (!dot) {
         return CAPYRO_MEDIA_NONE;
     }
-    if (ext_equals(dot + 1, "mp4")) {
-        return CAPYRO_MEDIA_VIDEO;
+    for (size_t i = 0; i < sizeof(VIDEO_EXTS) / sizeof(VIDEO_EXTS[0]); i++) {
+        if (ext_equals(dot + 1, VIDEO_EXTS[i])) {
+            return CAPYRO_MEDIA_VIDEO;
+        }
     }
-    if (ext_equals(dot + 1, "mp3")) {
-        return CAPYRO_MEDIA_AUDIO;
+    for (size_t i = 0; i < sizeof(AUDIO_EXTS) / sizeof(AUDIO_EXTS[0]); i++) {
+        if (ext_equals(dot + 1, AUDIO_EXTS[i])) {
+            return CAPYRO_MEDIA_AUDIO;
+        }
     }
     return CAPYRO_MEDIA_NONE;
+}
+
+const char *capyro_core_supported_video(void) {
+    return "mp4,mov";
+}
+
+const char *capyro_core_supported_audio(void) {
+    return "mp3,wav,ogg";
 }
 
 int capyro_core_open(CapyroCore *core, const char *path) {

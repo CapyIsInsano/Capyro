@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.3.0
+    VERSION 0.2.3
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -45,6 +45,8 @@ if(CAPYRO_BUILD_TESTS)
     enable_testing()
     add_executable(test_core tests/test_core.c)
     target_link_libraries(test_core PRIVATE capyro_core m)
+    # Prueba de caja blanca: mira el estado interno del reloj de audio.
+    target_include_directories(test_core PRIVATE core/src)
 
     # Media de prueba generada con el ffmpeg de línea de comandos (opcional).
     # Se genera al correr ctest, nunca durante el build.

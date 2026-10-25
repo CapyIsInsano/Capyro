@@ -33,6 +33,8 @@ pub struct VideoFrame<'a> {
 
 extern "C" {
     fn capyro_core_version() -> *const c_char;
+    fn capyro_core_supported_video() -> *const c_char;
+    fn capyro_core_supported_audio() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
     fn capyro_core_update(core: *mut CapyroCore);
     fn capyro_core_set_speed(core: *mut CapyroCore, speed: f64);
@@ -136,6 +138,19 @@ fn path_to_cstring(path: &Path) -> Option<CString> {
     use std::os::unix::ffi::OsStrExt;
     // En Linux una ruta son bytes: se pasan tal cual (aunque no sean UTF-8).
     CString::new(path.as_os_str().as_bytes()).ok()
+}
+
+/// Extensiones que acepta el núcleo (en minúscula, sin punto).
+pub fn supported_video() -> Vec<String> {
+    split_exts(cstr_to_string(unsafe { capyro_core_supported_video() }))
+}
+
+pub fn supported_audio() -> Vec<String> {
+    split_exts(cstr_to_string(unsafe { capyro_core_supported_audio() }))
+}
+
+fn split_exts(list: String) -> Vec<String> {
+    list.split(',').map(|e| e.trim().to_owned()).filter(|e| !e.is_empty()).collect()
 }
 
 pub fn version() -> String {

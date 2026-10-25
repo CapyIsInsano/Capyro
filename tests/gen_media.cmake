@@ -36,7 +36,24 @@ else()
     file(REMOVE ${OUT}/tono.mp3 ${OUT}/caratula.mp3)
 endif()
 
-# mpeg4 y aac son encoders internos de FFmpeg: siempre están.
+# mpeg4, aac y pcm son encoders internos de FFmpeg: siempre están.
 run(clip.mp4 -f lavfi -i testsrc=size=320x240:rate=25:duration=2
     -f lavfi -i sine=frequency=550:duration=2
     -c:v mpeg4 -q:v 5 -c:a aac -shortest ${OUT}/clip.mp4)
+run(clip.mov -f lavfi -i testsrc=size=320x240:rate=25:duration=2
+    -f lavfi -i sine=frequency=660:duration=2
+    -c:v mpeg4 -q:v 5 -c:a aac -shortest ${OUT}/clip.mov)
+run(tono.wav -f lavfi -i sine=frequency=440:duration=2 -c:a pcm_s16le ${OUT}/tono.wav)
+
+# ogg: Vorbis u Opus si están (lo normal); si no, FLAC dentro de ogg, que es interno.
+set(OGG_ENC "")
+foreach(enc libvorbis libopus)
+    if(ENCODERS MATCHES " ${enc} ")
+        set(OGG_ENC ${enc})
+        break()
+    endif()
+endforeach()
+if(NOT OGG_ENC)
+    set(OGG_ENC flac)
+endif()
+run(tono.ogg -f lavfi -i sine=frequency=440:duration=2 -c:a ${OGG_ENC} ${OUT}/tono.ogg)
