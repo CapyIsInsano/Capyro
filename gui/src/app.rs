@@ -901,19 +901,23 @@ impl CapyroApp {
                     }
                 }
                 MediaKind::Audio => {
-                    if self.cfg.visualizer && !self.viz.is_silent() {
-                        // barras de frecuencia de fondo, en la parte de abajo
-                        let band = Rect::from_min_max(
-                            pos2(rect.left() + 24.0, rect.bottom() - rect.height() * 0.30),
-                            pos2(rect.right() - 24.0, rect.bottom() - 12.0),
-                        );
-                        self.viz.draw(&painter, band, accent.gamma_multiply(0.55));
-                    }
                     let (title, artist) = self.track_labels();
                     let has_cover = self.video_tex.is_some();
                     let side = (rect.height() * 0.5).clamp(80.0, 260.0);
                     let art_center = c - vec2(0.0, if has_cover { 28.0 } else { 36.0 });
                     let text_y = if has_cover { art_center.y + side / 2.0 + 24.0 } else { c.y + 6.0 };
+                    if self.cfg.visualizer && !self.viz.is_silent() {
+                        // barras de frecuencia de fondo, debajo del título y el artista
+                        let text_bottom = text_y + if artist.is_empty() { 14.0 } else { 34.0 };
+                        let top = (rect.bottom() - rect.height() * 0.30).max(text_bottom + 6.0);
+                        if rect.bottom() - 12.0 - top > 18.0 {
+                            let band = Rect::from_min_max(
+                                pos2(rect.left() + 24.0, top),
+                                pos2(rect.right() - 24.0, rect.bottom() - 12.0),
+                            );
+                            self.viz.draw(&painter, band, accent.gamma_multiply(0.55));
+                        }
+                    }
 
                     if let Some(tex) = &self.video_tex {
                         let art = Rect::from_center_size(art_center, Vec2::splat(side));
