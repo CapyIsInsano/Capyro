@@ -300,3 +300,42 @@ pub fn sliders(pt: &Painter, c: Pos2, s: f32, col: Color32) {
         pt.circle_stroke(p(c, s, x, knob), 0.11 * s, st);
     }
 }
+
+/// Tilde ✓ (actualización instalada).
+pub fn check(pt: &Painter, c: Pos2, s: f32, col: Color32, width: f32) {
+    pt.add(Shape::line(
+        vec![p(c, s, -0.32, 0.02), p(c, s, -0.09, 0.25), p(c, s, 0.34, -0.22)],
+        Stroke::new(width, col),
+    ));
+}
+
+/// Flecha hacia abajo sobre una bandeja (buscar actualizaciones).
+/// `drop` (0..1) baja la flecha un poco: se usa al pasar el mouse.
+pub fn download(pt: &Painter, c: Pos2, s: f32, col: Color32, drop: f32) {
+    let st = Stroke::new(W, col);
+    let dy = 0.08 * drop;
+    pt.line_segment([p(c, s, 0.0, -0.4 + dy), p(c, s, 0.0, 0.12 + dy)], st);
+    pt.add(Shape::line(
+        vec![p(c, s, -0.2, -0.08 + dy), p(c, s, 0.0, 0.12 + dy), p(c, s, 0.2, -0.08 + dy)],
+        st,
+    ));
+    pt.add(Shape::line(
+        vec![p(c, s, -0.38, 0.12), p(c, s, -0.38, 0.36), p(c, s, 0.38, 0.36), p(c, s, 0.38, 0.12)],
+        st,
+    ));
+}
+
+/// Arco que gira (algo está cargando). `t` en segundos.
+pub fn spinner(pt: &Painter, c: Pos2, s: f32, col: Color32, t: f64) {
+    let r = 0.36 * s;
+    let start = (t * 5.0) as f32;
+    let len = 1.6 + 0.9 * ((t * 2.2).sin() as f32);
+    let n = 24;
+    let pts: Vec<Pos2> = (0..=n)
+        .map(|i| {
+            let a = start + len * i as f32 / n as f32;
+            pos2(c.x + r * a.cos(), c.y + r * a.sin())
+        })
+        .collect();
+    pt.add(Shape::line(pts, Stroke::new(W + 0.2, col)));
+}

@@ -100,6 +100,12 @@ pub struct Config {
     pub start_speed: f64,
     pub start_shuffle: bool,
     pub start_repeat: crate::ffi::Repeat,
+    /// Pantalla de "Cargando" al abrir, y el sonido de inicio.
+    pub splash: bool,
+    pub startup_sound: bool,
+    /// Repo y rama de donde se bajan las actualizaciones (vacío = de donde se compiló).
+    pub update_repo: Option<String>,
+    pub update_branch: Option<String>,
     /// De dónde salió (para el log): ruta o "embebida".
     pub source: String,
 }
@@ -165,6 +171,10 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         start_speed: 1.0,
         start_shuffle: false,
         start_repeat: crate::ffi::Repeat::Off,
+        splash: true,
+        startup_sound: true,
+        update_repo: None,
+        update_branch: None,
         source: name.to_owned(),
     };
 
@@ -241,6 +251,18 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                 cfg.screenshot_dir = Some(expanded);
             }
         }
+        if let Some(v) = opts.get::<Option<bool>>("splash")? {
+            cfg.splash = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("startup_sound")? {
+            cfg.startup_sound = v;
+        }
+        if let Some(v) = opts.get::<Option<String>>("update_repo")? {
+            cfg.update_repo = Some(v.trim().to_owned()).filter(|v| !v.is_empty());
+        }
+        if let Some(v) = opts.get::<Option<String>>("update_branch")? {
+            cfg.update_branch = Some(v.trim().to_owned()).filter(|v| !v.is_empty());
+        }
         if let Some(v) = opts.get::<Option<bool>>("auto_next")? {
             cfg.auto_next = v;
         }
@@ -312,6 +334,8 @@ mod tests {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
         assert!(cfg.bindings.len() >= 21);
         assert!(cfg.remember_session && cfg.visualizer);
+        assert!(cfg.splash && cfg.startup_sound);
+        assert_eq!(cfg.update_repo, None);
         assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);
         // Ctrl+L tiene que quedar antes que cualquier binding sin modificadores

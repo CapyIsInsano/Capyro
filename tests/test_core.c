@@ -66,6 +66,13 @@ static void test_basics(void) {
     CHECK(capyro_core_probe_extension("mp4") == CAPYRO_MEDIA_NONE);
     CHECK(capyro_core_probe_extension(NULL) == CAPYRO_MEDIA_NONE);
 
+    /* datos del build: siempre cadenas válidas (vacías si no hay git) */
+    const CapyroBuildInfo *bi = capyro_core_build_info();
+    CHECK(bi != NULL && bi->commit && bi->branch && bi->remote && bi->subject);
+    CHECK(bi->prefix && bi->prefix[0] == '/');
+    CHECK(bi->bindir && strstr(bi->bindir, bi->prefix) == bi->bindir);
+    CHECK(bi->commit[0] == '\0' || strlen(bi->commit) == 40);
+
     CapyroCore *core = capyro_core_init();
     CHECK(core != NULL);
     if (!core) {

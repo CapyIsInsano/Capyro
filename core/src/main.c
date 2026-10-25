@@ -30,7 +30,13 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
+            const CapyroBuildInfo *bi = capyro_core_build_info();
             printf("Capyro %s\n", capyro_core_version());
+            if (bi->commit[0]) {
+                printf("commit %.12s%s (%s)\n", bi->commit, bi->dirty ? "+cambios" : "",
+                       bi->branch[0] ? bi->branch : "sin rama");
+            }
+            printf("instalado en %s\n", bi->bindir);
             return 0;
         }
     }

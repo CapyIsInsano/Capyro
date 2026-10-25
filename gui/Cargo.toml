@@ -1,6 +1,6 @@
 [package]
 name = "capyro_gui"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 rust-version = "1.95"
 description = "Interfaz gráfica de Capyro (egui) — se compila como staticlib y se linkea al núcleo en C"
@@ -17,6 +17,8 @@ mlua = { version = "0.12", features = ["lua54", "vendored"] }
 # Diálogo nativo para abrir archivos (en Linux usa el portal de escritorio)
 rfd = "0.17"
 pollster = "0.4"
+# Actualizador: prioridad baja para la compilación, kill() y flock()
+libc = "0.2"
 # Solo para elegir el backend X11/Wayland en Linux (misma versión que usa eframe)
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
 

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.2.6
+    VERSION 0.2.7
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -63,6 +63,26 @@ if(NOT Corrosion_FOUND)
     FetchContent_MakeAvailable(Corrosion)
 endif()
 
+include(GNUInstallDirs)
+
+# --- datos del build (commit de git, prefijo de instalación) -------------
+# Los usa el actualizador ("Buscar actualizaciones" en el menú ⓘ). Se
+# regeneran en cada build, pero el header solo cambia si cambió el commit.
+set(CAPYRO_BUILDINFO_H ${CMAKE_CURRENT_BINARY_DIR}/generated/capyro_buildinfo.h)
+add_custom_target(capyro_buildinfo
+    COMMAND ${CMAKE_COMMAND}
+        -DSRC=${CMAKE_CURRENT_SOURCE_DIR}
+        -DOUT=${CAPYRO_BUILDINFO_H}
+        -DPREFIX=${CMAKE_INSTALL_PREFIX}
+        -DBINDIR=${CMAKE_INSTALL_FULL_BINDIR}
+        -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DDIST=${CAPYRO_DIST}
+        -DNATIVE=${CAPYRO_NATIVE}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/buildinfo.cmake
+    BYPRODUCTS ${CAPYRO_BUILDINFO_H}
+    COMMENT "Capyro: datos del build"
+    VERBATIM)
+
 add_subdirectory(core)
 add_subdirectory(gui)
 
@@ -100,7 +120,6 @@ if(CAPYRO_BUILD_TESTS)
 endif()
 
 # --- instalación --------------------------------------------------------
-include(GNUInstallDirs)
 install(TARGETS capyro RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES config/capyro.lua DESTINATION ${CMAKE_INSTALL_DATADIR}/capyro)
 install(FILES packaging/capyro.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

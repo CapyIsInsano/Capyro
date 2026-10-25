@@ -12,13 +12,14 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
 use eframe::egui::{
-    self, pos2, vec2, Align2, Color32, CursorIcon, Id, Key, Modifiers, Pos2, Rect, Response,
+    self, pos2, vec2, Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response,
     ResizeDirection, ScrollArea, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui,
     UiBuilder, Vec2, ViewportCommand,
 };
 
 use crate::config::{Action, Config};
-use crate::ffi::{self, Core, MediaKind, Repeat, State};
+use crate::ffi::{self, BuildInfo, Core, MediaKind, Repeat, State};
+use crate::updater::{self, CommitInfo, FailKind, Outcome, Updater};
 
 mod fx_menu;
 use crate::session::Session;
@@ -29,15 +30,26 @@ use crate::theme::{self, *};
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_128.png");
 const ICON_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_256.png");
 
-/// Slots de efectos: 0..=2 capibara (logo), 3 error.
-const SOUNDS: [&[u8]; 4] = [
+/// Slots de efectos: 0..=2 capibara (logo), 3 error, 4 inicio, 5 actualización.
+const SOUNDS: [&[u8]; 6] = [
     include_bytes!("../../assets/sounds/capybara1.mp3"),
     include_bytes!("../../assets/sounds/capybara2.mp3"),
     include_bytes!("../../assets/sounds/capybara3.mp3"),
     include_bytes!("../../assets/sounds/error.mp3"),
+    include_bytes!("../../assets/sounds/inicio.mp3"),
+    include_bytes!("../../assets/sounds/actualizacion.mp3"),
 ];
 const SFX_CAPYBARAS: usize = 3;
 const SFX_ERROR: usize = 3;
+const SFX_START: usize = 4;
+const SFX_UPDATE: usize = 5;
+
+/// Arranque: la pantalla de "Cargando" dura al menos esto, y después la
+/// interfaz entra animada en INTRO_TIME.
+const SPLASH_TIME: f64 = 1.0;
+const INTRO_TIME: f32 = 0.62;
+/// Cuánto se ve el aviso con el parche recién instalado.
+const BANNER_TIME: f64 = 9.0;
 
 /// Distancias desde el borde inferior del área de video (según el mockup).
 const TRACK_Y: f32 = 14.0;
@@ -51,6 +63,44 @@ struct Toast {
     start: f64,
     until: f64,
     error: bool,
+}
+
+/// Estado del arranque (pantalla de carga + entrada de la interfaz).
+struct Boot {
+    enabled: bool,
+    /// `ctx.time` y número de frame del primer frame dibujado.
+    start: Option<f64>,
+    frame0: u64,
+    /// Ya se cargaron los sonidos y la sesión.
+    loaded: bool,
+    /// Desde cuándo se ve la interfaz (termina la carga).
+    ready_at: Option<f64>,
+    /// Ya sonó el inicio (y arrancó la reproducción si correspondía).
+    announced: bool,
+    /// Archivos por línea de comandos: arrancar a sonar al terminar de cargar.
+    autoplay: bool,
+}
+
+/// Aviso grande con el parche que se acaba de instalar.
+struct UpdateBanner {
+    start: f64,
+    until: f64,
+    commits: Vec<CommitInfo>,
+    total: usize,
+}
+
+fn ease_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
+}
+
+fn ease_in_out(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
 }
 
 /// Velocidades que ofrece el menú de ajustes (y entre las que saltan los atajos).
@@ -146,6 +196,18 @@ pub struct CapyroApp {
     fx_rect: Rect,
     /// Tono mientras se arrastra (se aplica al soltar).
     fx_pitch_drag: Option<f32>,
+    /// Pantalla de carga y entrada animada.
+    boot: Boot,
+    /// El logo del header se esconde mientras el de la pantalla de carga vuela hacia él.
+    hide_header_logo: bool,
+    /// Actualizador (menú ⓘ) y de qué commit sale este binario.
+    updater: Updater,
+    build_info: BuildInfo,
+    update_banner: Option<UpdateBanner>,
+    /// Se está reiniciando para aplicar una actualización.
+    restarting: bool,
+    /// Este proceso es el capyro instalado (no uno corriendo desde build/).
+    installed: Option<updater::Install>,
 }
 
 fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -237,86 +299,27 @@ impl CapyroApp {
             cc.egui_ctx.load_texture("capyro-logo", img, TextureOptions::LINEAR)
         });
 
-        // Efectos de sonido embebidos en el binario (se decodifican en el núcleo).
-        for (slot, data) in SOUNDS.iter().enumerate() {
-            if let Err(e) = core.sfx_load(slot, data) {
-                eprintln!("capyro: no se pudo cargar el sonido {slot}: {}", e.0);
-            }
-        }
         core.set_volume(cfg.start_volume);
         core.set_auto_next(cfg.auto_next);
         core.set_speed(cfg.start_speed);
         core.set_shuffle(cfg.start_shuffle);
         core.set_repeat(cfg.start_repeat);
-        let mut startup_notice = core
+        let startup_notice = core
             .audio_backend()
             .is_empty()
             .then(|| "No encontré dispositivo de audio: reproduzco sin sonido".to_owned());
-
-        // Sesión anterior: ajustes siempre; la lista solo si no se abrieron
-        // archivos desde la línea de comandos.
-        let mut show_remaining = false;
-        if cfg.remember_session {
-            if let Some(sess) = Session::load() {
-                core.set_volume(sess.volume);
-                core.set_muted(sess.muted);
-                core.set_speed(sess.speed);
-                core.set_repeat(sess.repeat);
-                core.set_fx(&sess.fx);
-                core.set_pitch(sess.pitch);
-                show_remaining = sess.show_remaining;
-                if core.playlist_len() == 0 && !sess.playlist.is_empty() {
-                    let mut restored = 0;
-                    let mut cur = None;
-                    for (i, p) in sess.playlist.iter().enumerate() {
-                        let path = Path::new(p);
-                        if path.exists() && core.playlist_add(path).is_ok() {
-                            if sess.current == Some(i) {
-                                cur = Some(restored);
-                            }
-                            restored += 1;
-                        }
-                    }
-                    core.set_shuffle(sess.shuffle);
-                    if let Some(c) = cur {
-                        if core.playlist_select(c).is_ok() && sess.position > 3.0
-                            && sess.position < core.duration() - 3.0
-                        {
-                            core.seek(sess.position);
-                        }
-                    }
-                    if restored > 0 && startup_notice.is_none() {
-                        let pos = if cur.is_some() && sess.position > 3.0 {
-                            format!(" · seguís en {}", fmt_time(sess.position))
-                        } else {
-                            String::new()
-                        };
-                        let s = if restored == 1 { "" } else { "s" };
-                        startup_notice = Some(format!("Sesión restaurada: {restored} archivo{s}{pos}"));
-                    }
-                    // Al retomar no arranca a sonar solo: el usuario aprieta play.
-                    return Self::build(cc, core, cfg, logo, startup_notice, show_remaining, false);
-                } else {
-                    core.set_shuffle(sess.shuffle);
-                }
+        let splash = cfg.splash;
+        // Recién actualizado (lo abrió el Capyro viejo al reiniciar): contarlo.
+        let build_info = ffi::build_info();
+        let startup_notice = match std::env::var_os("CAPYRO_UPDATED") {
+            Some(_) if !build_info.commit.is_empty() => {
+                // SAFETY: todavía no hay otros hilos leyendo el entorno.
+                unsafe { std::env::remove_var("CAPYRO_UPDATED") };
+                let short: String = build_info.commit.chars().take(7).collect();
+                Some(format!("Capyro actualizado a {short} · {}", build_info.subject))
             }
-        }
-        Self::build(cc, core, cfg, logo, startup_notice, show_remaining, true)
-    }
-
-    fn build(
-        _cc: &eframe::CreationContext<'_>,
-        core: Core,
-        cfg: Config,
-        logo: Option<TextureHandle>,
-        startup_notice: Option<String>,
-        show_remaining: bool,
-        autoplay: bool,
-    ) -> Self {
-        // Archivos pasados por línea de comandos: "just press play" → arrancar solo.
-        if autoplay && core.state() == State::Stopped {
-            core.toggle();
-        }
+            _ => startup_notice,
+        };
 
         Self {
             core,
@@ -343,17 +346,89 @@ impl CapyroApp {
             first_pass: true,
             viz: Visualizer::new(),
             last_time: 0.0,
-            show_remaining,
+            show_remaining: false,
             last_session_save: 0.0,
             shot: None,
             show_fx: false,
             fx_rect: Rect::NOTHING,
             fx_pitch_drag: None,
+            boot: Boot {
+                enabled: splash,
+                start: None,
+                frame0: 0,
+                loaded: false,
+                ready_at: None,
+                announced: false,
+                autoplay: true,
+            },
+            hide_header_logo: false,
+            updater: Updater::new(),
+            installed: updater::install_location(&build_info),
+            build_info,
+            update_banner: None,
+            restarting: false,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64 | 1)
                 .unwrap_or(0x9E37_79B9_7F4A_7C15),
         }
+    }
+
+    /// La carga del arranque: sonidos (se decodifican en el núcleo) y la
+    /// sesión anterior. Corre mientras se ve la pantalla de "Cargando".
+    fn finish_loading(&mut self) {
+        for (slot, data) in SOUNDS.iter().enumerate() {
+            if let Err(e) = self.core.sfx_load(slot, data) {
+                eprintln!("capyro: no se pudo cargar el sonido {slot}: {}", e.0);
+            }
+        }
+
+        // Sesión anterior: ajustes siempre; la lista solo si no se abrieron
+        // archivos desde la línea de comandos.
+        if !self.cfg.remember_session {
+            return;
+        }
+        let Some(sess) = Session::load() else { return };
+        let core = &self.core;
+        core.set_volume(sess.volume);
+        core.set_muted(sess.muted);
+        core.set_speed(sess.speed);
+        core.set_repeat(sess.repeat);
+        core.set_fx(&sess.fx);
+        core.set_pitch(sess.pitch);
+        self.show_remaining = sess.show_remaining;
+        core.set_shuffle(sess.shuffle);
+        if core.playlist_len() > 0 || sess.playlist.is_empty() {
+            return;
+        }
+        let mut restored = 0;
+        let mut cur = None;
+        for (i, p) in sess.playlist.iter().enumerate() {
+            let path = Path::new(p);
+            if path.exists() && core.playlist_add(path).is_ok() {
+                if sess.current == Some(i) {
+                    cur = Some(restored);
+                }
+                restored += 1;
+            }
+        }
+        core.set_shuffle(sess.shuffle);
+        if let Some(c) = cur {
+            if core.playlist_select(c).is_ok() && sess.position > 3.0 && sess.position < core.duration() - 3.0 {
+                core.seek(sess.position);
+            }
+        }
+        if restored > 0 && self.startup_notice.is_none() {
+            let pos = if cur.is_some() && sess.position > 3.0 {
+                format!(" · seguís en {}", fmt_time(sess.position))
+            } else {
+                String::new()
+            };
+            let s = if restored == 1 { "" } else { "s" };
+            self.startup_notice = Some(format!("Sesión restaurada: {restored} archivo{s}{pos}"));
+        }
+        // Al retomar no arranca a sonar solo: el usuario aprieta play.
+        self.boot.autoplay = false;
     }
 
     /// Uno de los tres sonidos de capibara, al azar (sin repetir el anterior).
@@ -374,8 +449,97 @@ impl CapyroApp {
     }
 
     fn toast(&mut self, ctx: &egui::Context, text: impl Into<String>, error: bool) {
+        self.toast_for(ctx, text, error, 2.5);
+    }
+
+    fn toast_for(&mut self, ctx: &egui::Context, text: impl Into<String>, error: bool, secs: f64) {
         let now = ctx.input(|i| i.time);
-        self.toast = Some(Toast { text: text.into(), start: now, until: now + 2.5, error });
+        self.toast = Some(Toast { text: ellipsize(&text.into(), 84), start: now, until: now + secs, error });
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* actualizaciones                                                  */
+    /* ---------------------------------------------------------------- */
+
+    /// Botón "Buscar actualizaciones" del menú ⓘ. Si ya se instaló una,
+    /// el mismo botón reinicia Capyro.
+    fn start_update(&mut self, ctx: &egui::Context) {
+        if self.updater.is_running() {
+            return;
+        }
+        if matches!(self.updater.last, Some(Outcome::Installed { .. })) {
+            self.restart(ctx);
+            return;
+        }
+        match updater::Job::new(
+            &self.build_info,
+            self.installed.as_ref(),
+            self.cfg.update_repo.as_deref(),
+            self.cfg.update_branch.as_deref(),
+        ) {
+            Ok(job) => {
+                let c = ctx.clone();
+                self.updater.start(job, move || c.request_repaint());
+            }
+            Err(message) => {
+                self.play_error();
+                self.toast_for(ctx, message.clone(), true, 4.0);
+                self.updater.last = Some(Outcome::Failed { kind: FailKind::Repo, message });
+            }
+        }
+    }
+
+    /// Resultado del actualizador (una vez por búsqueda).
+    fn poll_update(&mut self, ctx: &egui::Context) {
+        if self.updater.is_running() {
+            // spinner del menú y puntito del botón ⓘ
+            ctx.request_repaint_after(Duration::from_millis(40));
+        }
+        let Some(out) = self.updater.poll() else { return };
+        let now = ctx.input(|i| i.time);
+        match out {
+            Outcome::UpToDate { hash } => {
+                self.toast_for(ctx, format!("Ya tenés la última versión ({hash})"), false, 3.0);
+            }
+            Outcome::Ahead => {
+                self.toast_for(ctx, "Tu Capyro es más nuevo que el del repo", false, 3.0);
+            }
+            Outcome::NotInstalled { latest } => {
+                self.toast_for(
+                    ctx,
+                    format!("Hay una versión nueva ({}), pero este Capyro no está instalado", latest.hash),
+                    false,
+                    5.0,
+                );
+            }
+            Outcome::Installed { commits, total } => {
+                self.core.sfx_play(SFX_UPDATE);
+                self.update_banner = Some(UpdateBanner { start: now, until: now + BANNER_TIME, commits, total });
+            }
+            Outcome::Failed { message, .. } => {
+                self.play_error();
+                self.toast_for(ctx, message, true, 5.0);
+            }
+        }
+    }
+
+    /// Guarda la sesión, abre el Capyro recién instalado y cierra este.
+    fn restart(&mut self, ctx: &egui::Context) {
+        self.save_session();
+        let bindir = match &self.installed {
+            Some(i) => i.bindir.clone(),
+            None => std::path::PathBuf::from(&self.build_info.bindir),
+        };
+        match updater::relaunch(&bindir) {
+            Ok(()) => {
+                self.restarting = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
+            Err(e) => {
+                self.play_error();
+                self.toast_for(ctx, format!("No pude reiniciar Capyro: {e}"), true, 4.0);
+            }
+        }
     }
 
     /* ---------------------------------------------------------------- */
@@ -794,7 +958,7 @@ impl CapyroApp {
             }
         }
         let logo_scale = 1.0 + 0.05 * logo_btn.hover - 0.08 * logo_btn.press + 0.14 * bounce;
-        if let Some(logo) = &self.logo {
+        if let Some(logo) = self.logo.as_ref().filter(|_| !self.hide_header_logo) {
             painter.image(
                 logo.id(),
                 Rect::from_center_size(logo_rect.center(), logo_rect.size() * logo_scale),
@@ -953,7 +1117,6 @@ impl CapyroApp {
         if self.show_playlist {
             self.playlist_panel(ui, rect);
         }
-        self.draw_toast(ui, rect);
     }
 
     fn playlist_panel(&mut self, ui: &mut Ui, video: Rect) {
@@ -970,7 +1133,7 @@ impl CapyroApp {
         );
         let interactive = self.show_playlist && t > 0.5;
         let mut painter = ui.painter().clone();
-        painter.set_opacity(ease);
+        painter.multiply_opacity(ease);
         if interactive {
             // Bloquea los clics para que no lleguen al área de video de abajo.
             ui.interact(panel, Id::unique("capyro-playlist-bg"), Sense::click());
@@ -1015,7 +1178,7 @@ impl CapyroApp {
             );
         } else {
             let mut child = ui.new_child(UiBuilder::new().max_rect(list_rect));
-            child.set_opacity(ease);
+            child.multiply_opacity(ease);
             if !interactive {
                 child.disable();
             }
@@ -1131,7 +1294,7 @@ impl CapyroApp {
         let rise = (1.0 - fade_in) * 8.0;
 
         let mut painter = ui.painter().clone();
-        painter.set_opacity(alpha);
+        painter.multiply_opacity(alpha);
         let galley = painter.layout_no_wrap(t.text.clone(), regular(12.5), if t.error { ERROR } else { TEXT });
         let size = galley.size() + vec2(28.0, 14.0);
         let rect = Rect::from_center_size(pos2(video.center().x, video.bottom() - 28.0 + rise), size);
@@ -1353,6 +1516,17 @@ impl CapyroApp {
         let info_on = ctx.animate_bool_with_time(Id::unique("capyro-info-on"), self.show_info, 0.15);
         let info_col = info.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, info_on);
         icons::info(&painter, info_c, 17.0 * info.scale(), info_col);
+        // puntito: actualizando (late) o lista para reiniciar
+        let pending_restart = matches!(self.updater.last, Some(Outcome::Installed { .. }));
+        let badge = ctx.animate_bool_with_time(
+            Id::unique("capyro-info-badge"),
+            self.updater.is_running() || pending_restart,
+            0.2,
+        );
+        if badge > 0.001 {
+            let beat = if self.updater.is_running() { 0.6 + 0.4 * (ctx.input(|i| i.time) * 5.0).sin().abs() as f32 } else { 1.0 };
+            painter.circle_filled(info_c + vec2(0.0, 13.0), 2.0 * badge, accent.gamma_multiply(beat));
+        }
         self.info_rect = Rect::from_center_size(info_c, Vec2::splat(30.0));
         if info.resp.clicked() {
             self.show_info = !self.show_info;
@@ -1360,7 +1534,13 @@ impl CapyroApp {
             self.show_fx = false;
         }
         if !self.show_info {
-            info.resp.on_hover_text("Acerca de Capyro");
+            info.resp.on_hover_text(if self.updater.is_running() {
+                "Acerca de Capyro · actualizando…"
+            } else if pending_restart {
+                "Acerca de Capyro · actualización lista"
+            } else {
+                "Acerca de Capyro"
+            });
         }
 
         /* --- fila inferior --- */
@@ -1424,7 +1604,7 @@ impl CapyroApp {
                 format!("{}%", (volume * 100.0).round())
             };
             let mut p = painter.clone();
-            p.set_opacity(vol.hover);
+            p.multiply_opacity(vol.hover);
             let g = p.layout_no_wrap(label, regular(11.0), TEXT);
             let r = Rect::from_center_size(vol_c - vec2(0.0, 24.0 + 3.0 * vol.hover), g.size() + vec2(12.0, 6.0));
             p.rect_filled(r, r.height() / 2.0, BG_PANEL);
@@ -1501,7 +1681,7 @@ impl CapyroApp {
         let accent = self.cfg.accent;
         let width = 312.0;
         let inner_w = width - 28.0;
-        let base_h = 196.0;
+        let base_h = 244.0;
 
         // --- resúmenes (acordeón): se calcula antes para saber el alto total ---
         // Cada formato tiene su propia animación; como solo uno puede estar
@@ -1544,7 +1724,7 @@ impl CapyroApp {
         let interactive = self.show_info && t > 0.6;
 
         let mut painter = ui.painter().clone();
-        painter.set_opacity(ease);
+        painter.multiply_opacity(ease);
         if interactive {
             let outside = ui.interact(ui.max_rect(), Id::unique("capyro-info-outside"), Sense::click());
             if outside.clicked() {
@@ -1633,6 +1813,11 @@ impl CapyroApp {
             cy += (card_h + 8.0) * k;
         }
 
+        // actualizaciones
+        let upd_top = region.bottom() + 2.0;
+        painter.line_segment([pos2(x0, upd_top), pos2(x1, upd_top)], Stroke::new(1.0, Color32::from_white_alpha(14)));
+        self.update_row(ui, &painter, Rect::from_min_max(pos2(x0 - 6.0, upd_top + 6.0), pos2(x1 + 6.0, upd_top + 48.0)), interactive);
+
         // pie: backend de audio y licencia
         let backend = self.core.audio_backend();
         let audio = if backend.is_empty() { "sin dispositivo".to_owned() } else { backend };
@@ -1667,7 +1852,7 @@ impl CapyroApp {
         let interactive = self.show_settings && t > 0.6;
 
         let mut painter = ui.painter().clone();
-        painter.set_opacity(ease);
+        painter.multiply_opacity(ease);
         if interactive {
             // Capa invisible sobre toda la ventana: un clic afuera solo cierra
             // el menú (no pausa el video ni aprieta lo que haya abajo).
@@ -1776,6 +1961,315 @@ impl CapyroApp {
         }
     }
 
+    /// "Versión actual: 1a2b3c4 · hace 2 días" (debajo de "Buscar actualizaciones").
+    fn version_line(&self) -> String {
+        let b = &self.build_info;
+        if b.commit.is_empty() {
+            return if self.installed.is_some() {
+                "Compilado sin git (desde un .zip)".to_owned()
+            } else {
+                "Sin git · sin instalar (corre desde build/)".to_owned()
+            };
+        }
+        let short: String = b.commit.chars().take(7).collect();
+        let dirty = if b.dirty { "+cambios" } else { "" };
+        if self.installed.is_none() {
+            return format!("{short}{dirty} · sin instalar (corre desde build/)");
+        }
+        let when = updater::ago(b.commit_time);
+        if when.is_empty() {
+            format!("Versión actual: {short}{dirty}")
+        } else {
+            format!("Versión actual: {short}{dirty} · {when}")
+        }
+    }
+
+    /// Fila "Buscar actualizaciones" del menú ⓘ, con su progreso y resultado.
+    fn update_row(&mut self, ui: &mut Ui, painter: &egui::Painter, row: Rect, interactive: bool) {
+        let ctx = ui.ctx().clone();
+        let accent = self.cfg.accent;
+        let now = ctx.input(|i| i.time);
+        let progress = self.updater.progress();
+        let running = progress.is_some();
+        let installed = matches!(self.updater.last, Some(Outcome::Installed { .. }));
+
+        let btn = animate_button(ui, Id::unique("capyro-update-row"), row, interactive && !running);
+        if btn.hover > 0.001 || btn.press > 0.001 {
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * btn.hover + 10.0 * btn.press) as u8));
+        }
+        let x0 = row.left() + 6.0;
+        let cy = row.center().y;
+        let ic = pos2(x0 + 8.0, cy - 1.0);
+
+        let mut sub_col = TEXT_FAINT;
+        let mut tooltip = "Busca commits nuevos en el repo de GitHub; si hay, los baja, compila e instala solo".to_owned();
+        let (title, sub) = if let Some(pr) = &progress {
+            icons::spinner(painter, ic, 15.0, accent, now);
+            let secs = pr.elapsed.as_secs();
+            let t = format!("{}:{:02}", secs / 60, secs % 60);
+            let sub = if pr.detail.is_empty() { t } else { format!("{} · {t}", pr.detail) };
+            tooltip = format!("Mientras tanto podés seguir usando Capyro. Detalle en {}", updater::log_path_display());
+            (pr.stage.label().to_owned(), sub)
+        } else {
+            match &self.updater.last {
+                Some(Outcome::Installed { commits, .. }) => {
+                    painter.circle_filled(ic, 8.0, accent);
+                    icons::check(painter, ic, 11.0, Color32::WHITE, 1.8);
+                    tooltip = "Clic para reiniciar Capyro con la versión nueva".to_owned();
+                    match commits.first() {
+                        Some(c) => (format!("Actualizado a {}", c.hash), c.subject.clone()),
+                        None => ("Actualizado".to_owned(), "Reiniciá para aplicar".to_owned()),
+                    }
+                }
+                other => {
+                    icons::download(painter, ic, 15.0 * btn.scale(), btn.tint(ICON, Color32::WHITE), btn.hover);
+                    let sub = match other {
+                        Some(Outcome::UpToDate { hash }) => format!("Ya tenés la última versión ({hash})"),
+                        Some(Outcome::Ahead) => "Tu versión es más nueva que la del repo".to_owned(),
+                        Some(Outcome::NotInstalled { latest }) => {
+                            tooltip = format!(
+                                "Hay una versión nueva: {} · {}\nPara que se actualice solo, instalá Capyro (cmake --install build)",
+                                latest.hash, latest.subject
+                            );
+                            format!("Hay una nueva ({}) · instalá Capyro", latest.hash)
+                        }
+                        Some(Outcome::Failed { kind, message }) => {
+                            sub_col = ERROR;
+                            tooltip = if *kind == FailKind::Build {
+                                format!("{message}\nDetalle en {}", updater::log_path_display())
+                            } else {
+                                message.clone()
+                            };
+                            message.clone()
+                        }
+                        _ => {
+                            let b = &self.build_info;
+                            if !b.subject.is_empty() {
+                                let rama = if b.branch.is_empty() { String::new() } else { format!(" ({})", b.branch) };
+                                tooltip = format!("{tooltip}\nEste Capyro sale de: {}{rama}", b.subject);
+                            }
+                            self.version_line()
+                        }
+                    };
+                    ("Buscar actualizaciones".to_owned(), sub)
+                }
+            }
+        };
+
+        // a la derecha: "Reiniciar" cuando ya está instalada
+        let mut text_right = row.right() - 10.0;
+        if installed {
+            let g = painter.layout_no_wrap("Reiniciar".to_owned(), bold(11.5), Color32::WHITE);
+            let pill = Rect::from_min_size(
+                pos2(row.right() - 8.0 - g.size().x - 20.0, cy - 12.0),
+                vec2(g.size().x + 20.0, 24.0),
+            );
+            let fill = accent.lerp_to_gamma(Color32::WHITE, 0.12 * btn.hover);
+            painter.rect_filled(pill, 12.0, fill);
+            painter.galley(pill.center() - g.size() / 2.0, g, Color32::WHITE);
+            text_right = pill.left() - 8.0;
+        }
+        let max_chars = (((text_right - (x0 + 24.0)) / 5.6) as usize).max(10);
+        painter.text(pos2(x0 + 24.0, cy - 7.0), Align2::LEFT_CENTER, ellipsize(&title, max_chars), regular(12.5), TEXT);
+        painter.text(pos2(x0 + 24.0, cy + 8.0), Align2::LEFT_CENTER, ellipsize(&sub, max_chars + 4), regular(10.5), sub_col);
+
+        // barra "indeterminada": compilar no avisa cuánto falta
+        if running {
+            let bar = Rect::from_min_max(pos2(x0 + 24.0, row.bottom() - 3.0), pos2(row.right() - 12.0, row.bottom() - 1.0));
+            painter.rect_filled(bar, 1.0, TRACK);
+            let w = bar.width() * 0.3;
+            let phase = ((now * 0.8) % 1.0) as f32;
+            let x = bar.left() - w + (bar.width() + w) * ease_in_out(phase);
+            let seg = Rect::from_min_max(
+                pos2(x.max(bar.left()), bar.top()),
+                pos2((x + w).min(bar.right()), bar.bottom()),
+            );
+            if seg.width() > 0.0 {
+                painter.rect_filled(seg, 1.0, accent);
+            }
+        }
+
+        if btn.resp.clicked() {
+            self.start_update(&ctx);
+        }
+        if interactive {
+            btn.resp.on_hover_text(tooltip);
+        }
+    }
+
+    /// Aviso con "el parche": los commits que se acaban de instalar.
+    fn draw_update_banner(&mut self, ui: &mut Ui, video: Rect) {
+        let ctx = ui.ctx().clone();
+        let now = ctx.input(|i| i.time);
+        let accent = self.cfg.accent;
+        let Some(b) = &mut self.update_banner else { return };
+        if now > b.until {
+            self.update_banner = None;
+            return;
+        }
+        let fade_in = ease_out(((now - b.start) / 0.35) as f32);
+        let fade_out = ((b.until - now) / 0.45).clamp(0.0, 1.0) as f32;
+        let alpha = fade_in.min(fade_out);
+
+        let shown: Vec<CommitInfo> = b.commits.iter().take(3).cloned().collect();
+        let more = b.total.saturating_sub(shown.len());
+        let width = (video.width() - 32.0).min(440.0);
+        let h = 62.0 + 26.0 * shown.len() as f32 + if more > 0 { 18.0 } else { 0.0 } + 10.0;
+        let rect = Rect::from_min_size(
+            pos2(video.center().x - width / 2.0, video.top() + 14.0 - 16.0 * (1.0 - fade_in)),
+            vec2(width, h),
+        );
+        // con el mouse encima no se va
+        if ui.rect_contains_pointer(rect) && fade_in >= 1.0 {
+            b.until = b.until.max(now + 1.2);
+        }
+        let (start, until, total) = (b.start, b.until, b.total);
+
+        let mut p = ui.painter().clone();
+        p.multiply_opacity(alpha);
+        ui.interact(rect, Id::unique("capyro-update-banner"), Sense::click()); // que no pause el video
+        p.rect_filled(rect.translate(vec2(0.0, 5.0)), 14.0, Color32::from_black_alpha(80));
+        p.rect_filled(rect, 14.0, BG_PANEL);
+        p.rect_stroke(rect, 14.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
+
+        // encabezado
+        let hc = pos2(rect.left() + 30.0, rect.top() + 31.0);
+        let pop = ease_out(((now - start - 0.15) / 0.3) as f32);
+        p.circle_filled(hc, 15.0 + 5.0 * (1.0 - pop) * pop * 4.0 * 0.25, accent.gamma_multiply(0.2));
+        p.circle_filled(hc, 12.0 * (0.6 + 0.4 * pop), accent);
+        if pop > 0.05 {
+            icons::check(&p, hc, 13.0 * pop, Color32::WHITE, 2.0);
+        }
+        let tx = hc.x + 24.0;
+        p.text(pos2(tx, rect.top() + 22.0), Align2::LEFT_CENTER, "Capyro se actualizó", bold(14.0), TEXT);
+        let cambios = if total == 1 {
+            "1 cambio nuevo · reiniciá para aplicarlo".to_owned()
+        } else {
+            format!("{total} cambios nuevos · reiniciá para aplicarlos")
+        };
+        p.text(pos2(tx, rect.top() + 40.0), Align2::LEFT_CENTER, cambios, regular(11.5), TEXT_DIM);
+
+        // botón Reiniciar
+        let g = p.layout_no_wrap("Reiniciar".to_owned(), bold(12.0), Color32::WHITE);
+        let pill = Rect::from_min_size(pos2(rect.right() - 16.0 - g.size().x - 24.0, hc.y - 14.0), vec2(g.size().x + 24.0, 28.0));
+        let rb = animate_button(ui, Id::unique("capyro-banner-restart"), pill, alpha > 0.9);
+        let pr = Rect::from_center_size(pill.center(), pill.size() * (1.0 + 0.04 * rb.hover - 0.08 * rb.press));
+        if rb.hover > 0.001 {
+            p.rect_filled(pr.expand(3.0 * rb.hover), pr.height() / 2.0 + 3.0, accent.gamma_multiply(0.2 * rb.hover));
+        }
+        p.rect_filled(pr, pr.height() / 2.0, accent.lerp_to_gamma(Color32::WHITE, 0.12 * rb.hover));
+        p.galley(pr.center() - g.size() / 2.0, g, Color32::WHITE);
+
+        // los commits
+        p.line_segment(
+            [pos2(rect.left() + 16.0, rect.top() + 58.0), pos2(rect.right() - 16.0, rect.top() + 58.0)],
+            Stroke::new(1.0, Color32::from_white_alpha(14)),
+        );
+        let mut y = rect.top() + 76.0;
+        for (i, c) in shown.iter().enumerate() {
+            // cada línea entra un poquito después de la anterior
+            let k = ease_out(((now - start - 0.2 - 0.08 * i as f64) / 0.3) as f32);
+            let mut lp = p.clone();
+            lp.multiply_opacity(k);
+            let dx = 8.0 * (1.0 - k);
+            let hg = lp.layout_no_wrap(c.hash.clone(), FontId::monospace(11.0), accent);
+            let chip = Rect::from_min_size(pos2(rect.left() + 16.0 + dx, y - 10.0), hg.size() + vec2(12.0, 20.0 - hg.size().y));
+            lp.rect_filled(chip, 6.0, accent.gamma_multiply(0.14));
+            lp.galley(chip.center() - hg.size() / 2.0, hg, accent);
+            let when = updater::ago(c.time);
+            let wg = lp.layout_no_wrap(when, regular(10.5), TEXT_FAINT);
+            lp.galley(pos2(rect.right() - 16.0 - wg.size().x, y - wg.size().y / 2.0), wg.clone(), TEXT_FAINT);
+            let avail = rect.right() - 24.0 - wg.size().x - (chip.right() + 8.0);
+            let max_chars = ((avail / 6.4) as usize).max(8);
+            lp.text(
+                pos2(chip.right() + 8.0, y),
+                Align2::LEFT_CENTER,
+                ellipsize(&c.subject, max_chars),
+                if i == 0 { bold(12.0) } else { regular(12.0) },
+                if i == 0 { TEXT } else { TEXT_DIM },
+            );
+            y += 26.0;
+        }
+        if more > 0 {
+            p.text(pos2(rect.left() + 16.0, y - 4.0), Align2::LEFT_CENTER, format!("+{more} más"), regular(11.0), TEXT_FAINT);
+        }
+
+        // cuánto le queda al aviso
+        let left = ((until - now) / BANNER_TIME).clamp(0.0, 1.0) as f32;
+        let bar = Rect::from_min_size(pos2(rect.left() + 14.0, rect.bottom() - 4.0), vec2((rect.width() - 28.0) * left, 2.0));
+        p.rect_filled(bar, 1.0, accent.gamma_multiply(0.5));
+
+        if rb.resp.clicked() {
+            self.restart(&ctx);
+        }
+        ctx.request_repaint();
+    }
+
+    /// Pantalla de carga: logo, "Cargando…" y un ecualizador. Con `intro`
+    /// (segundos desde que terminó de cargar) todo se desvanece y el logo
+    /// vuela hasta su lugar en el header.
+    fn splash(&self, ui: &Ui, full: Rect, now: f64, intro: Option<f32>, logo_dest: Rect) {
+        let painter = ui.painter();
+        let accent = self.cfg.accent;
+        let since = (now - self.boot.start.unwrap_or(now)) as f32;
+        let appear = ease_out(since / 0.3);
+        let fade = intro.map_or(1.0, |t| 1.0 - ease_out(t / 0.28));
+
+        let c = full.center() - vec2(0.0, 18.0);
+        let logo_c = c - vec2(0.0, 30.0);
+        let mut p = painter.clone();
+        p.multiply_opacity(appear * fade);
+
+        // brillo que respira detrás del logo
+        let breathe = 0.5 + 0.5 * (since * 2.6).sin();
+        p.circle_filled(logo_c, 70.0 + 8.0 * breathe, accent.gamma_multiply(0.05 + 0.03 * breathe));
+        p.circle_filled(logo_c, 56.0, accent.gamma_multiply(0.06));
+
+        p.text(c + vec2(0.0, 42.0), Align2::CENTER_CENTER, "Capyro", bold(21.0), TEXT);
+
+        // "Cargando" fijo y los puntitos al lado (así el texto no baila)
+        let g = p.layout_no_wrap("Cargando".to_owned(), regular(13.0), TEXT_DIM);
+        let dots = (since * 3.2) as usize % 4;
+        let tl = pos2(c.x - g.size().x / 2.0 - 6.0, c.y + 68.0 - g.size().y / 2.0);
+        p.galley(tl, g.clone(), TEXT_DIM);
+        p.text(pos2(tl.x + g.size().x + 1.0, c.y + 68.0), Align2::LEFT_CENTER, ".".repeat(dots), regular(13.0), TEXT_DIM);
+
+        // ecualizador, como el del README
+        let n = 7;
+        let (bw, gap) = (4.0, 4.0);
+        let total_w = n as f32 * bw + (n - 1) as f32 * gap;
+        let base = c.y + 104.0;
+        for i in 0..n {
+            let ph = since * 7.0 + i as f32 * 1.1;
+            let h = 5.0 + 15.0 * (0.5 + 0.5 * ph.sin()) * (0.6 + 0.4 * (ph * 0.37).cos().abs());
+            let x = c.x - total_w / 2.0 + i as f32 * (bw + gap);
+            p.rect_filled(Rect::from_min_max(pos2(x, base - h), pos2(x + bw, base)), 2.0, accent);
+        }
+
+        p.text(
+            pos2(full.center().x, full.bottom() - 26.0),
+            Align2::CENTER_CENTER,
+            format!("v{} · Just press play.", ffi::version()),
+            regular(11.0),
+            TEXT_FAINT,
+        );
+
+        // el logo: aparece creciendo y, al terminar, vuela al header
+        let Some(logo) = &self.logo else { return };
+        let start_rect = Rect::from_center_size(logo_c, Vec2::splat(96.0 * (0.9 + 0.1 * appear)));
+        let (rect, alpha) = match intro {
+            None => (start_rect, appear),
+            Some(t) => {
+                let k = ease_in_out(t / 0.46);
+                let r = Rect::from_min_max(start_rect.min.lerp(logo_dest.min, k), start_rect.max.lerp(logo_dest.max, k));
+                (r, 1.0)
+            }
+        };
+        let mut lp = painter.clone();
+        lp.multiply_opacity(alpha);
+        lp.image(logo.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    }
+
     /// Ventana sin bordes del sistema → bordes de 6px para redimensionar.
     fn resize_handles(ui: &mut Ui, full: Rect) {
         const B: f32 = 6.0;
@@ -1816,7 +2310,11 @@ impl CapyroApp {
 
 impl eframe::App for CapyroApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.save_session();
+        self.updater.cancel();
+        if !self.restarting {
+            // al reiniciar ya se guardó antes de abrir el Capyro nuevo
+            self.save_session();
+        }
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -1828,19 +2326,48 @@ impl eframe::App for CapyroApp {
         let frame = ctx.cumulative_frame_nr();
         self.first_pass = frame != self.last_frame;
         self.last_frame = frame;
-        if let Some(msg) = self.startup_notice.take() {
-            let is_error = msg.starts_with("No encontré");
-            self.toast(&ctx, msg, is_error);
+        let now = ctx.input(|i| i.time);
+
+        /* --- arranque: primero se dibuja "Cargando", después se carga --- */
+        if self.boot.start.is_none() {
+            self.boot.start = Some(now);
+            self.boot.frame0 = frame;
         }
+        if !self.boot.loaded && (!self.boot.enabled || frame > self.boot.frame0) {
+            self.finish_loading();
+            self.boot.loaded = true;
+            let earliest = if self.boot.enabled { self.boot.start.unwrap_or(now) + SPLASH_TIME } else { now };
+            self.boot.ready_at = Some(earliest.max(now));
+        }
+        let ready = self.boot.ready_at.is_some_and(|r| now >= r);
+        if ready && !self.boot.announced {
+            self.boot.announced = true;
+            if self.cfg.startup_sound {
+                self.core.sfx_play(SFX_START);
+            }
+            if self.boot.autoplay && self.core.state() == State::Stopped {
+                self.core.toggle(); // archivos por línea de comandos: just press play
+            }
+        }
+        if ready {
+            if let Some(msg) = self.startup_notice.take() {
+                let is_error = msg.starts_with("No encontré");
+                let secs = if msg.starts_with("Capyro actualizado") { 4.5 } else { 2.5 };
+                self.toast_for(&ctx, msg, is_error, secs);
+            }
+        }
+
         self.core.update();
-        self.handle_input(&ctx);
+        if ready {
+            self.handle_input(&ctx);
+        }
         self.update_title(&ctx);
         self.sync_video_texture(&ctx);
         self.poll_file_dialog(&ctx);
         self.poll_screenshot(&ctx);
+        self.poll_update(&ctx);
 
         // visualizador: se alimenta con lo último que sonó
-        let now = ctx.input(|i| i.time);
         let dt = ((now - self.last_time) as f32).clamp(0.0, 0.1);
         self.last_time = now;
         if self.cfg.visualizer && self.first_pass && self.core.media_kind() == MediaKind::Audio {
@@ -1854,7 +2381,7 @@ impl eframe::App for CapyroApp {
         }
 
         // la sesión se guarda cada 15 s (y al cerrar)
-        if self.cfg.remember_session && now - self.last_session_save > 15.0 {
+        if ready && self.cfg.remember_session && now - self.last_session_save > 15.0 {
             self.last_session_save = now;
             self.save_session();
         }
@@ -1883,6 +2410,40 @@ impl eframe::App for CapyroApp {
         let header = Rect::from_min_size(inner.min, vec2(inner.width(), 46.0));
         let video_bottom = (inner.bottom() - BELOW_VIDEO).max(header.bottom() + 60.0);
         let video = Rect::from_min_max(pos2(inner.left(), header.bottom() + 12.0), pos2(inner.right(), video_bottom));
+        let logo_dest = Rect::from_min_size(header.min, vec2(46.0, 46.0));
+
+        if !ready {
+            // pantalla de carga (se puede arrastrar la ventana igual)
+            let drag = ui.interact(full, Id::unique("capyro-splash-drag"), Sense::drag());
+            if drag.drag_started() {
+                ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+            }
+            self.splash(ui, full, now, None, logo_dest);
+            ctx.request_repaint();
+            return;
+        }
+
+        let intro = self.boot.ready_at.map_or(INTRO_TIME, |r| (now - r) as f32);
+        if self.boot.enabled && intro < INTRO_TIME {
+            // la interfaz entra por partes: header, video y controles
+            let part = |delay: f32| ease_out((intro - delay) / 0.42);
+            let (e1, e2, e3) = (part(0.0), part(0.08), part(0.16));
+            self.hide_header_logo = true;
+            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+            child.multiply_opacity(e1);
+            self.header(&mut child, header.translate(vec2(0.0, -12.0 * (1.0 - e1))), maximized);
+            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+            child.multiply_opacity(e2);
+            self.video_area(&mut child, Rect::from_center_size(video.center(), video.size() * (0.96 + 0.04 * e2)));
+            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+            child.multiply_opacity(e3);
+            self.transport(&mut child, video_bottom + 18.0 * (1.0 - e3), inner);
+            self.draw_toast(&mut child, video);
+            self.splash(ui, full, now, Some(intro), logo_dest);
+            ctx.request_repaint();
+            return;
+        }
+        self.hide_header_logo = false;
 
         self.header(ui, header, maximized);
         self.video_area(ui, video);
@@ -1890,6 +2451,9 @@ impl eframe::App for CapyroApp {
         self.settings_menu(ui);
         self.info_menu(ui);
         self.fx_menu(ui);
+        // avisos arriba de todo (también de los menús abiertos)
+        self.draw_toast(ui, video);
+        self.draw_update_banner(ui, video);
         if !square {
             Self::resize_handles(ui, full);
         }

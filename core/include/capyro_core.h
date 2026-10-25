@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.6-alpha"
+#define CAPYRO_VERSION "0.2.7-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -139,6 +139,25 @@ void capyro_core_get_fx(CapyroCore *core, CapyroAudioFx *out);
  * aplicarse: se vuelve a decodificar desde la posición actual. */
 void   capyro_core_set_pitch(CapyroCore *core, double semitones);
 double capyro_core_get_pitch(CapyroCore *core);
+
+/* ---------- datos del build ----------
+ * De qué commit de git sale este binario y dónde se instala. Los usa el
+ * actualizador. Si se compiló sin git (desde un .zip), commit es "". */
+typedef struct CapyroBuildInfo {
+    const char *commit;     /* hash completo o "" */
+    const char *branch;     /* rama al compilar o "" */
+    const char *remote;     /* URL del "origin" o "" */
+    const char *subject;    /* título del commit */
+    long long   commit_time;/* fecha del commit (unix), 0 = desconocida */
+    bool        dirty;      /* había cambios sin commitear */
+    const char *prefix;     /* CMAKE_INSTALL_PREFIX */
+    const char *bindir;     /* carpeta donde se instala el ejecutable */
+    const char *build_type; /* Release, Debug... */
+    bool        dist;       /* -DCAPYRO_DIST=ON */
+    bool        native;     /* -DCAPYRO_NATIVE=ON */
+} CapyroBuildInfo;
+
+const CapyroBuildInfo *capyro_core_build_info(void);
 
 /* ---------- efectos de sonido ----------
  * Sonidos cortos (logo, error...) que se mezclan encima de lo que esté

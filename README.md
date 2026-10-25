@@ -4,7 +4,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.2.6--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.2.6-alpha">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.2.7--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.2.7-alpha">
 <img src="https://img.shields.io/badge/plataforma-Linux-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
@@ -17,6 +17,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 
 [Funciones](#funciones) ·
 [Efectos de audio](#efectos-de-audio) ·
+[Actualizaciones](#4-actualizar) ·
 [Distribuciones](#distribuciones) ·
 [Instalación](#instalación) ·
 [Atajos](#cómo-se-usa) ·
@@ -26,9 +27,10 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.2.6:** llegaron los **efectos de audio**. Ecualizador de graves,
-> medios y agudos, tono sin cambiar la velocidad, estéreo/mono, modo noche y presets.
-> Todo está en el botón ≡ al lado del volumen. [Ver el historial completo →](CHANGELOG.md)
+> **Novedades de la v0.2.7:** Capyro **se actualiza solo**. En el menú **ⓘ** tocás
+> *Buscar actualizaciones* y él baja los commits nuevos del repo, se compila y se instala;
+> te muestra el parche y te pide reiniciar. Además, al abrir hay una **pantalla de carga**
+> animada con su propio sonido. [Ver el historial completo →](CHANGELOG.md)
 
 <br>
 
@@ -46,8 +48,12 @@ Abrís un archivo, apretás play y listo: *just press play*.
 <td align="center"><img src="docs/screenshot-efectos.png" alt="Menú de efectos de audio"><br><sub><b>Efectos de audio</b> que se escuchan al instante</sub></td>
 </tr>
 <tr>
-<td align="center"><img src="docs/screenshot-info.png" alt="Menú de información"><br><sub><b>ⓘ</b> versión y un resumen de cada formato</sub></td>
+<td align="center"><img src="docs/screenshot-info.png" alt="Menú de información"><br><sub><b>ⓘ</b> versión, formatos y buscar actualizaciones</sub></td>
 <td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, recargar la config y capturas</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshot-carga.png" alt="Pantalla de carga"><br><sub><b>Pantalla de carga</b> animada, con sonido de inicio</sub></td>
+<td align="center"><img src="docs/screenshot-actualizacion.png" alt="Aviso de actualización instalada"><br><sub><b>Se actualiza solo</b> y te muestra el parche</sub></td>
 </tr>
 </table>
 
@@ -58,8 +64,9 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 📃 **Lista** | Aleatorio sin repetidos, repetir la lista o un archivo, paso automático al siguiente y quitar archivos aunque estén sonando. |
 | 💾 **Memoria** | Retoma la lista, el archivo, la posición, el volumen y los efectos de la última vez. |
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
-| ✨ **Interfaz** | Ventana propia con esquinas redondeadas, botones animados, menús que aparecen deslizándose y avisos con fundido. |
-| 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). |
+| 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, compila e instala la versión nueva y te muestra qué cambió. |
+| ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
+| 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
 | ⚙️ **Personalizable** | Todos los atajos y opciones en un archivo **Lua**, que se recarga sin reiniciar. |
 
 <img src="docs/readme/divider-2.svg" width="100%" alt="">
@@ -223,8 +230,8 @@ La ventana carga OpenGL, Wayland y xkbcommon en tiempo de ejecución: si no abre
 ### 2. Compilar
 
 ```sh
-git clone https://github.com/CapyIsInsano/Capyro.git
-cd Capyro
+git clone https://github.com/TU_USUARIO/capyro.git
+cd capyro
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 ./build/capyro
@@ -256,7 +263,7 @@ cmake --build build-dist
 ```
 </details>
 
-### 3. Instalar (opcional)
+### 3. Instalar
 
 ```sh
 sudo cmake --install build                  # en /usr/local
@@ -265,6 +272,34 @@ cmake --install build --prefix ~/.local     # o solo para tu usuario
 
 Instala el binario, la config de ejemplo, el lanzador `.desktop` (Capyro aparece en el menú
 de aplicaciones y en "Abrir con…" para todos sus formatos) y el ícono.
+
+> [!TIP]
+> Si lo instalás **en tu usuario** (`--prefix ~/.local`), se actualiza sin pedir contraseña.
+> Fijate que `~/.local/bin` esté en tu `PATH`.
+
+### 4. Actualizar
+
+Una vez instalado, Capyro se actualiza solo: **ⓘ → Buscar actualizaciones**.
+
+1. Le pregunta al repo de GitHub cuál es el último commit (`git ls-remote`). Si es el mismo
+   de tu Capyro, te dice que ya tenés la última.
+2. Si hay algo nuevo, baja el código a `~/.cache/capyro/src`.
+3. Lo compila en `~/.cache/capyro/build` con las mismas opciones que usaste vos (prefijo,
+   `CAPYRO_DIST`, `CAPYRO_NATIVE`), con prioridad baja para no trabar lo que estés mirando.
+4. Lo instala en el mismo lugar donde está. Si es una carpeta del sistema (`/usr/local`), te
+   pide la contraseña con `pkexec`.
+5. Suena el aviso, aparece **el parche** (los commits nuevos) y te pide **reiniciar**: con un
+   clic se vuelve a abrir en la versión nueva, con tu lista y tu posición.
+
+La **primera** actualización compila todo (unos minutos, como la primera vez). Las
+siguientes reutilizan lo compilado y tardan **segundos**. Mientras tanto podés seguir usándolo.
+
+| Para que funcione | |
+|---|---|
+| Capyro **instalado** | Corriendo desde `build/` solo te avisa si hay algo nuevo. |
+| `git`, `cmake` y `cargo` | Los mismos que usaste para compilarlo. |
+| Saber de qué repo bajar | Lo toma del `git remote` con el que lo compilaste. Si lo bajaste como `.zip`, poné `update_repo = "usuario/capyro"` en la configuración. |
+| Internet | Sin conexión te avisa con el sonido de error. |
 
 <img src="docs/readme/divider-6.svg" width="100%" alt="">
 
@@ -325,6 +360,9 @@ return {
         visualizer       = true,       -- barras de frecuencia en los audios
         screenshot_dir   = "",         -- "" = ~/Imágenes/Capyro
         backend          = "auto",     -- "auto", "x11" o "wayland"
+        splash           = true,       -- pantalla de carga al abrir
+        startup_sound    = true,       -- sonido de inicio
+        update_repo      = "",         -- "" = el repo del que lo compilaste
     },
 }
 ```
@@ -340,6 +378,7 @@ las acciones de teclado están comentadas en [`config/capyro.lua`](config/capyro
 | Configuración | `~/.config/capyro/capyro.lua` (o la ruta en `CAPYRO_CONFIG`) |
 | Sesión (lista, posición, volumen, efectos) | `~/.local/state/capyro/session.lua` |
 | Capturas | `~/Imágenes/Capyro` (tu carpeta de Imágenes de `xdg-user-dirs`) |
+| Actualizaciones (código, compilación y `update.log`) | `~/.cache/capyro/` (se puede borrar) |
 
 Sin archivo de configuración usa la que trae adentro del binario. Si el archivo tiene un
 error, te avisa en la terminal y usa la de adentro.
@@ -383,6 +422,19 @@ Tu Rust es viejo. Instalá [rustup](https://rustup.rs) y corré `rustup default 
 
 Faltan las librerías de desarrollo de FFmpeg (los paquetes `-dev` / `-devel`). Revisá los
 comandos de tu distro en [Instalación](#instalación).
+</details>
+
+<details>
+<summary><b>"Buscar actualizaciones" falla</b></summary>
+
+| Mensaje | Qué hacer |
+|---|---|
+| *Sin conexión* | Revisá internet. Capyro necesita llegar a GitHub. |
+| *No encontré el repo* | El repo es privado o la URL está mal. Revisá `update_repo` en la configuración. |
+| *No sé de qué repo bajar* | Lo compilaste desde un `.zip`: poné `update_repo = "usuario/capyro"`. |
+| *Necesita git / cmake / cargo* | Instalá lo que falte. Si usás rustup y abrís Capyro desde el menú, igual busca en `~/.cargo/bin`. |
+| *Falló la compilación* | El detalle completo está en `~/.cache/capyro/update.log`. |
+| *No hay agente de polkit* | Tu escritorio no tiene quién pida la contraseña (en Niri/Hyprland: `polkit-gnome`, `lxqt-policykit` o `hyprpolkitagent`). O instalá Capyro en `~/.local`. |
 </details>
 
 <details>
@@ -443,7 +495,10 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
 - **La lista vive en el núcleo**: orden, aleatorio y repetir se deciden en C. La GUI solo
   muestra y manda comandos.
 - **Frontera C ↔ Rust segura**: `CapyroCore` es opaco, los enums viajan como `int`, todo el
-  `unsafe` está en `gui/src/ffi.rs` y ningún `panic` cruza hacia C.
+  `unsafe` de la interfaz está en `gui/src/ffi.rs` y ningún `panic` cruza hacia C.
+- **El binario sabe de dónde salió**: en cada compilación `cmake/buildinfo.cmake` guarda el
+  commit, el repo y el prefijo de instalación (`capyro --version` los muestra). El
+  actualizador (`gui/src/updater.rs`) corre en su propio hilo y compara ese commit con el del repo.
 </details>
 
 <details>
@@ -452,6 +507,7 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
 ```
 capyro/
 ├── CMakeLists.txt            # build principal (trae Corrosion)
+├── cmake/buildinfo.cmake     # guarda el commit de git en cada build
 ├── core/                     # ── núcleo en C ──
 │   ├── include/capyro_core.h #    API pública (lo único que ve Rust)
 │   └── src/
@@ -459,6 +515,7 @@ capyro/
 │       ├── player.c          #    FFmpeg + miniaudio: hilos, colas, reloj
 │       ├── dsp.c/.h          #    efectos de audio (EQ, estéreo, modo noche)
 │       ├── sfx.c             #    sonidos de la app (decodifica desde memoria)
+│       ├── buildinfo.c       #    commit y prefijo del build (para actualizar)
 │       ├── platform.c/.h     #    hilos y mutex (pthreads)
 │       ├── internal.h        #    estructuras internas
 │       ├── miniaudio_impl.c  #    implementación de miniaudio
@@ -471,12 +528,13 @@ capyro/
 │       ├── ffi.rs            #    bindings seguros al núcleo
 │       ├── viz.rs            #    visualizador (FFT propia)
 │       ├── session.rs        #    guardar / retomar la sesión
+│       ├── updater.rs        #    buscar, compilar e instalar actualizaciones
 │       ├── config.rs         #    lectura de capyro.lua (mlua)
 │       ├── formats.rs        #    resúmenes de cada formato
 │       ├── icons.rs          #    íconos dibujados a mano
 │       └── theme.rs          #    colores y fuentes
 ├── config/capyro.lua         # configuración por defecto
-├── assets/                   # logo + sounds/ (el capibara y el error)
+├── assets/                   # logo + sounds/ (capibaras, error, inicio, actualización)
 ├── packaging/capyro.desktop  # lanzador para Linux
 ├── tests/                    # pruebas del núcleo
 └── docs/                     # capturas e ilustraciones de este README
@@ -488,7 +546,7 @@ capyro/
 
 ```sh
 ctest --test-dir build --output-on-failure   # núcleo en C
-cd gui && cargo test                         # config, sesión y visualizador
+cd gui && cargo test                         # config, sesión, visualizador y actualizador
 ```
 
 `ctest` genera archivos en **todos los formatos** con `ffmpeg` y prueba el núcleo de punta

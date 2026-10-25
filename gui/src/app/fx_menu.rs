@@ -204,7 +204,7 @@ impl CapyroApp {
         let interactive = self.show_fx && t > 0.6;
 
         let mut painter = ui.painter().clone();
-        painter.set_opacity(ease);
+        painter.multiply_opacity(ease);
         if interactive {
             let outside = ui.interact(ui.max_rect(), Id::unique("capyro-fx-outside"), Sense::click());
             if outside.clicked() {

@@ -9,6 +9,7 @@ mod config;
 mod ffi;
 mod formats;
 mod session;
+mod updater;
 mod viz;
 mod icons;
 mod theme;

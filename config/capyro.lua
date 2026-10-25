@@ -70,6 +70,14 @@ local options = {
     remember_session = true,   -- al abrir, retomar la lista, el archivo y la posición
     visualizer       = true,   -- barras de frecuencia mientras suena un audio
     screenshot_dir   = "",     -- "" = Imágenes/Capyro; o una ruta, ej. "~/Capturas"
+    splash           = true,   -- pantalla de "Cargando" al abrir (con animación)
+    startup_sound    = true,   -- sonido de inicio cuando termina de cargar
+
+    -- Actualizaciones (menú ⓘ → "Buscar actualizaciones").
+    -- Vacío = el repo de git desde el que se compiló Capyro. Si lo compilaste
+    -- desde un .zip, poné el tuyo: "usuario/Capyro" o la URL completa.
+    update_repo   = "",
+    update_branch = "",        -- vacío = la rama principal del repo
 
     -- Solo Linux: "auto", "x11" o "wayland" (hay que reabrir Capyro).
     -- En Wayland nativo todavía no se pueden arrastrar archivos a la ventana

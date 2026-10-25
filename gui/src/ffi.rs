@@ -40,6 +40,38 @@ impl AudioFx {
     }
 }
 
+/// Debe coincidir con `CapyroBuildInfo` de capyro_core.h.
+#[repr(C)]
+struct RawBuildInfo {
+    commit: *const c_char,
+    branch: *const c_char,
+    remote: *const c_char,
+    subject: *const c_char,
+    commit_time: i64,
+    dirty: bool,
+    prefix: *const c_char,
+    bindir: *const c_char,
+    build_type: *const c_char,
+    dist: bool,
+    native: bool,
+}
+
+/// De qué commit sale este binario y dónde se instala (lo usa el actualizador).
+#[derive(Debug, Clone, Default)]
+pub struct BuildInfo {
+    pub commit: String,
+    pub branch: String,
+    pub remote: String,
+    pub subject: String,
+    pub commit_time: i64,
+    pub dirty: bool,
+    pub prefix: String,
+    pub bindir: String,
+    pub build_type: String,
+    pub dist: bool,
+    pub native: bool,
+}
+
 /// Debe coincidir con `CapyroVideoFrame` de capyro_core.h.
 #[repr(C)]
 struct RawVideoFrame {
@@ -62,6 +94,7 @@ pub struct VideoFrame<'a> {
 
 extern "C" {
     fn capyro_core_version() -> *const c_char;
+    fn capyro_core_build_info() -> *const RawBuildInfo;
     fn capyro_core_supported_video() -> *const c_char;
     fn capyro_core_supported_audio() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
@@ -188,6 +221,24 @@ pub fn supported_audio() -> Vec<String> {
 
 fn split_exts(list: String) -> Vec<String> {
     list.split(',').map(|e| e.trim().to_owned()).filter(|e| !e.is_empty()).collect()
+}
+
+pub fn build_info() -> BuildInfo {
+    // SAFETY: devuelve un puntero a un struct estático con literales.
+    let raw = unsafe { &*capyro_core_build_info() };
+    BuildInfo {
+        commit: cstr_to_string(raw.commit),
+        branch: cstr_to_string(raw.branch),
+        remote: cstr_to_string(raw.remote),
+        subject: cstr_to_string(raw.subject),
+        commit_time: raw.commit_time,
+        dirty: raw.dirty,
+        prefix: cstr_to_string(raw.prefix),
+        bindir: cstr_to_string(raw.bindir),
+        build_type: cstr_to_string(raw.build_type),
+        dist: raw.dist,
+        native: raw.native,
+    }
 }
 
 pub fn version() -> String {
