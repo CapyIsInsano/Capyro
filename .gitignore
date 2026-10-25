@@ -1,0 +1,5 @@
+/build/
+/gui/target/
+compile_commands.json
+*.o
+*.a
