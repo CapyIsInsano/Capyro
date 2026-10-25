@@ -94,6 +94,16 @@ static void test_basics(void) {
     remove("capyro_test_vacio.mp3");
 }
 
+static bool exists(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+        return true;
+    }
+    printf("SALTEO: no está %s (tu ffmpeg no pudo generarlo)\n", path);
+    return false;
+}
+
 static void test_media(const char *dir) {
     char tone[1024], cover[1024], clip[1024];
     snprintf(tone, sizeof(tone), "%s/tono.mp3", dir);
@@ -107,13 +117,16 @@ static void test_media(const char *dir) {
     }
     printf("backend de audio: \"%s\"\n", capyro_core_audio_backend(core));
 
+    bool has_tone = exists(tone), has_cover = exists(cover), has_clip = exists(clip);
+    CapyroVideoFrame vf;
+
     /* --- mp3: duración, metadatos, reproducción, seek, fin --- */
+    if (has_tone) {
     CHECK(capyro_core_open(core, tone) == CAPYRO_OK);
     CHECK(capyro_core_get_media_kind(core) == CAPYRO_MEDIA_AUDIO);
     CHECK(NEAR(capyro_core_get_duration(core), 3.0, 0.15));
     CHECK(strcmp(capyro_core_get_title(core), "Tono de prueba") == 0);
     CHECK(strcmp(capyro_core_get_artist(core), "Capyro") == 0);
-    CapyroVideoFrame vf;
     CHECK(!capyro_core_lock_video_frame(core, &vf)); /* sin carátula */
 
     capyro_core_play(core);
@@ -140,8 +153,10 @@ static void test_media(const char *dir) {
     capyro_core_stop(core);
     CHECK(capyro_core_get_state(core) == CAPYRO_STATE_STOPPED);
     CHECK(capyro_core_get_position(core) == 0.0);
+    }
 
     /* --- mp3 con carátula --- */
+    if (has_cover) {
     CHECK(capyro_core_open(core, cover) == CAPYRO_OK);
     CHECK(capyro_core_get_media_kind(core) == CAPYRO_MEDIA_AUDIO);
     if (capyro_core_lock_video_frame(core, &vf)) {
@@ -149,6 +164,12 @@ static void test_media(const char *dir) {
         capyro_core_unlock_video_frame(core);
     } else {
         CHECK(!"la carátula debería verse como frame");
+    }
+    }
+
+    if (!has_clip) {
+        capyro_core_shutdown(core);
+        return;
     }
 
     /* --- mp4: primer frame visible sin play, frames nuevos al reproducir --- */
@@ -194,7 +215,7 @@ static void test_media(const char *dir) {
     /* --- auto_next: al terminar el mp4 pasa al siguiente de la lista --- */
     capyro_core_playlist_clear(core);
     CHECK(capyro_core_playlist_add(core, clip) == CAPYRO_OK);
-    CHECK(capyro_core_playlist_add(core, tone) == CAPYRO_OK);
+    CHECK(capyro_core_playlist_add(core, has_tone ? tone : clip) == CAPYRO_OK);
     CHECK(capyro_core_playlist_select(core, 0) == CAPYRO_OK);
     capyro_core_seek(core, 1.7);
     capyro_core_play(core);

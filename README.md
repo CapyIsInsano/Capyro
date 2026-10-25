@@ -132,7 +132,7 @@ y [rustup](https://rustup.rs/) con `rustup default stable-x86_64-pc-windows-gnu`
 ## Compilar
 
 ```sh
-git clone https://github.com/CapyIsInsano/Capyro.git
+git clone https://github.com/CapyIsInsano/capyro.git
 cd capyro
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
@@ -249,10 +249,14 @@ ctest --test-dir build --output-on-failure   # núcleo en C
 cd gui && cargo test                         # parser de config Lua y de atajos
 ```
 
-Si está el `ffmpeg` de línea de comandos, CMake genera un mp3, un mp3 con carátula y un mp4
-de prueba, y `ctest` prueba de punta a punta: duración, metadatos, reproducción, pausa,
+Si está el `ffmpeg` de línea de comandos, `ctest` genera primero un mp3, un mp3 con carátula
+y un mp4 de prueba (nunca durante el build) y después prueba de punta a punta: duración, metadatos, reproducción, pausa,
 seek (también en pausa), fin del archivo, carátula, frames de video y paso automático al
 siguiente. Sin `ffmpeg` solo corren las pruebas que no decodifican.
+
+Para generar los mp3 de prueba tu `ffmpeg` necesita un encoder de mp3 (LAME); si no lo
+tiene, esas pruebas se saltean. En Gentoo se activa con el USE `lame` de
+`media-video/ffmpeg`. Para *reproducir* mp3 no hace falta: el decoder viene con FFmpeg.
 
 Sin placa de sonido (un contenedor, CI) miniaudio usa su backend *Null*, que consume
 audio en tiempo real, así que las pruebas igual valen. El núcleo también se probó con

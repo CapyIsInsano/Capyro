@@ -51,28 +51,16 @@ if(CAPYRO_BUILD_TESTS)
     endif()
 
     # Media de prueba generada con el ffmpeg de línea de comandos (opcional).
+    # Se genera al correr ctest, nunca durante el build.
     find_program(FFMPEG_EXECUTABLE ffmpeg)
     if(FFMPEG_EXECUTABLE)
         set(TEST_MEDIA ${CMAKE_CURRENT_BINARY_DIR}/test-media)
-        set(FF ${FFMPEG_EXECUTABLE} -hide_banner -loglevel error -y)
-        add_custom_command(
-            OUTPUT ${TEST_MEDIA}/tono.mp3 ${TEST_MEDIA}/caratula.mp3 ${TEST_MEDIA}/clip.mp4
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${TEST_MEDIA}
-            COMMAND ${FF} -f lavfi -i sine=frequency=440:duration=3
-                    -metadata title=Tono\ de\ prueba -metadata artist=Capyro
-                    ${TEST_MEDIA}/tono.mp3
-            COMMAND ${FF} -f lavfi -i color=c=orange:s=64x64 -frames:v 1 ${TEST_MEDIA}/caratula.png
-            COMMAND ${FF} -f lavfi -i sine=frequency=330:duration=2 -i ${TEST_MEDIA}/caratula.png
-                    -map 0:a -map 1:v -c:v mjpeg -disposition:v attached_pic -id3v2_version 3
-                    ${TEST_MEDIA}/caratula.mp3
-            COMMAND ${FF} -f lavfi -i testsrc=size=320x240:rate=25:duration=2
-                    -f lavfi -i sine=frequency=550:duration=2
-                    -c:v mpeg4 -q:v 5 -c:a aac -shortest
-                    ${TEST_MEDIA}/clip.mp4
-            COMMENT "Generando media de prueba con ffmpeg"
-            VERBATIM)
-        add_custom_target(test_media ALL DEPENDS ${TEST_MEDIA}/clip.mp4)
+        add_test(NAME generar_media
+            COMMAND ${CMAKE_COMMAND} -DFFMPEG=${FFMPEG_EXECUTABLE} -DOUT=${TEST_MEDIA}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gen_media.cmake)
+        set_tests_properties(generar_media PROPERTIES FIXTURES_SETUP media)
         add_test(NAME core COMMAND test_core ${TEST_MEDIA} WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+        set_tests_properties(core PROPERTIES FIXTURES_REQUIRED media)
     else()
         message(STATUS "Capyro: no encontré ffmpeg (CLI); las pruebas no van a decodificar")
         add_test(NAME core COMMAND test_core WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
