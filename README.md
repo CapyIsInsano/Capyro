@@ -132,7 +132,7 @@ y [rustup](https://rustup.rs/) con `rustup default stable-x86_64-pc-windows-gnu`
 ## Compilar
 
 ```sh
-git clone https://github.com/TU_USUARIO/capyro.git
+git clone https://github.com/CapyIsInsano/Capyro.git
 cd capyro
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
