@@ -37,6 +37,8 @@ extern "C" {
     fn capyro_core_supported_audio() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
     fn capyro_core_update(core: *mut CapyroCore);
+    fn capyro_core_sfx_load(core: *mut CapyroCore, slot: c_int, data: *const u8, size: usize) -> c_int;
+    fn capyro_core_sfx_play(core: *mut CapyroCore, slot: c_int);
     fn capyro_core_set_speed(core: *mut CapyroCore, speed: f64);
     fn capyro_core_get_speed(core: *mut CapyroCore) -> f64;
     fn capyro_core_set_repeat(core: *mut CapyroCore, mode: c_int);
@@ -179,6 +181,13 @@ impl Core {
     }
     pub fn set_auto_next(&self, enabled: bool) {
         unsafe { capyro_core_set_auto_next(self.ptr, enabled) }
+    }
+    /// Decodifica un efecto de sonido (archivo entero en memoria) en `slot`.
+    pub fn sfx_load(&self, slot: usize, data: &[u8]) -> Result<(), CoreError> {
+        check(unsafe { capyro_core_sfx_load(self.ptr, slot as c_int, data.as_ptr(), data.len()) })
+    }
+    pub fn sfx_play(&self, slot: usize) {
+        unsafe { capyro_core_sfx_play(self.ptr, slot as c_int) }
     }
     pub fn speed(&self) -> f64 {
         unsafe { capyro_core_get_speed(self.ptr) }

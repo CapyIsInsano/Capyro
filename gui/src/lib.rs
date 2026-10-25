@@ -7,6 +7,7 @@
 mod app;
 mod config;
 mod ffi;
+mod formats;
 mod icons;
 mod theme;
 

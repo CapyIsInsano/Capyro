@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.2.3
+    VERSION 0.2.4
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -38,7 +38,7 @@ add_subdirectory(gui)
 
 # --- ejecutable final ---------------------------------------------------
 add_executable(capyro core/src/main.c)
-target_link_libraries(capyro PRIVATE capyro_core capyro_gui)
+target_link_libraries(capyro PRIVATE capyro_gui capyro_core)
 
 # --- pruebas ------------------------------------------------------------
 if(CAPYRO_BUILD_TESTS)

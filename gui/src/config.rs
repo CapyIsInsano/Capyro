@@ -78,6 +78,8 @@ pub struct Config {
     pub bindings: Vec<Binding>,
     pub seek_step: f64,
     pub volume_step: f32,
+    /// Paso por muesca de la rueda sobre el ícono de volumen.
+    pub wheel_step: f32,
     pub start_volume: f32,
     pub accent: Color32,
     pub auto_next: bool,
@@ -140,6 +142,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         bindings: Vec::new(),
         seek_step: 5.0,
         volume_step: 0.05,
+        wheel_step: 0.05,
         start_volume: 1.0,
         accent: Color32::from_rgb(0xFF, 0x74, 0x17),
         auto_next: true,
@@ -172,6 +175,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<f64>>("volume_step")? {
             cfg.volume_step = (v as f32 / 100.0).clamp(0.01, 1.0);
+        }
+        if let Some(v) = opts.get::<Option<f64>>("wheel_step")? {
+            cfg.wheel_step = (v as f32 / 100.0).clamp(0.01, 0.25);
         }
         if let Some(v) = opts.get::<Option<f64>>("start_volume")? {
             cfg.start_volume = (v as f32 / 100.0).clamp(0.0, 1.0);

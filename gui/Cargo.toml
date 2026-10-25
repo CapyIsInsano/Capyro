@@ -1,6 +1,6 @@
 [package]
 name = "capyro_gui"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 rust-version = "1.95"
 description = "Interfaz gráfica de Capyro (egui) — se compila como staticlib y se linkea al núcleo en C"

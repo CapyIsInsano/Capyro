@@ -6,7 +6,7 @@
 <p align="center"><b>Just press play.</b></p>
 
 <p align="center">
-  Reproductor multimedia liviano para <b>Linux</b>: video <code>mp4</code> y <code>mov</code>, audio <code>mp3</code>, <code>wav</code> y <code>ogg</code>.<br>
+  Reproductor multimedia liviano para <b>Linux</b>: video <code>mp4</code>, <code>mov</code> y <code>avi</code>; audio <code>mp3</code>, <code>wav</code>, <code>ogg</code> y <code>aac</code>.<br>
   Núcleo en <b>C</b> · interfaz en <b>Rust</b> · compilado con <b>CMake</b> · configurable en <b>Lua</b>.
 </p>
 
@@ -16,7 +16,7 @@
 
 ---
 
-## Estado: `v0.2.3-alpha`
+## Estado: `v0.2.4-alpha`
 
 Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **aleatorio** y
 **repetir**, **velocidad** de 0.5× a 2× sin cambiar el tono, y animaciones en los botones.
@@ -30,7 +30,7 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
 
 | Funciona ✅ | Pendiente 🚧 |
 |---|---|
-| Video `.mp4` `.mov` y audio `.mp3` `.wav` `.ogg` (FFmpeg + miniaudio) | Subtítulos |
+| Video `.mp4` `.mov` `.avi` y audio `.mp3` `.wav` `.ogg` `.aac` (FFmpeg + miniaudio) | Subtítulos |
 | Botón **+ Agregar archivo(s)** con el selector de archivos del sistema | Arrastrar archivos en Wayland nativo (limitación de winit) |
 | Video sincronizado con el audio (el audio es el reloj maestro) | Más opciones en el menú de ajustes |
 | Seek preciso (clic/arrastre en la barra, flechas) | Aceleración por hardware (VA-API) |
@@ -38,7 +38,8 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
 | Lista con aleatorio, repetir (lista / uno) y paso automático | Otras plataformas (más adelante) |
 | Velocidad 0.5×–2× sin cambiar el tono (menú ⚙ o `[` `]`) | |
 | Botones animados (hover, clic, transiciones) | |
-| Menú ⓘ con la versión y los formatos soportados | |
+| Menú ⓘ con la versión y un resumen de cada formato | |
+| Sonidos: capibara al tocar el logo, aviso de error | |
 | Volumen, silencio, pausa, stop, pantalla completa | |
 | Atajos y opciones en `capyro.lua` (recarga en caliente) | |
 | Sigue andando sin placa de sonido (reloj de pared, sin audio) | |
@@ -197,9 +198,14 @@ capyro --version
   quitarlo. Si quitás el que está sonando, sigue con el próximo.
 - **Clic** en el área de video: play/pausa. **Doble clic**: pantalla completa.
 - **Barra de progreso**: clic o arrastrar para saltar.
-- **Volumen**: clic para silenciar, rueda del mouse encima para subir/bajar.
+- **Volumen**: clic para silenciar, rueda del mouse encima para subir/bajar (un paso por
+  muesca, configurable con `wheel_step`).
 - **ⓘ Acerca de** (arriba de "Lista"): versión de Capyro, formatos soportados y backend de
-  audio en uso.
+  audio en uso. Tocá un formato para ver un resumen; solo se abre uno a la vez y tocarlo de
+  nuevo lo cierra.
+- **Logo**: tocalo y suena un capibara (uno de tres, al azar).
+- Si intentás abrir un archivo no soportado o tocás subtítulos (todavía no disponibles),
+  suena un aviso de error. Los sonidos siguen el volumen y el silencio generales.
 - **⚙ Ajustes**: velocidad (0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×) y recargar `capyro.lua` sin
   reiniciar. Se cierra con un clic afuera o `Esc`.
 - **Header**: arrastrar para mover, doble clic para maximizar. Los bordes redimensionan.
@@ -253,7 +259,8 @@ return {
     },
     options = {
         seek_step    = 10,         -- segundos
-        volume_step  = 5,          -- %
+        volume_step  = 5,          -- % por tecla
+        wheel_step   = 5,          -- % por muesca de la rueda sobre el volumen
         start_volume = 80,         -- %
         auto_next    = true,       -- pasar al siguiente al terminar
         speed        = 1.0,        -- velocidad inicial (0.5 .. 2.0)
@@ -280,12 +287,13 @@ cd gui && cargo test                         # parser de config Lua y de atajos
 ```
 
 Si está el `ffmpeg` de línea de comandos, `ctest` genera primero archivos de prueba en todos
-los formatos (mp3, mp3 con carátula, wav, ogg, mp4 y mov; nunca durante el build) y después
+los formatos (mp3, mp3 con carátula, wav, ogg, aac, mp4, mov y avi; nunca durante el build) y después
 prueba de punta a punta: duración, metadatos, reproducción, pausa,
 seek (también en pausa), fin del archivo, carátula, frames de video, paso automático al
 siguiente, velocidad (0.5× y 2×), repetir lista/uno, aleatorio sin repetidos y quitar
 archivos de la lista (incluido el que está sonando). También verifica que al repetir un
-archivo el audio vuelva a sonar (el bug de la v0.2.2). Sin `ffmpeg` solo corren las pruebas que no decodifican.
+archivo el audio vuelva a sonar (el bug de la v0.2.2) y que los efectos de sonido se
+decodifiquen desde memoria y se mezclen. Sin `ffmpeg` solo corren las pruebas que no decodifican.
 
 Para generar los mp3 de prueba tu `ffmpeg` necesita un encoder de mp3 (LAME); si no lo
 tiene, esas pruebas se saltean. En Gentoo se activa con el USE `lame` de
@@ -307,6 +315,7 @@ capyro/
 │   └── src/
 │       ├── core.c            #    API, transporte, lista de reproducción
 │       ├── player.c          #    FFmpeg + miniaudio: hilos, colas, reloj
+│       ├── sfx.c             #    efectos de sonido (decodifica desde memoria)
 │       ├── platform.c/.h     #    hilos y mutex (pthreads)
 │       ├── internal.h        #    estructuras internas
 │       ├── miniaudio_impl.c  #    implementación de miniaudio
@@ -319,9 +328,10 @@ capyro/
 │       ├── app.rs            #    layout y lógica de la UI
 │       ├── icons.rs          #    íconos dibujados a mano
 │       ├── theme.rs          #    colores y fuentes
-│       └── config.rs         #    lectura de capyro.lua (mlua)
+│       ├── config.rs         #    lectura de capyro.lua (mlua)
+│       └── formats.rs        #    resúmenes de cada formato (menú ⓘ)
 ├── config/capyro.lua         # configuración por defecto
-├── assets/                   # logo en 128/256/512 px
+├── assets/                   # logo en 128/256/512 px + sounds/ (efectos)
 ├── packaging/capyro.desktop  # lanzador para Linux
 ├── tests/                    # test_core.c + gen_media.cmake
 └── docs/                     # capturas para este README
@@ -336,6 +346,7 @@ capyro/
 - [x] Frames de video → textura en egui, sincronizados con el audio
 - [x] Carátulas y metadatos
 - [x] wav, ogg y mov
+- [x] avi y aac, resúmenes de formatos, efectos de sonido
 - [x] Paso automático al siguiente de la lista
 - [x] Aleatorio y repetir (lista / uno)
 - [x] Menú de ajustes con velocidad de reproducción

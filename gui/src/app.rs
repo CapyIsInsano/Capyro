@@ -25,6 +25,16 @@ use crate::theme::{self, *};
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_128.png");
 const ICON_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_256.png");
 
+/// Slots de efectos: 0..=2 capibara (logo), 3 error.
+const SOUNDS: [&[u8]; 4] = [
+    include_bytes!("../../assets/sounds/capybara1.mp3"),
+    include_bytes!("../../assets/sounds/capybara2.mp3"),
+    include_bytes!("../../assets/sounds/capybara3.mp3"),
+    include_bytes!("../../assets/sounds/error.mp3"),
+];
+const SFX_CAPYBARAS: usize = 3;
+const SFX_ERROR: usize = 3;
+
 /// Distancias desde el borde inferior del área de video (según el mockup).
 const TRACK_Y: f32 = 14.0;
 const TIMES_Y: f32 = 34.0;
@@ -106,6 +116,18 @@ pub struct CapyroApp {
     info_rect: Rect,
     /// Formatos que acepta el núcleo, en minúscula: (video, audio).
     formats: (Vec<String>, Vec<String>),
+    /// Formato cuyo resumen está abierto en el menú ⓘ (uno a la vez).
+    info_format: Option<String>,
+    /// Rueda sobre el volumen: fracciones de "muesca" acumuladas.
+    wheel_acc: f32,
+    /// Cuándo se tocó el logo (para el rebote) y último sonido que sonó.
+    logo_click: Option<f64>,
+    last_capy: usize,
+    rng: u64,
+    /// egui puede correr más de una pasada por frame con la MISMA entrada
+    /// (pasadas de "medición"); lo que lee eventos crudos solo corre en la primera.
+    last_frame: u64,
+    first_pass: bool,
 }
 
 fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -180,6 +202,12 @@ impl CapyroApp {
             cc.egui_ctx.load_texture("capyro-logo", img, TextureOptions::LINEAR)
         });
 
+        // Efectos de sonido embebidos en el binario (se decodifican en el núcleo).
+        for (slot, data) in SOUNDS.iter().enumerate() {
+            if let Err(e) = core.sfx_load(slot, data) {
+                eprintln!("capyro: no se pudo cargar el sonido {slot}: {}", e.0);
+            }
+        }
         core.set_volume(cfg.start_volume);
         core.set_auto_next(cfg.auto_next);
         core.set_speed(cfg.start_speed);
@@ -211,7 +239,34 @@ impl CapyroApp {
             show_info: false,
             info_rect: Rect::NOTHING,
             formats: (ffi::supported_video(), ffi::supported_audio()),
+            info_format: None,
+            wheel_acc: 0.0,
+            logo_click: None,
+            last_capy: usize::MAX,
+            last_frame: u64::MAX,
+            first_pass: true,
+            rng: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64 | 1)
+                .unwrap_or(0x9E37_79B9_7F4A_7C15),
         }
+    }
+
+    /// Uno de los tres sonidos de capibara, al azar (sin repetir el anterior).
+    fn play_capybara(&mut self) {
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 7;
+        self.rng ^= self.rng << 17;
+        let mut pick = (self.rng % SFX_CAPYBARAS as u64) as usize;
+        if pick == self.last_capy {
+            pick = (pick + 1) % SFX_CAPYBARAS;
+        }
+        self.last_capy = pick;
+        self.core.sfx_play(pick);
+    }
+
+    fn play_error(&self) {
+        self.core.sfx_play(SFX_ERROR);
     }
 
     fn toast(&mut self, ctx: &egui::Context, text: impl Into<String>, error: bool) {
@@ -342,6 +397,7 @@ impl CapyroApp {
             }
         }
         if let Some(first) = errors.first() {
+            self.play_error();
             let more = if errors.len() > 1 {
                 format!(" (+{} más)", errors.len() - 1)
             } else {
@@ -416,9 +472,12 @@ impl CapyroApp {
     }
 
     fn handle_input(&mut self, ctx: &egui::Context) {
-        // Archivos soltados sobre la ventana.
-        let dropped: Vec<PathBuf> =
-            ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        // Archivos soltados sobre la ventana (una sola vez por frame).
+        let dropped: Vec<PathBuf> = if !self.first_pass {
+            Vec::new()
+        } else {
+            ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect())
+        };
         if !dropped.is_empty() {
             self.add_paths(ctx, dropped, true);
         }
@@ -499,11 +558,29 @@ impl CapyroApp {
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }
 
+        // Logo: al tocarlo suena un capibara y rebota.
         let logo_rect = Rect::from_min_size(rect.min, vec2(46.0, 46.0));
+        let logo_btn = animate_button(ui, Id::unique("capyro-logo"), logo_rect, true);
+        let now = ctx.input(|i| i.time);
+        if logo_btn.resp.clicked() {
+            self.play_capybara();
+            self.logo_click = Some(now);
+        }
+        let mut bounce = 0.0;
+        if let Some(t0) = self.logo_click {
+            let dt = (now - t0) as f32;
+            if dt < 0.7 {
+                bounce = (-dt * 7.0).exp() * (dt * 22.0).sin();
+                ctx.request_repaint();
+            } else {
+                self.logo_click = None;
+            }
+        }
+        let logo_scale = 1.0 + 0.05 * logo_btn.hover - 0.08 * logo_btn.press + 0.14 * bounce;
         if let Some(logo) = &self.logo {
             painter.image(
                 logo.id(),
-                logo_rect,
+                Rect::from_center_size(logo_rect.center(), logo_rect.size() * logo_scale),
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
@@ -1065,11 +1142,33 @@ impl CapyroApp {
         if vol.resp.clicked() {
             self.toggle_mute(&ctx);
         }
-        if vol.resp.hovered() {
-            let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
-            if scroll.abs() > 0.5 {
-                self.change_volume(&ctx, scroll.signum() * self.cfg.volume_step);
+        // Rueda: un paso por "muesca". Antes se usaba el scroll suavizado, que
+        // reparte una muesca en muchos frames y cada frame bajaba un paso
+        // entero: una sola muesca se comía casi todo el volumen.
+        // (Solo en la primera pasada del frame: egui a veces repite la pasada
+        // con la misma entrada, p. ej. al mostrar un tooltip, y se contaba doble.)
+        if vol.resp.hovered() && self.first_pass {
+            let notches: f32 = ctx.input(|i| {
+                i.events
+                    .iter()
+                    .map(|e| match e {
+                        egui::Event::MouseWheel { unit, delta, .. } => match unit {
+                            egui::MouseWheelUnit::Line => delta.y,
+                            egui::MouseWheelUnit::Point => delta.y / 50.0, // touchpad
+                            egui::MouseWheelUnit::Page => delta.y * 4.0,
+                        },
+                        _ => 0.0,
+                    })
+                    .sum()
+            });
+            self.wheel_acc += notches;
+            let steps = self.wheel_acc.trunc();
+            if steps != 0.0 {
+                self.wheel_acc -= steps;
+                self.change_volume(&ctx, steps * self.cfg.wheel_step);
             }
+        } else if !vol.resp.hovered() {
+            self.wheel_acc = 0.0;
         }
         if vol.hover > 0.001 {
             let label = if muted {
@@ -1090,6 +1189,10 @@ impl CapyroApp {
         let subs_c = pos2(right - 64.0, by);
         let subs = Self::icon_button(ui, "subtitles", subs_c, 26.0);
         icons::subtitles(&painter, subs_c, 16.0 * subs.scale(), subs.tint(ICON_DIM, Color32::WHITE));
+        if subs.resp.clicked() {
+            self.play_error();
+            self.toast(&ctx, "Los subtítulos todavía no están disponibles", true);
+        }
         subs.resp.on_hover_text("Subtítulos — próximamente");
 
         // engranaje: abre el menú de ajustes (y gira un poco al pasar el mouse)
@@ -1122,11 +1225,49 @@ impl CapyroApp {
         let ctx = ui.ctx().clone();
         let t = ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, 0.15);
         if t <= 0.001 {
+            self.info_format = None; // al volver a abrirlo arranca sin resumen abierto
             return;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(286.0, 196.0);
+        let width = 312.0;
+        let inner_w = width - 28.0;
+        let base_h = 196.0;
+
+        // --- resúmenes (acordeón): se calcula antes para saber el alto total ---
+        // Cada formato tiene su propia animación; como solo uno puede estar
+        // abierto, al cambiar de MP4 a MP3 uno se cierra mientras el otro se abre.
+        let formats = self.formats.clone();
+        let all: Vec<(String, bool)> = formats
+            .0
+            .iter()
+            .map(|e| (e.clone(), true))
+            .chain(formats.1.iter().map(|e| (e.clone(), false)))
+            .collect();
+        let mut cards = Vec::new();
+        let mut region_h = 0.0;
+        for (ext, is_video) in &all {
+            let open = self.info_format.as_deref() == Some(ext.as_str());
+            let k = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-open", ext.as_str())), open, 0.22);
+            if k <= 0.001 {
+                continue;
+            }
+            let k = 1.0 - (1.0 - k).powi(3);
+            let info = crate::formats::info(ext);
+            let kind = if *is_video { "Video" } else { "Audio" };
+            let title = ui.painter().layout_no_wrap(
+                format!("{} · {}", ext.to_uppercase(), info.name),
+                bold(12.0),
+                TEXT,
+            );
+            let kind_g = ui.painter().layout_no_wrap(kind.to_owned(), regular(10.5), TEXT_FAINT);
+            let body = ui.painter().layout(info.summary.to_owned(), regular(11.5), TEXT_DIM, inner_w - 20.0);
+            let card_h = 10.0 + title.size().y + 5.0 + body.size().y + 10.0;
+            region_h += (card_h + 8.0) * k;
+            cards.push((k, card_h, title, kind_g, body));
+        }
+
+        let size = vec2(width, base_h + region_h);
         let anchor = pos2(self.info_rect.left() - 6.0, self.info_rect.top() - 10.0);
         let full = Rect::from_min_size(pos2(anchor.x, anchor.y - size.y), size);
         let grown = size * (0.85 + 0.15 * ease);
@@ -1152,28 +1293,28 @@ impl CapyroApp {
 
         let x0 = panel.left() + 14.0;
         let x1 = panel.right() - 14.0;
-        let mut y = panel.top() + 14.0;
+        let top = panel.top();
 
         // encabezado: logo + nombre + versión
-        let logo_rect = Rect::from_min_size(pos2(x0, y), vec2(40.0, 40.0));
+        let logo_rect = Rect::from_min_size(pos2(x0, top + 14.0), vec2(40.0, 40.0));
         if let Some(logo) = &self.logo {
             painter.image(logo.id(), logo_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
         let tx = logo_rect.right() + 10.0;
-        let name = painter.text(pos2(tx, y + 11.0), Align2::LEFT_CENTER, "Capyro", bold(15.0), TEXT);
-        let ver = format!("v{}", ffi::version());
-        let g = painter.layout_no_wrap(ver, bold(11.0), accent);
-        let chip = Rect::from_min_size(pos2(name.right() + 8.0, y + 11.0 - g.size().y / 2.0 - 3.0), g.size() + vec2(12.0, 6.0));
+        let name = painter.text(pos2(tx, top + 25.0), Align2::LEFT_CENTER, "Capyro", bold(15.0), TEXT);
+        let g = painter.layout_no_wrap(format!("v{}", ffi::version()), bold(11.0), accent);
+        let chip = Rect::from_min_size(pos2(name.right() + 8.0, top + 25.0 - g.size().y / 2.0 - 3.0), g.size() + vec2(12.0, 6.0));
         painter.rect_filled(chip, chip.height() / 2.0, accent.gamma_multiply(0.16));
         painter.galley(chip.center() - g.size() / 2.0, g, accent);
-        painter.text(pos2(tx, y + 30.0), Align2::LEFT_CENTER, "Just press play.", regular(12.0), TEXT_DIM);
+        painter.text(pos2(tx, top + 44.0), Align2::LEFT_CENTER, "Just press play.", regular(12.0), TEXT_DIM);
 
         // formatos
-        y = logo_rect.bottom() + 18.0;
-        painter.line_segment([pos2(x0, y - 8.0), pos2(x1, y - 8.0)], Stroke::new(1.0, Color32::from_white_alpha(14)));
-        painter.text(pos2(x0, y + 6.0), Align2::LEFT_CENTER, "Formatos soportados", bold(12.5), TEXT);
-        y += 30.0;
-        let formats = self.formats.clone();
+        painter.line_segment([pos2(x0, top + 64.0), pos2(x1, top + 64.0)], Stroke::new(1.0, Color32::from_white_alpha(14)));
+        painter.text(pos2(x0, top + 80.0), Align2::LEFT_CENTER, "Formatos soportados", bold(12.5), TEXT);
+        painter.text(pos2(x1, top + 80.0), Align2::RIGHT_CENTER, "tocá uno", regular(10.5), TEXT_FAINT);
+
+        let mut clicked: Option<String> = None;
+        let mut y = top + 108.0;
         for (label, list, is_video) in [("Video", &formats.0, true), ("Audio", &formats.1, false)] {
             let ic = pos2(x0 + 8.0, y);
             if is_video {
@@ -1184,15 +1325,43 @@ impl CapyroApp {
             painter.text(pos2(x0 + 22.0, y), Align2::LEFT_CENTER, label, regular(12.0), TEXT_DIM);
             let mut cx = x0 + 74.0;
             for ext in list {
+                let selected = self.info_format.as_deref() == Some(ext.as_str());
                 let g = painter.layout_no_wrap(ext.to_uppercase(), bold(11.0), TEXT);
                 let r = Rect::from_min_size(pos2(cx, y - 11.0), vec2(g.size().x + 14.0, 22.0));
-                let hover = ui.rect_contains_pointer(r) && interactive;
-                let h = ctx.animate_bool_with_time(Id::unique(("capyro-fmt", ext.as_str())), hover, 0.12);
-                painter.rect_filled(r, 6.0, Color32::from_white_alpha((10.0 + 10.0 * h) as u8));
-                painter.galley(r.center() - g.size() / 2.0, g, TEXT);
+                let a = animate_button(ui, Id::unique(("capyro-fmt", ext.as_str())), r, interactive);
+                let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-sel", ext.as_str())), selected, 0.15);
+                let rr = Rect::from_center_size(r.center(), r.size() * (1.0 + 0.04 * a.hover - 0.08 * a.press));
+                let bg = Color32::from_white_alpha((10.0 + 12.0 * a.hover) as u8).lerp_to_gamma(accent, sel);
+                painter.rect_filled(rr, 6.0, bg);
+                let col = TEXT.lerp_to_gamma(Color32::WHITE, sel);
+                painter.galley(rr.center() - g.size() / 2.0, g, col);
+                if a.resp.clicked() {
+                    clicked = Some(ext.clone());
+                }
                 cx = r.right() + 6.0;
             }
             y += 30.0;
+        }
+        if let Some(ext) = clicked {
+            // solo uno abierto a la vez; tocar el abierto lo cierra
+            self.info_format = if self.info_format.as_deref() == Some(ext.as_str()) { None } else { Some(ext) };
+        }
+
+        // resúmenes
+        let region = Rect::from_min_size(pos2(x0, top + 156.0), vec2(inner_w, region_h));
+        let clipped = painter.with_clip_rect(region.expand2(vec2(2.0, 0.0)).intersect(painter.clip_rect()));
+        let mut cy = region.top();
+        for (k, card_h, title, kind_g, body) in cards {
+            let mut p = clipped.clone();
+            p.multiply_opacity(k);
+            let card = Rect::from_min_size(pos2(x0, cy - 6.0 * (1.0 - k)), vec2(inner_w, card_h));
+            p.rect_filled(card, 8.0, Color32::from_white_alpha(9));
+            p.rect_filled(Rect::from_min_size(card.min + vec2(0.0, 10.0), vec2(3.0, card_h - 20.0)), 1.5, accent);
+            let ty = card.top() + 10.0;
+            p.galley(pos2(card.left() + 12.0, ty), title.clone(), TEXT);
+            p.galley(pos2(card.right() - 10.0 - kind_g.size().x, ty + 1.0), kind_g, TEXT_FAINT);
+            p.galley(pos2(card.left() + 12.0, ty + title.size().y + 5.0), body, TEXT_DIM);
+            cy += (card_h + 8.0) * k;
         }
 
         // pie: backend de audio y licencia
@@ -1354,6 +1523,9 @@ impl eframe::App for CapyroApp {
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let frame = ctx.cumulative_frame_nr();
+        self.first_pass = frame != self.last_frame;
+        self.last_frame = frame;
         if let Some(msg) = self.startup_notice.take() {
             self.toast(&ctx, msg, true);
         }

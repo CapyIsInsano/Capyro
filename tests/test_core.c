@@ -59,8 +59,10 @@ static void test_basics(void) {
     CHECK(capyro_core_probe_extension("tono.wav") == CAPYRO_MEDIA_AUDIO);
     CHECK(capyro_core_probe_extension("tono.Ogg") == CAPYRO_MEDIA_AUDIO);
     CHECK(capyro_core_probe_extension("tono.flac") == CAPYRO_MEDIA_NONE);
-    CHECK(strcmp(capyro_core_supported_video(), "mp4,mov") == 0);
-    CHECK(strcmp(capyro_core_supported_audio(), "mp3,wav,ogg") == 0);
+    CHECK(capyro_core_probe_extension("viejo.AVI") == CAPYRO_MEDIA_VIDEO);
+    CHECK(capyro_core_probe_extension("tema.aac") == CAPYRO_MEDIA_AUDIO);
+    CHECK(strcmp(capyro_core_supported_video(), "mp4,mov,avi") == 0);
+    CHECK(strcmp(capyro_core_supported_audio(), "mp3,wav,ogg,aac") == 0);
     CHECK(capyro_core_probe_extension("mp4") == CAPYRO_MEDIA_NONE);
     CHECK(capyro_core_probe_extension(NULL) == CAPYRO_MEDIA_NONE);
 
@@ -319,9 +321,10 @@ static void test_media(const char *dir) {
     capyro_core_set_repeat(core, CAPYRO_REPEAT_OFF);
 
     /* --- formatos nuevos: wav, ogg y mov --- */
-    const char *extra[] = { "tono.wav", "tono.ogg", "clip.mov" };
-    const int   kinds[] = { CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO };
-    for (int i = 0; i < 3; i++) {
+    const char *extra[] = { "tono.wav", "tono.ogg", "clip.mov", "tono.aac", "clip.avi" };
+    const int   kinds[] = { CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO,
+                            CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO };
+    for (int i = 0; i < 5; i++) {
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", dir, extra[i]);
         if (!exists(path)) {
@@ -330,12 +333,44 @@ static void test_media(const char *dir) {
         capyro_core_playlist_clear(core);
         CHECK(capyro_core_open(core, path) == CAPYRO_OK);
         CHECK(capyro_core_get_media_kind(core) == kinds[i]);
-        CHECK(NEAR(capyro_core_get_duration(core), 2.0, 0.2));
+        CHECK(NEAR(capyro_core_get_duration(core), 2.0, 0.25)); /* .aac: estimada por bitrate */
         capyro_core_play(core);
         pump(core, 400);
         double p = capyro_core_get_position(core);
         printf("%s: posición tras 0.4 s: %.3f\n", extra[i], p);
         CHECK(p > 0.2 && p < 0.7);
+    }
+
+    /* --- efectos de sonido: se cargan desde memoria y se mezclan --- */
+    char wav[1024];
+    snprintf(wav, sizeof(wav), "%s/tono.wav", dir);
+    FILE *f = fopen(wav, "rb");
+    if (f && core->audio_ok) {
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        uint8_t *data = malloc((size_t)size);
+        CHECK(data && fread(data, 1, (size_t)size, f) == (size_t)size);
+        CHECK(capyro_core_sfx_load(core, 0, data, (size_t)size) == CAPYRO_OK);
+        free(data); /* el núcleo ya lo decodificó: no guarda el puntero */
+        CHECK(core->sfx_len[0] > (size_t)(core->out_rate * 1.9)); /* ~2 s a la frecuencia del dispositivo */
+        CHECK(capyro_core_sfx_load(core, 1, (const uint8_t *)"basura", 6) != CAPYRO_OK);
+        capyro_core_sfx_play(core, 1);           /* slot vacío: no hace nada */
+        CHECK(core->sfx_playing == -1);
+        capyro_core_playlist_clear(core);        /* suena aunque no haya nada cargado */
+        capyro_core_sfx_play(core, 0);
+        pump(core, 300);
+        cp_mutex_lock(&core->lock);
+        size_t pos = core->sfx_pos;
+        int playing = core->sfx_playing;
+        cp_mutex_unlock(&core->lock);
+        printf("sfx: %zu frames mezclados en 0.3 s\n", pos);
+        CHECK(playing == 0 && pos > 0);
+        pump(core, 2000);
+        CHECK(core->sfx_playing == -1);          /* terminó solo */
+    }
+    if (f) {
+        fclose(f);
     }
 
     capyro_core_shutdown(core);

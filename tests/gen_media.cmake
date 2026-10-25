@@ -44,6 +44,10 @@ run(clip.mov -f lavfi -i testsrc=size=320x240:rate=25:duration=2
     -f lavfi -i sine=frequency=660:duration=2
     -c:v mpeg4 -q:v 5 -c:a aac -shortest ${OUT}/clip.mov)
 run(tono.wav -f lavfi -i sine=frequency=440:duration=2 -c:a pcm_s16le ${OUT}/tono.wav)
+run(tono.aac -f lavfi -i sine=frequency=440:duration=2 -c:a aac ${OUT}/tono.aac)
+run(clip.avi -f lavfi -i testsrc=size=320x240:rate=25:duration=2
+    -f lavfi -i sine=frequency=770:duration=2
+    -c:v mpeg4 -q:v 5 -c:a pcm_s16le -shortest ${OUT}/clip.avi)
 
 # ogg: Vorbis u Opus si están (lo normal); si no, FLAC dentro de ogg, que es interno.
 set(OGG_ENC "")
