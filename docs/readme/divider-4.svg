@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="34" viewBox="0 0 900 34" font-family="'DejaVu Sans','Segoe UI',Ubuntu,'Helvetica Neue',Arial,sans-serif">
+<style>
+text { font-family: 'DejaVu Sans','Segoe UI',Ubuntu,'Helvetica Neue',Arial,sans-serif; }
+.b { font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+<text x="0" y="22" font-size="12" fill="#6E6F75">00:04</text><rect x="50" y="15" width="800" height="4" rx="2" fill="#3A3B40" fill-opacity="0.85"/><rect x="50" y="15" width="320" height="4" rx="2" fill="#FF7417"/><circle cx="370" cy="17" r="5.5" fill="#FF7417"/><text x="900" y="22" text-anchor="end" font-size="12" fill="#6E6F75">00:10</text>
+</svg>

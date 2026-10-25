@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="96" viewBox="0 0 900 96" font-family="'DejaVu Sans','Segoe UI',Ubuntu,'Helvetica Neue',Arial,sans-serif">
+<style>
+text { font-family: 'DejaVu Sans','Segoe UI',Ubuntu,'Helvetica Neue',Arial,sans-serif; }
+.b { font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+<rect x="1" y="1" width="211" height="94" rx="14" fill="#222328" stroke="#fff" stroke-opacity="0.07"/><text x="20" y="38" class="b" font-size="22" fill="#FF7417">C</text><text x="193" y="37" text-anchor="end" font-size="12" fill="#A8A9AE">núcleo</text><text x="20" y="72" font-size="12.5" fill="#6E6F75">FFmpeg · miniaudio · DSP</text><rect x="230" y="1" width="211" height="94" rx="14" fill="#222328" stroke="#fff" stroke-opacity="0.07"/><text x="249" y="38" class="b" font-size="22" fill="#FF7417">Rust</text><text x="422" y="37" text-anchor="end" font-size="12" fill="#A8A9AE">interfaz</text><text x="249" y="72" font-size="12.5" fill="#6E6F75">egui · eframe</text><rect x="459" y="1" width="211" height="94" rx="14" fill="#222328" stroke="#fff" stroke-opacity="0.07"/><text x="478" y="38" class="b" font-size="22" fill="#FF7417">CMake</text><text x="651" y="37" text-anchor="end" font-size="12" fill="#A8A9AE">compilación</text><text x="478" y="72" font-size="12.5" fill="#6E6F75">Corrosion integra Cargo</text><rect x="688" y="1" width="211" height="94" rx="14" fill="#222328" stroke="#fff" stroke-opacity="0.07"/><text x="707" y="38" class="b" font-size="22" fill="#FF7417">Lua</text><text x="880" y="37" text-anchor="end" font-size="12" fill="#A8A9AE">configuración</text><text x="707" y="72" font-size="12.5" fill="#6E6F75">atajos y opciones</text>
+</svg>
