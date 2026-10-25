@@ -29,6 +29,8 @@ pub enum Action {
     SpeedDown,
     SpeedReset,
     Screenshot,
+    ToggleEffects,
+    EffectsBypass,
     Quit,
 }
 
@@ -62,6 +64,8 @@ impl Action {
             "speed_down" => Self::SpeedDown,
             "speed_reset" => Self::SpeedReset,
             "screenshot" => Self::Screenshot,
+            "toggle_effects" => Self::ToggleEffects,
+            "effects_bypass" => Self::EffectsBypass,
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -306,7 +310,7 @@ mod tests {
     #[test]
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
-        assert!(cfg.bindings.len() >= 19);
+        assert!(cfg.bindings.len() >= 21);
         assert!(cfg.remember_session && cfg.visualizer);
         assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);

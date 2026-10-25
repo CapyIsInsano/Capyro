@@ -30,6 +30,7 @@
 
 #include "miniaudio.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,12 +129,15 @@ static void audio_callback(ma_device *dev, void *output, const void *input, ma_u
             if (chunk > until_wrap)     chunk = until_wrap;
             const float *src = core->ring + core->ring_read * 2;
             float *dst = out + (size_t)done * 2;
-            for (size_t i = 0; i < chunk * 2; i++) {
-                dst[i] = src[i] * gain;
-            }
+            /* efectos → visualizador (ve el sonido ya ecualizado) → volumen */
+            memcpy(dst, src, chunk * 2 * sizeof(float));
+            dsp_process(&core->dsp, dst, chunk);
             for (size_t i = 0; i < chunk; i++) {
-                core->scope[core->scope_pos] = 0.5f * (src[2 * i] + src[2 * i + 1]);
+                core->scope[core->scope_pos] = 0.5f * (dst[2 * i] + dst[2 * i + 1]);
                 core->scope_pos = (core->scope_pos + 1) % CAPYRO_SCOPE_LEN;
+            }
+            for (size_t i = 0; i < chunk * 2; i++) {
+                dst[i] *= gain;
             }
             core->ring_read = (core->ring_read + chunk) % core->ring_cap;
             core->ring_len -= chunk;
@@ -193,6 +197,9 @@ int player_global_init(CapyroCore *core) {
     }
     core->device   = dev;
     core->audio_ok = true;
+    CapyroAudioFx fx = core->dsp.fx;
+    dsp_init(&core->dsp, core->out_rate);
+    dsp_set(&core->dsp, &fx);
     snprintf(core->backend, sizeof(core->backend), "%s",
              ma_get_backend_name(dev->pContext->backend));
     return CAPYRO_OK;
@@ -236,6 +243,11 @@ void player_ensure_device_started(CapyroCore *core) {
 /* ================================================================== */
 /* reloj                                                              */
 /* ================================================================== */
+
+/* El interruptor general de efectos también apaga el tono. */
+double player_effective_pitch_locked(const CapyroCore *core) {
+    return core->dsp.fx.enabled ? core->pitch : 0.0;
+}
 
 double player_clock_locked(CapyroCore *core) {
     if (core->clock_audio) {
@@ -434,7 +446,7 @@ static int pull_frame(AVCodecContext *ctx, PktQueue *q, AVFrame *frame,
 
 /* Grafo de audio genérico: [atempo] → aresample → aformat (float estéreo a
  * out_rate). Lo usan la reproducción y los efectos de sonido. */
-bool audio_graph_create(const AVFrame *f, double speed, unsigned out_rate,
+bool audio_graph_create(const AVFrame *f, double speed, double pitch, unsigned out_rate,
                         AVFilterGraph **graph, AVFilterContext **src, AVFilterContext **sink) {
     *graph = NULL;
     *src = *sink = NULL;
@@ -458,13 +470,29 @@ bool audio_graph_create(const AVFrame *f, double speed, unsigned out_rate,
              "time_base=1/%d:sample_rate=%d:sample_fmt=%s:channel_layout=%s",
              f->sample_rate, f->sample_rate, fmt_name, layout_str);
 
-    char tempo[48] = "";
-    if (speed < 0.999 || speed > 1.001) {
-        snprintf(tempo, sizeof(tempo), "atempo=%.4f,", speed);
+    /* Tono sin cambiar la velocidad: asetrate reinterpreta las muestras a
+     * otra frecuencia (sube/baja el tono Y la velocidad por k) y atempo
+     * compensa la velocidad. Tempo total = k * (speed / k) = speed, así que
+     * el reloj de reproducción no se entera. */
+    char shift[96] = "";
+    double tempo_factor = speed;
+    if (pitch < -0.01 || pitch > 0.01) {
+        double k = pow(2.0, pitch / 12.0);
+        snprintf(shift, sizeof(shift), "asetrate=%d,aresample=%d,",
+                 (int)lround(f->sample_rate * k), f->sample_rate);
+        tempo_factor = speed / k;
     }
-    char chain[256];
-    snprintf(chain, sizeof(chain), "%saresample=%u,aformat=sample_fmts=flt:channel_layouts=stereo",
-             tempo, out_rate);
+    /* atempo acepta 0,5 .. 100: por debajo se encadenan dos. */
+    char tempo[64] = "";
+    if (tempo_factor < 0.5) {
+        double t = sqrt(tempo_factor);
+        snprintf(tempo, sizeof(tempo), "atempo=%.5f,atempo=%.5f,", t, t);
+    } else if (tempo_factor < 0.999 || tempo_factor > 1.001) {
+        snprintf(tempo, sizeof(tempo), "atempo=%.5f,", tempo_factor);
+    }
+    char chain[320];
+    snprintf(chain, sizeof(chain), "%s%saresample=%u,aformat=sample_fmts=flt:channel_layouts=stereo",
+             shift, tempo, out_rate);
 
     AVFilterInOut *outputs = avfilter_inout_alloc();
     AVFilterInOut *inputs  = avfilter_inout_alloc();
@@ -502,15 +530,16 @@ bool audio_graph_create(const AVFrame *f, double speed, unsigned out_rate,
 }
 
 /* Arma el grafo de reproducción a partir del formato real del primer frame. */
-static bool build_audio_graph(CapyroCore *core, const AVFrame *f, double speed) {
+static bool build_audio_graph(CapyroCore *core, const AVFrame *f, double speed, double pitch) {
     Player *p = &core->player;
     avfilter_graph_free(&p->agraph);
     p->asrc = p->asink = NULL;
     p->af_flushed = false;
-    if (!audio_graph_create(f, speed, core->out_rate, &p->agraph, &p->asrc, &p->asink)) {
+    if (!audio_graph_create(f, speed, pitch, core->out_rate, &p->agraph, &p->asrc, &p->asink)) {
         return false;
     }
     p->speed = speed;
+    p->pitch = pitch;
     return true;
 }
 
@@ -527,7 +556,7 @@ static void drain_audio_graph(CapyroCore *core) {
     }
 }
 
-static bool audio_step(CapyroCore *core, double speed) {
+static bool audio_step(CapyroCore *core, double speed, double pitch) {
     Player *p = &core->player;
     int r = pull_frame(p->actx, &p->aq, p->frame, p->demux_eof, &p->a_flushed, &p->a_done);
     if (r < 1) {
@@ -555,8 +584,8 @@ static bool audio_step(CapyroCore *core, double speed) {
         p->a_drop_until = -1.0;
     }
 
-    if (!p->agraph || p->speed != speed) {
-        if (!build_audio_graph(core, f, speed)) {
+    if (!p->agraph || p->speed != speed || p->pitch != pitch) {
+        if (!build_audio_graph(core, f, speed, pitch)) {
             av_frame_unref(f);
             return true;
         }
@@ -656,6 +685,7 @@ static void decode_thread(void *arg) {
         uint64_t serial  = core->seek_serial;
         size_t   ring    = core->ring_len;
         double   speed   = core->speed;
+        double   pitch   = player_effective_pitch_locked(core);
         int      vq_len  = core->vq_len;
         /* Si la GUI no está pidiendo frames (ventana minimizada), igual hay
          * que dejar pasar los viejos: si no, el video frena al audio. */
@@ -690,7 +720,7 @@ static void decode_thread(void *arg) {
             worked |= demux_one(core);
         }
         if (want_audio) {
-            worked |= audio_step(core, speed);
+            worked |= audio_step(core, speed, pitch);
         }
         if (want_video) {
             worked |= video_step(core);

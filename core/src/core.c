@@ -207,6 +207,7 @@ CapyroCore *capyro_core_init(void) {
     core->volume           = 1.0f;
     core->sfx_playing      = -1;
     core->speed            = 1.0;
+    dsp_init(&core->dsp, 48000); /* se rehace con la frecuencia real del dispositivo */
     core->repeat           = CAPYRO_REPEAT_OFF;
     core->rng              = (uint64_t)(cp_now() * 1e9) ^ 0x9E3779B97F4A7C15ull;
     if (core->rng == 0) {
@@ -466,6 +467,63 @@ void capyro_core_set_speed(CapyroCore *core, double speed) {
         }
     }
     cp_mutex_unlock(&core->lock);
+}
+
+/* ------------------------------------------------------------------ */
+/* efectos de audio                                                    */
+/* ------------------------------------------------------------------ */
+
+/* Si el tono que suena cambia, hay que volver a decodificar desde acá. */
+static void refresh_pitch_locked(CapyroCore *core, double before) {
+    if (player_effective_pitch_locked(core) != before && core->state != CAPYRO_STATE_IDLE) {
+        player_request_seek_locked(core, clamp_pos(core, player_clock_locked(core)));
+    }
+}
+
+void capyro_core_set_fx(CapyroCore *core, const CapyroAudioFx *fx) {
+    if (!core || !fx) {
+        return;
+    }
+    cp_mutex_lock(&core->lock);
+    double before = player_effective_pitch_locked(core);
+    dsp_set(&core->dsp, fx);
+    refresh_pitch_locked(core, before);
+    cp_mutex_unlock(&core->lock);
+}
+
+void capyro_core_get_fx(CapyroCore *core, CapyroAudioFx *out) {
+    if (!core || !out) {
+        return;
+    }
+    cp_mutex_lock(&core->lock);
+    *out = core->dsp.fx;
+    cp_mutex_unlock(&core->lock);
+}
+
+void capyro_core_set_pitch(CapyroCore *core, double semitones) {
+    if (!core) {
+        return;
+    }
+    if (semitones != semitones) { /* NaN */
+        semitones = 0.0;
+    }
+    if (semitones < CAPYRO_PITCH_MIN) semitones = CAPYRO_PITCH_MIN;
+    if (semitones > CAPYRO_PITCH_MAX) semitones = CAPYRO_PITCH_MAX;
+    cp_mutex_lock(&core->lock);
+    double before = player_effective_pitch_locked(core);
+    core->pitch = semitones;
+    refresh_pitch_locked(core, before);
+    cp_mutex_unlock(&core->lock);
+}
+
+double capyro_core_get_pitch(CapyroCore *core) {
+    if (!core) {
+        return 0.0;
+    }
+    cp_mutex_lock(&core->lock);
+    double p = core->pitch;
+    cp_mutex_unlock(&core->lock);
+    return p;
 }
 
 double capyro_core_get_speed(CapyroCore *core) {

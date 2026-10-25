@@ -11,6 +11,35 @@ pub struct CapyroCore {
     _private: [u8; 0],
 }
 
+/// Efectos de audio. Debe coincidir con `CapyroAudioFx` de capyro_core.h.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AudioFx {
+    pub enabled: bool,
+    pub bass_db: f32,
+    pub mid_db: f32,
+    pub treble_db: f32,
+    pub width: f32,
+    pub night: bool,
+}
+
+impl Default for AudioFx {
+    fn default() -> Self {
+        Self { enabled: true, bass_db: 0.0, mid_db: 0.0, treble_db: 0.0, width: 1.0, night: false }
+    }
+}
+
+impl AudioFx {
+    /// Todo en su valor neutro (aunque el interruptor esté prendido).
+    pub fn is_neutral(&self) -> bool {
+        self.bass_db.abs() < 0.05
+            && self.mid_db.abs() < 0.05
+            && self.treble_db.abs() < 0.05
+            && (self.width - 1.0).abs() < 0.005
+            && !self.night
+    }
+}
+
 /// Debe coincidir con `CapyroVideoFrame` de capyro_core.h.
 #[repr(C)]
 struct RawVideoFrame {
@@ -37,6 +66,10 @@ extern "C" {
     fn capyro_core_supported_audio() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
     fn capyro_core_update(core: *mut CapyroCore);
+    fn capyro_core_set_fx(core: *mut CapyroCore, fx: *const AudioFx);
+    fn capyro_core_get_fx(core: *mut CapyroCore, out: *mut AudioFx);
+    fn capyro_core_set_pitch(core: *mut CapyroCore, semitones: f64);
+    fn capyro_core_get_pitch(core: *mut CapyroCore) -> f64;
     fn capyro_core_audio_rate(core: *mut CapyroCore) -> std::ffi::c_uint;
     fn capyro_core_get_scope(core: *mut CapyroCore, out: *mut f32, n: usize) -> usize;
     fn capyro_core_sfx_load(core: *mut CapyroCore, slot: c_int, data: *const u8, size: usize) -> c_int;
@@ -217,6 +250,20 @@ impl Core {
     }
     pub fn set_shuffle(&self, on: bool) {
         unsafe { capyro_core_set_shuffle(self.ptr, on) }
+    }
+    pub fn fx(&self) -> AudioFx {
+        let mut fx = AudioFx::default();
+        unsafe { capyro_core_get_fx(self.ptr, &mut fx) };
+        fx
+    }
+    pub fn set_fx(&self, fx: &AudioFx) {
+        unsafe { capyro_core_set_fx(self.ptr, fx) }
+    }
+    pub fn pitch(&self) -> f64 {
+        unsafe { capyro_core_get_pitch(self.ptr) }
+    }
+    pub fn set_pitch(&self, semitones: f64) {
+        unsafe { capyro_core_set_pitch(self.ptr, semitones) }
     }
     pub fn audio_rate(&self) -> u32 {
         unsafe { capyro_core_audio_rate(self.ptr) }

@@ -151,7 +151,7 @@ int capyro_core_sfx_load(CapyroCore *core, int slot, const uint8_t *data, size_t
             av_packet_unref(pkt);
         }
         while (avcodec_receive_frame(ctx, frame) == 0) {
-            if (!graph && !audio_graph_create(frame, 1.0, core->out_rate, &graph, &src, &sink)) {
+            if (!graph && !audio_graph_create(frame, 1.0, 0.0, core->out_rate, &graph, &src, &sink)) {
                 goto out;
             }
             if (av_buffersrc_add_frame(src, frame) >= 0) {

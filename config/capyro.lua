@@ -25,7 +25,7 @@
 --    volume_up, volume_down, mute,
 --    next_file, prev_file, toggle_playlist, fullscreen, open_files,
 --    toggle_shuffle, cycle_repeat, speed_up, speed_down, speed_reset,
---    screenshot, quit
+--    screenshot, toggle_effects, effects_bypass, quit
 --
 --  Además, las teclas 0..9 (sin modificadores) saltan al 0 %..90 % del archivo.
 -- ------------------------------------------------------------
@@ -48,6 +48,8 @@ local keys = {
     speed_up        = "]",
     speed_reset     = "Backspace",
     screenshot      = "Shift+S",       -- guarda el fotograma actual como PNG
+    toggle_effects  = "Ctrl+E",        -- abre/cierra el menú de efectos de audio
+    effects_bypass  = "Shift+E",       -- prende/apaga todos los efectos (para comparar)
     quit            = "Ctrl+Q",
 }
 

@@ -290,3 +290,13 @@ pub fn camera(pt: &Painter, c: Pos2, s: f32, col: Color32) {
     ));
     pt.circle_stroke(p(c, s, 0.0, 0.07), 0.17 * s, st);
 }
+
+/// Tres deslizadores verticales (botón de efectos de audio).
+pub fn sliders(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    for (x, knob) in [(-0.3, 0.12), (0.0, -0.16), (0.3, 0.05)] {
+        pt.line_segment([p(c, s, x, -0.38), p(c, s, x, 0.38)], st);
+        pt.circle_filled(p(c, s, x, knob), 0.11 * s, crate::theme::BG_WINDOW);
+        pt.circle_stroke(p(c, s, x, knob), 0.11 * s, st);
+    }
+}

@@ -16,7 +16,7 @@
 
 ---
 
-## Estado: `v0.2.5-alpha`
+## Estado: `v0.2.6-alpha`
 
 Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **aleatorio** y
 **repetir**, **velocidad** de 0.5× a 2× sin cambiar el tono, y animaciones en los botones.
@@ -41,6 +41,7 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
 | Menú ⓘ con la versión y un resumen de cada formato | |
 | Sonidos: capibara al tocar el logo, aviso de error | |
 | Retoma la sesión, visualizador, capturas, tiempo restante, saltos 0–9 | |
+| Efectos de audio: graves, medios, agudos, tono, estéreo/mono, modo noche, presets | |
 | Volumen, silencio, pausa, stop, pantalla completa | |
 | Atajos y opciones en `capyro.lua` (recarga en caliente) | |
 | Sigue andando sin placa de sonido (reloj de pared, sin audio) | |
@@ -55,7 +56,7 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
   (arranca)     │                                              │
                 │  hilo de decodificación ─ FFmpeg             │
                 │    demux → colas de paquetes → decode        │
-                │      audio → atempo/aresample → ring (2 s) ──┼──▶ miniaudio ──▶ 🔊
+                │      audio → tono/atempo/aresample → ring ───┼──▶ EQ/estéreo/noche ──▶ 🔊
                 │      video → swscale → cola RGBA (3 frames)  │    (callback = reloj)
                 └──────────────────────▲───────────────────────┘
                                        │ FFI: capyro_core.h
@@ -77,6 +78,11 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
   antes que el video) el reloj pasa a ser de pared sin saltos.
 - **Velocidad**: el audio pasa por el filtro `atempo` de libavfilter (cambia el tempo sin
   cambiar el tono) y el reloj avanza `velocidad` segundos por segundo, así el video lo sigue.
+- **Efectos de audio**: el ecualizador (biquads del *Audio EQ Cookbook*), el estéreo y el
+  compresor del modo noche están escritos en C (`core/src/dsp.c`) y corren en el callback
+  de audio, justo antes de que suene: por eso responden al instante. El tono necesita
+  estirar el audio en el tiempo, así que va en el grafo de FFmpeg (`asetrate` + `atempo`)
+  y cambiarlo vuelve a decodificar desde la posición actual.
 - **La lista vive en el núcleo**: el orden de reproducción (mezclado si hay aleatorio),
   repetir y el paso al siguiente se deciden en C; la GUI solo muestra y manda comandos.
 - **Rust se compila como `staticlib`** y expone una sola función: `capyro_gui_run()`.
@@ -239,6 +245,17 @@ capyro --version
   posición de la última vez (en pausa), además del volumen, la velocidad, aleatorio y
   repetir. Se guarda en `~/.local/state/capyro/session.lua`; se apaga con
   `remember_session = false`.
+- **Efectos de audio** (botón ≡ a la izquierda del volumen, `Ctrl+E`):
+  - **Graves / Medios · voces / Agudos**: ecualizador de 3 bandas, ±12 dB.
+  - **Tono**: ±12 semitonos *sin* cambiar la velocidad (se aplica al soltar el control).
+  - **Estéreo**: de *Mono* (útil con un solo auricular) a 200 % (más abierto).
+  - **Modo noche**: compresor que baja lo fuerte y sube lo bajito (diálogos claros a
+    volumen bajo).
+  - **Presets**: Normal, Bajos, Voces, Lo-fi y Noche.
+  - **Interruptor general** (`Shift+E`) para comparar con y sin efectos, y **Restablecer**.
+  - Doble clic en un control lo vuelve a 0; la rueda del mouse lo mueve de a un paso.
+  - El ecualizador se escucha **al instante** y nunca satura (limitador suave). Los
+    efectos se recuerdan entre sesiones, y el botón se pone naranja cuando hay alguno activo.
 - **Visualizador**: mientras suena un audio, barras de frecuencia de fondo (FFT propia, sin
   dependencias). Se apaga con `visualizer = false`.
 - **Tiempo restante**: clic en el tiempo de la derecha para alternar entre la duración total
@@ -269,6 +286,8 @@ capyro --version
 | Pantalla completa | `F`, `F11` (salir: `Esc`) |
 | Saltar al 0 %, 10 % ... 90 % | `0` ... `9` |
 | Capturar fotograma (PNG) | `Shift+S` |
+| Menú de efectos de audio | `Ctrl+E` |
+| Prender / apagar todos los efectos | `Shift+E` |
 | Salir | `Ctrl+Q` |
 
 ---
@@ -321,7 +340,7 @@ return {
 Acciones disponibles: `play_pause`, `stop`, `seek_forward`, `seek_backward`, `volume_up`,
 `volume_down`, `mute`, `next_file`, `prev_file`, `toggle_playlist`, `fullscreen`,
 `open_files`, `toggle_shuffle`, `cycle_repeat`, `speed_up`, `speed_down`, `speed_reset`,
-`screenshot`, `quit`.
+`screenshot`, `toggle_effects`, `effects_bypass`, `quit`.
 La lista completa de nombres de teclas está comentada en [`config/capyro.lua`](config/capyro.lua).
 
 ---
@@ -340,7 +359,10 @@ seek (también en pausa), fin del archivo, carátula, frames de video, paso auto
 siguiente, velocidad (0.5× y 2×), repetir lista/uno, aleatorio sin repetidos y quitar
 archivos de la lista (incluido el que está sonando). También verifica que al repetir un
 archivo el audio vuelva a sonar (el bug de la v0.2.2) y que los efectos de sonido se
-decodifiquen desde memoria y se mezclen. Sin `ffmpeg` solo corren las pruebas que no decodifican.
+decodifiquen desde memoria y se mezclen. Los efectos de audio se prueban midiendo: graves
++12 suben ~12 dB más los 50 Hz que los 5 kHz, el modo noche achica el rango dinámico, mono
+deja ambos canales iguales, nada satura al máximo, y tono +12 convierte un La de 440 Hz en
+880 Hz sin cambiar la velocidad. Sin `ffmpeg` solo corren las pruebas que no decodifican.
 
 Para generar los mp3 de prueba tu `ffmpeg` necesita un encoder de mp3 (LAME); si no lo
 tiene, esas pruebas se saltean. En Gentoo se activa con el USE `lame` de
@@ -363,6 +385,7 @@ capyro/
 │       ├── core.c            #    API, transporte, lista de reproducción
 │       ├── player.c          #    FFmpeg + miniaudio: hilos, colas, reloj
 │       ├── sfx.c             #    efectos de sonido (decodifica desde memoria)
+│       ├── dsp.c/.h          #    efectos de audio en tiempo real (EQ, estéreo, noche)
 │       ├── platform.c/.h     #    hilos y mutex (pthreads)
 │       ├── internal.h        #    estructuras internas
 │       ├── miniaudio_impl.c  #    implementación de miniaudio
@@ -373,6 +396,7 @@ capyro/
 │       ├── lib.rs            #    capyro_gui_run() + ventana
 │       ├── ffi.rs            #    bindings seguros al núcleo
 │       ├── app.rs            #    layout y lógica de la UI
+│       ├── app/fx_menu.rs    #    menú de efectos de audio
 │       ├── icons.rs          #    íconos dibujados a mano
 │       ├── theme.rs          #    colores y fuentes
 │       ├── config.rs         #    lectura de capyro.lua (mlua)
@@ -398,6 +422,7 @@ capyro/
 - [x] avi y aac, resúmenes de formatos, efectos de sonido
 - [x] Compilación rápida (sin LTO por defecto) y modo `CAPYRO_DIST`
 - [x] Retomar sesión, visualizador, capturas, tiempo restante
+- [x] Efectos de audio (ecualizador, tono, estéreo, modo noche, presets)
 - [x] Paso automático al siguiente de la lista
 - [x] Aleatorio y repetir (lista / uno)
 - [x] Menú de ajustes con velocidad de reproducción

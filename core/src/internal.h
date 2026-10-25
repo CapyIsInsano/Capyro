@@ -3,6 +3,7 @@
 #define CAPYRO_INTERNAL_H
 
 #include "capyro_core.h"
+#include "dsp.h"
 #include "platform.h"
 
 #include <stdbool.h>
@@ -52,6 +53,7 @@ typedef struct {
     struct AVFrame         *afilt;
     bool                    af_flushed;
     double                  speed;    /* velocidad con la que se armó agraph */
+    double                  pitch;    /* y el tono (semitonos) */
     struct SwsContext      *sws;
     struct AVFrame         *frame;
     struct AVPacket        *pkt;
@@ -78,6 +80,10 @@ struct CapyroCore {
     double   wall_started;
     uint64_t audio_consumed;
     double   speed;
+    double   pitch;         /* semitonos pedidos por el usuario */
+
+    /* efectos de audio en tiempo real (se aplican en el callback) */
+    Dsp      dsp;
 
     /* audio */
     struct ma_device *device;
@@ -143,7 +149,8 @@ double player_clock_locked(CapyroCore *core);
 bool   player_ended_locked(CapyroCore *core);
 void   player_request_seek_locked(CapyroCore *core, double target);
 void   player_ensure_device_started(CapyroCore *core); /* sin el lock tomado */
-bool   audio_graph_create(const struct AVFrame *f, double speed, unsigned out_rate,
+double player_effective_pitch_locked(const CapyroCore *core);
+bool   audio_graph_create(const struct AVFrame *f, double speed, double pitch, unsigned out_rate,
                           struct AVFilterGraph **graph, struct AVFilterContext **src,
                           struct AVFilterContext **sink);
 

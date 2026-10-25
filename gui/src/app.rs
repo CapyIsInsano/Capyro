@@ -19,6 +19,8 @@ use eframe::egui::{
 
 use crate::config::{Action, Config};
 use crate::ffi::{self, Core, MediaKind, Repeat, State};
+
+mod fx_menu;
 use crate::session::Session;
 use crate::viz::Visualizer;
 use crate::icons;
@@ -139,6 +141,11 @@ pub struct CapyroApp {
     last_session_save: f64,
     /// Captura de fotograma que se está guardando en otro hilo.
     shot: Option<Receiver<Result<PathBuf, String>>>,
+    /// Menú de efectos de audio y dónde está su botón.
+    show_fx: bool,
+    fx_rect: Rect,
+    /// Tono mientras se arrastra (se aplica al soltar).
+    fx_pitch_drag: Option<f32>,
 }
 
 fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -255,6 +262,8 @@ impl CapyroApp {
                 core.set_muted(sess.muted);
                 core.set_speed(sess.speed);
                 core.set_repeat(sess.repeat);
+                core.set_fx(&sess.fx);
+                core.set_pitch(sess.pitch);
                 show_remaining = sess.show_remaining;
                 if core.playlist_len() == 0 && !sess.playlist.is_empty() {
                     let mut restored = 0;
@@ -337,6 +346,9 @@ impl CapyroApp {
             show_remaining,
             last_session_save: 0.0,
             shot: None,
+            show_fx: false,
+            fx_rect: Rect::NOTHING,
+            fx_pitch_drag: None,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64 | 1)
@@ -420,6 +432,17 @@ impl CapyroApp {
             }
             Action::SpeedReset => self.set_speed(ctx, 1.0),
             Action::Screenshot => self.take_screenshot(ctx),
+            Action::ToggleEffects => {
+                self.show_fx = !self.show_fx;
+                self.show_settings = false;
+                self.show_info = false;
+            }
+            Action::EffectsBypass => {
+                let mut fx = self.core.fx();
+                fx.enabled = !fx.enabled;
+                self.core.set_fx(&fx);
+                self.toast(ctx, if fx.enabled { "Efectos activados" } else { "Efectos apagados" }, false);
+            }
             Action::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
         }
     }
@@ -519,6 +542,8 @@ impl CapyroApp {
             playlist: self.core.playlist(),
             current: self.core.playlist_current(),
             position: self.core.position(),
+            fx: self.core.fx(),
+            pitch: self.core.pitch(),
         }
     }
 
@@ -1328,6 +1353,7 @@ impl CapyroApp {
         if info.resp.clicked() {
             self.show_info = !self.show_info;
             self.show_settings = false;
+            self.show_fx = false;
         }
         if !self.show_info {
             info.resp.on_hover_text("Acerca de Capyro");
@@ -1387,18 +1413,40 @@ impl CapyroApp {
             self.wheel_acc = 0.0;
         }
         if vol.hover > 0.001 {
+            // porcentaje en una pastillita arriba del ícono
             let label = if muted {
                 "Silenciado".to_owned()
             } else {
                 format!("{}%", (volume * 100.0).round())
             };
-            painter.text(
-                vol_c - vec2(16.0 + 4.0 * vol.hover, 0.0),
-                Align2::RIGHT_CENTER,
-                label,
-                regular(11.0),
-                TEXT_FAINT.gamma_multiply(vol.hover),
-            );
+            let mut p = painter.clone();
+            p.set_opacity(vol.hover);
+            let g = p.layout_no_wrap(label, regular(11.0), TEXT);
+            let r = Rect::from_center_size(vol_c - vec2(0.0, 24.0 + 3.0 * vol.hover), g.size() + vec2(12.0, 6.0));
+            p.rect_filled(r, r.height() / 2.0, BG_PANEL);
+            p.galley(r.center() - g.size() / 2.0, g, TEXT);
+        }
+
+        // efectos de audio: a la izquierda del volumen
+        let fx_c = pos2(right - 120.0, by);
+        let fxb = Self::icon_button(ui, "effects", fx_c, 26.0);
+        let fx_on = ctx.animate_bool_with_time(Id::unique("capyro-fx-on"), self.show_fx, 0.15);
+        let fx_active = ctx.animate_bool_with_time(Id::unique("capyro-fx-active"), self.fx_active(), 0.15);
+        let fx_col = fxb
+            .tint(ICON_DIM, Color32::WHITE)
+            .lerp_to_gamma(accent, fx_on.max(fx_active));
+        icons::sliders(&painter, fx_c, 16.0 * fxb.scale(), fx_col);
+        if fx_active > 0.001 {
+            painter.circle_filled(fx_c + vec2(0.0, 12.0), 2.0 * fx_active, accent);
+        }
+        self.fx_rect = Rect::from_center_size(fx_c, Vec2::splat(26.0));
+        if fxb.resp.clicked() {
+            self.show_fx = !self.show_fx;
+            self.show_settings = false;
+            self.show_info = false;
+        }
+        if !self.show_fx {
+            fxb.resp.on_hover_text("Efectos de audio (Ctrl+E)");
         }
         vol.resp.on_hover_text("Clic: silenciar · Rueda: volumen");
 
@@ -1421,6 +1469,7 @@ impl CapyroApp {
         if gear.resp.clicked() {
             self.show_settings = !self.show_settings;
             self.show_info = false;
+            self.show_fx = false;
         }
         if !self.show_settings {
             gear.resp.on_hover_text("Ajustes");
@@ -1836,6 +1885,7 @@ impl eframe::App for CapyroApp {
         self.transport(ui, video_bottom, inner);
         self.settings_menu(ui);
         self.info_menu(ui);
+        self.fx_menu(ui);
         if !square {
             Self::resize_handles(ui, full);
         }

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use mlua::{Lua, Table};
 
-use crate::ffi::Repeat;
+use crate::ffi::{AudioFx, Repeat};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Session {
@@ -22,6 +22,8 @@ pub struct Session {
     pub playlist: Vec<String>,
     pub current: Option<usize>,
     pub position: f64,
+    pub fx: AudioFx,
+    pub pitch: f64,
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -71,6 +73,11 @@ impl Session {
             s += &format!("    current = {},\n", c + 1); // Lua cuenta desde 1
         }
         s += &format!("    position = {:.2},\n", self.position);
+        let f = &self.fx;
+        s += &format!(
+            "    fx = {{ enabled = {}, bass = {:.1}, mid = {:.1}, treble = {:.1}, width = {:.2}, night = {}, pitch = {:.0} }},\n",
+            f.enabled, f.bass_db, f.mid_db, f.treble_db, f.width, f.night, self.pitch
+        );
         s += "    playlist = {\n";
         for p in &self.playlist {
             s += &format!("        {},\n", lua_quote(p));
@@ -90,7 +97,20 @@ impl Session {
             .get::<Option<i64>>("current")?
             .and_then(|c| usize::try_from(c - 1).ok())
             .filter(|&c| c < playlist.len());
+        let mut fx = AudioFx::default();
+        let mut pitch = 0.0;
+        if let Some(t) = t.get::<Option<Table>>("fx")? {
+            fx.enabled = t.get::<Option<bool>>("enabled")?.unwrap_or(true);
+            fx.bass_db = t.get::<Option<f32>>("bass")?.unwrap_or(0.0).clamp(-12.0, 12.0);
+            fx.mid_db = t.get::<Option<f32>>("mid")?.unwrap_or(0.0).clamp(-12.0, 12.0);
+            fx.treble_db = t.get::<Option<f32>>("treble")?.unwrap_or(0.0).clamp(-12.0, 12.0);
+            fx.width = t.get::<Option<f32>>("width")?.unwrap_or(1.0).clamp(0.0, 2.0);
+            fx.night = t.get::<Option<bool>>("night")?.unwrap_or(false);
+            pitch = t.get::<Option<f64>>("pitch")?.unwrap_or(0.0).clamp(-12.0, 12.0).round();
+        }
         Ok(Self {
+            fx,
+            pitch,
             volume: t.get::<Option<f32>>("volume")?.unwrap_or(1.0).clamp(0.0, 1.0),
             muted: t.get::<Option<bool>>("muted")?.unwrap_or(false),
             speed: t.get::<Option<f64>>("speed")?.unwrap_or(1.0).clamp(0.5, 2.0),
@@ -149,6 +169,8 @@ mod tests {
             ],
             current: Some(1),
             position: 83.5,
+            fx: AudioFx { enabled: false, bass_db: 6.5, mid_db: -3.0, treble_db: 2.0, width: 0.4, night: true },
+            pitch: -3.0,
         };
         let back = Session::from_lua(&s.to_lua()).unwrap();
         assert_eq!(back, Session { volume: 0.42, ..s });
@@ -159,5 +181,6 @@ mod tests {
         let s = Session::from_lua("return { playlist = { \"a.mp3\" }, current = 7 }").unwrap();
         assert_eq!(s.current, None);
         assert_eq!(s.playlist.len(), 1);
+        assert_eq!(s.fx, AudioFx::default()); // sesiones viejas (sin fx) siguen andando
     }
 }

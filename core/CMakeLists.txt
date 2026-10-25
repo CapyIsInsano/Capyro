@@ -33,6 +33,7 @@ add_library(capyro_core STATIC
     src/core.c
     src/player.c
     src/sfx.c
+    src/dsp.c
     src/platform.c
     src/miniaudio_impl.c
 )
@@ -47,7 +48,7 @@ target_link_libraries(capyro_core PUBLIC PkgConfig::FFMPEG Threads::Threads ${CM
 target_link_libraries(capyro_core PUBLIC m)
 
 # Warnings solo para nuestro código (miniaudio va aparte).
-set_source_files_properties(src/core.c src/player.c src/sfx.c src/platform.c
+set_source_files_properties(src/core.c src/player.c src/sfx.c src/dsp.c src/platform.c
     PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic")
 # miniaudio son ~4 MB de C: con -O2 compila un 40 % más rápido y lo que hace
 # en tiempo real (copiar buffers al dispositivo) no nota la diferencia.

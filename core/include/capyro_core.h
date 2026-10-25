@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.5-alpha"
+#define CAPYRO_VERSION "0.2.6-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -57,6 +57,23 @@ typedef enum {
 
 #define CAPYRO_SPEED_MIN 0.5
 #define CAPYRO_SPEED_MAX 2.0
+
+/* Efectos de audio (ecualizador, estéreo, modo noche). Se aplican en tiempo
+ * real sobre lo que está sonando: los cambios se escuchan al instante. */
+#define CAPYRO_EQ_MIN_DB  (-12.0f)
+#define CAPYRO_EQ_MAX_DB  ( 12.0f)
+#define CAPYRO_WIDTH_MAX  ( 2.0f)
+#define CAPYRO_PITCH_MIN  (-12.0)   /* semitonos */
+#define CAPYRO_PITCH_MAX  ( 12.0)
+
+typedef struct {
+    bool  enabled;    /* interruptor general (false = todo apagado, tono incluido) */
+    float bass_db;    /* graves  (low shelf 120 Hz),  -12 .. +12 dB */
+    float mid_db;     /* medios  (peaking 1,5 kHz),   -12 .. +12 dB */
+    float treble_db;  /* agudos  (high shelf 6 kHz),  -12 .. +12 dB */
+    float width;      /* estéreo: 0 = mono, 1 = normal, 2 = muy abierto */
+    bool  night;      /* modo noche: compresor (lo fuerte baja, lo bajito sube) */
+} CapyroAudioFx;
 
 /* Último frame de video listo para mostrar (RGBA8, sin premultiplicar). */
 typedef struct {
@@ -113,6 +130,15 @@ void capyro_core_seek_relative(CapyroCore *core, double delta);
  * tono (filtro atempo de FFmpeg). */
 void   capyro_core_set_speed(CapyroCore *core, double speed);
 double capyro_core_get_speed(CapyroCore *core);
+
+/* ---------- efectos de audio ---------- */
+void capyro_core_set_fx(CapyroCore *core, const CapyroAudioFx *fx);
+void capyro_core_get_fx(CapyroCore *core, CapyroAudioFx *out);
+/* Tono en semitonos (-12 .. +12) sin cambiar la velocidad (asetrate +
+ * atempo de FFmpeg). A diferencia del ecualizador tarda un instante en
+ * aplicarse: se vuelve a decodificar desde la posición actual. */
+void   capyro_core_set_pitch(CapyroCore *core, double semitones);
+double capyro_core_get_pitch(CapyroCore *core);
 
 /* ---------- efectos de sonido ----------
  * Sonidos cortos (logo, error...) que se mezclan encima de lo que esté

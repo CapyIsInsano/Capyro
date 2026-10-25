@@ -109,6 +109,136 @@ static bool exists(const char *path) {
     return false;
 }
 
+/* ---------- efectos de audio (DSP puro, sin dispositivo) ---------- */
+
+#define FX_RATE 48000u
+#define FX_N    (FX_RATE / 2) /* medio segundo */
+
+static void sine(float *buf, size_t frames, double hz, float amp) {
+    for (size_t i = 0; i < frames; i++) {
+        float v = amp * (float)sin(2.0 * 3.14159265358979 * hz * (double)i / FX_RATE);
+        buf[2 * i] = buf[2 * i + 1] = v;
+    }
+}
+
+/* RMS del canal izquierdo, salteando el arranque del filtro. */
+static double rms_left(const float *buf, size_t frames) {
+    double acc = 0.0;
+    size_t from = frames / 4;
+    for (size_t i = from; i < frames; i++) {
+        acc += (double)buf[2 * i] * buf[2 * i];
+    }
+    return sqrt(acc / (double)(frames - from));
+}
+
+static double fx_gain_db(const CapyroAudioFx *fx, double hz, float amp) {
+    static float buf[FX_N * 2];
+    Dsp d;
+    dsp_init(&d, FX_RATE);
+    dsp_set(&d, fx);
+    sine(buf, FX_N, hz, amp);
+    double before = rms_left(buf, FX_N);
+    dsp_process(&d, buf, FX_N);
+    return 20.0 * log10(rms_left(buf, FX_N) / before);
+}
+
+static void test_dsp(void) {
+    CapyroAudioFx neutral = { .enabled = true, .width = 1.0f };
+    static float buf[FX_N * 2], copy[FX_N * 2];
+
+    /* neutro = no toca ni un bit */
+    Dsp d;
+    dsp_init(&d, FX_RATE);
+    dsp_set(&d, &neutral);
+    sine(buf, FX_N, 440.0, 0.5f);
+    memcpy(copy, buf, sizeof(buf));
+    dsp_process(&d, buf, FX_N);
+    CHECK(memcmp(buf, copy, sizeof(buf)) == 0);
+
+    /* graves +12: los 50 Hz suben ~12 dB más que los 5 kHz */
+    CapyroAudioFx bass = neutral;
+    bass.bass_db = 12.0f;
+    double low = fx_gain_db(&bass, 50.0, 0.05f), high = fx_gain_db(&bass, 5000.0, 0.05f);
+    printf("dsp graves +12: 50 Hz %+.1f dB, 5 kHz %+.1f dB\n", low, high);
+    CHECK(low - high > 10.0 && low - high < 13.0);
+
+    /* agudos -12: 10 kHz bajan, 100 Hz casi no */
+    CapyroAudioFx treble = neutral;
+    treble.treble_db = -12.0f;
+    double t_hi = fx_gain_db(&treble, 10000.0, 0.3f), t_lo = fx_gain_db(&treble, 100.0, 0.3f);
+    printf("dsp agudos -12: 10 kHz %+.1f dB, 100 Hz %+.1f dB\n", t_hi, t_lo);
+    CHECK(t_hi < -9.0 && fabs(t_lo) < 1.0);
+
+    /* medios +9: pico en 1,5 kHz */
+    CapyroAudioFx mid = neutral;
+    mid.mid_db = 9.0f;
+    double m_c = fx_gain_db(&mid, 1500.0, 0.05f), m_far = fx_gain_db(&mid, 60.0, 0.05f);
+    CHECK(m_c - m_far > 7.5);
+
+    /* estéreo 0 = mono: izquierda == derecha */
+    CapyroAudioFx mono = neutral;
+    mono.width = 0.0f;
+    dsp_set(&d, &mono);
+    for (size_t i = 0; i < 1000; i++) {
+        buf[2 * i]     = (float)(i % 7) * 0.05f;
+        buf[2 * i + 1] = -(float)(i % 5) * 0.05f;
+    }
+    dsp_process(&d, buf, 1000);
+    bool same = true;
+    for (size_t i = 0; i < 1000; i++) {
+        same = same && fabsf(buf[2 * i] - buf[2 * i + 1]) < 1e-6f;
+    }
+    CHECK(same);
+
+    /* modo noche: un tono fuerte y uno suave quedan mucho más parejos */
+    CapyroAudioFx night = neutral;
+    night.night = true;
+    double loud = fx_gain_db(&night, 440.0, 0.9f), soft = fx_gain_db(&night, 440.0, 0.03f);
+    printf("dsp modo noche: fuerte %+.1f dB, suave %+.1f dB\n", loud, soft);
+    CHECK(soft - loud > 15.0); /* rango dinámico: de 29,5 dB pasa a menos de 15 */
+    CHECK(soft > 5.0);         /* lo bajito sube */
+
+    /* interruptor general apagado = no se toca nada aunque haya ajustes */
+    CapyroAudioFx off = bass;
+    off.enabled = false;
+    off.night = true;
+    dsp_set(&d, &off);
+    sine(buf, FX_N, 60.0, 0.5f);
+    memcpy(copy, buf, sizeof(buf));
+    dsp_process(&d, buf, FX_N);
+    CHECK(memcmp(buf, copy, sizeof(buf)) == 0);
+
+    /* nunca satura: graves y agudos al máximo con señal a tope */
+    CapyroAudioFx max = neutral;
+    max.bass_db = max.mid_db = max.treble_db = 12.0f;
+    max.width = 2.0f;
+    dsp_set(&d, &max);
+    sine(buf, FX_N, 80.0, 1.0f);
+    dsp_process(&d, buf, FX_N);
+    float peak = 0.0f;
+    for (size_t i = 0; i < FX_N * 2; i++) {
+        peak = fabsf(buf[i]) > peak ? fabsf(buf[i]) : peak;
+    }
+    CHECK(peak <= 1.0f);
+
+    /* rangos */
+    CapyroAudioFx wild = { .enabled = true, .bass_db = 99.0f, .mid_db = -99.0f,
+                           .treble_db = NAN, .width = 7.0f };
+    dsp_clamp(&wild);
+    CHECK(wild.bass_db == 12.0f && wild.mid_db == -12.0f && wild.treble_db == 0.0f && wild.width == 2.0f);
+}
+
+/* Frecuencia dominante contando cruces por cero (sirve para un tono puro). */
+static double zero_cross_hz(const float *x, size_t n, unsigned rate) {
+    size_t crossings = 0;
+    for (size_t i = 1; i < n; i++) {
+        if ((x[i - 1] < 0.0f) != (x[i] < 0.0f)) {
+            crossings++;
+        }
+    }
+    return (double)crossings / 2.0 * (double)rate / (double)n;
+}
+
 static void test_media(const char *dir) {
     char tone[1024], cover[1024], clip[1024];
     snprintf(tone, sizeof(tone), "%s/tono.mp3", dir);
@@ -341,6 +471,44 @@ static void test_media(const char *dir) {
         CHECK(p > 0.2 && p < 0.7);
     }
 
+    /* --- tono: +12 semitonos = una octava arriba, misma velocidad --- */
+    char wav_tone[1024];
+    snprintf(wav_tone, sizeof(wav_tone), "%s/tono.wav", dir); /* 440 Hz, 2 s */
+    if (core->audio_ok && exists(wav_tone)) {
+        static float sc[4096];
+        unsigned rate = capyro_core_audio_rate(core);
+        capyro_core_playlist_clear(core);
+        CHECK(capyro_core_open(core, wav_tone) == CAPYRO_OK);
+
+        capyro_core_set_pitch(core, 99.0);
+        CHECK(capyro_core_get_pitch(core) == 12.0);
+        capyro_core_play(core);
+        pump(core, 500);
+        double pos = capyro_core_get_position(core);
+        CHECK(capyro_core_get_scope(core, sc, 4096) == 4096);
+        double hz = zero_cross_hz(sc, 4096, rate);
+        printf("tono +12: %.0f Hz (esperado 880), posición tras 0,5 s: %.2f\n", hz, pos);
+        CHECK(hz > 820.0 && hz < 940.0);
+        CHECK(pos > 0.3 && pos < 0.75); /* la velocidad no cambió */
+
+        /* con el interruptor general apagado el tono vuelve a 440 */
+        CapyroAudioFx fx;
+        capyro_core_get_fx(core, &fx);
+        fx.enabled = false;
+        capyro_core_set_fx(core, &fx);
+        pump(core, 400);
+        capyro_core_get_scope(core, sc, 4096);
+        hz = zero_cross_hz(sc, 4096, rate);
+        printf("efectos apagados: %.0f Hz (esperado 440)\n", hz);
+        CHECK(hz > 410.0 && hz < 470.0);
+        CHECK(capyro_core_get_pitch(core) == 12.0); /* el ajuste se recuerda */
+
+        fx.enabled = true;
+        capyro_core_set_fx(core, &fx);
+        capyro_core_set_pitch(core, 0.0);
+        capyro_core_pause(core);
+    }
+
     /* --- visualizador: el núcleo guarda lo último que sonó --- */
     if (core->audio_ok) {
         capyro_core_playlist_clear(core);
@@ -398,6 +566,7 @@ static void test_media(const char *dir) {
 
 int main(int argc, char **argv) {
     test_basics();
+    test_dsp();
     if (argc > 1) {
         test_media(argv[1]);
     } else {
