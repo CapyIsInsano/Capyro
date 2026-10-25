@@ -261,6 +261,26 @@ const char *capyro_core_error_string(int err) {
     }
 }
 
+unsigned capyro_core_audio_rate(CapyroCore *core) {
+    return (core && core->audio_ok) ? core->out_rate : 0;
+}
+
+size_t capyro_core_get_scope(CapyroCore *core, float *out, size_t n) {
+    if (!core || !out || !core->audio_ok) {
+        return 0;
+    }
+    if (n > CAPYRO_SCOPE_LEN) {
+        n = CAPYRO_SCOPE_LEN;
+    }
+    cp_mutex_lock(&core->lock);
+    size_t start = (core->scope_pos + CAPYRO_SCOPE_LEN - n) % CAPYRO_SCOPE_LEN;
+    for (size_t i = 0; i < n; i++) {
+        out[i] = core->scope[(start + i) % CAPYRO_SCOPE_LEN];
+    }
+    cp_mutex_unlock(&core->lock);
+    return n;
+}
+
 const char *capyro_core_audio_backend(CapyroCore *core) {
     return (core && core->audio_ok) ? core->backend : "";
 }

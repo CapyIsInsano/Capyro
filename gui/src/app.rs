@@ -19,6 +19,8 @@ use eframe::egui::{
 
 use crate::config::{Action, Config};
 use crate::ffi::{self, Core, MediaKind, Repeat, State};
+use crate::session::Session;
+use crate::viz::Visualizer;
 use crate::icons;
 use crate::theme::{self, *};
 
@@ -128,6 +130,15 @@ pub struct CapyroApp {
     /// (pasadas de "medición"); lo que lee eventos crudos solo corre en la primera.
     last_frame: u64,
     first_pass: bool,
+    /// Visualizador de audio (barras de fondo).
+    viz: Visualizer,
+    last_time: f64,
+    /// Mostrar el tiempo que falta en vez de la duración total.
+    show_remaining: bool,
+    /// Guardado periódico de la sesión.
+    last_session_save: f64,
+    /// Captura de fotograma que se está guardando en otro hilo.
+    shot: Option<Receiver<Result<PathBuf, String>>>,
 }
 
 fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
@@ -156,6 +167,23 @@ fn ellipsize(s: &str, max: usize) -> String {
         out.push('…');
         out
     }
+}
+
+/// Carpeta de Imágenes del usuario (según xdg-user-dirs) + "/Capyro".
+fn default_screenshot_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
+    let pictures = std::fs::read_to_string(config.join("user-dirs.dirs"))
+        .ok()
+        .and_then(|txt| {
+            txt.lines().find_map(|l| {
+                let v = l.trim().strip_prefix("XDG_PICTURES_DIR=")?;
+                let v = v.trim_matches('"').replace("$HOME", &home.to_string_lossy());
+                Some(PathBuf::from(v))
+            })
+        })
+        .unwrap_or_else(|| home.join("Pictures"));
+    pictures.join("Capyro")
 }
 
 fn fmt_time(seconds: f64) -> String {
@@ -213,12 +241,71 @@ impl CapyroApp {
         core.set_speed(cfg.start_speed);
         core.set_shuffle(cfg.start_shuffle);
         core.set_repeat(cfg.start_repeat);
-        let startup_notice = core
+        let mut startup_notice = core
             .audio_backend()
             .is_empty()
             .then(|| "No encontré dispositivo de audio: reproduzco sin sonido".to_owned());
+
+        // Sesión anterior: ajustes siempre; la lista solo si no se abrieron
+        // archivos desde la línea de comandos.
+        let mut show_remaining = false;
+        if cfg.remember_session {
+            if let Some(sess) = Session::load() {
+                core.set_volume(sess.volume);
+                core.set_muted(sess.muted);
+                core.set_speed(sess.speed);
+                core.set_repeat(sess.repeat);
+                show_remaining = sess.show_remaining;
+                if core.playlist_len() == 0 && !sess.playlist.is_empty() {
+                    let mut restored = 0;
+                    let mut cur = None;
+                    for (i, p) in sess.playlist.iter().enumerate() {
+                        let path = Path::new(p);
+                        if path.exists() && core.playlist_add(path).is_ok() {
+                            if sess.current == Some(i) {
+                                cur = Some(restored);
+                            }
+                            restored += 1;
+                        }
+                    }
+                    core.set_shuffle(sess.shuffle);
+                    if let Some(c) = cur {
+                        if core.playlist_select(c).is_ok() && sess.position > 3.0
+                            && sess.position < core.duration() - 3.0
+                        {
+                            core.seek(sess.position);
+                        }
+                    }
+                    if restored > 0 && startup_notice.is_none() {
+                        let pos = if cur.is_some() && sess.position > 3.0 {
+                            format!(" · seguís en {}", fmt_time(sess.position))
+                        } else {
+                            String::new()
+                        };
+                        let s = if restored == 1 { "" } else { "s" };
+                        startup_notice = Some(format!("Sesión restaurada: {restored} archivo{s}{pos}"));
+                    }
+                    // Al retomar no arranca a sonar solo: el usuario aprieta play.
+                    return Self::build(cc, core, cfg, logo, startup_notice, show_remaining, false);
+                } else {
+                    core.set_shuffle(sess.shuffle);
+                }
+            }
+        }
+        Self::build(cc, core, cfg, logo, startup_notice, show_remaining, true)
+    }
+
+    fn build(
+        _cc: &eframe::CreationContext<'_>,
+        core: Core,
+        cfg: Config,
+        logo: Option<TextureHandle>,
+        startup_notice: Option<String>,
+        show_remaining: bool,
+        autoplay: bool,
+    ) -> Self {
         // Archivos pasados por línea de comandos: "just press play" → arrancar solo.
-        if core.state() == State::Stopped {
+        if autoplay && core.state() == State::Stopped {
             core.toggle();
         }
 
@@ -245,6 +332,11 @@ impl CapyroApp {
             last_capy: usize::MAX,
             last_frame: u64::MAX,
             first_pass: true,
+            viz: Visualizer::new(),
+            last_time: 0.0,
+            show_remaining,
+            last_session_save: 0.0,
+            shot: None,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64 | 1)
@@ -327,6 +419,7 @@ impl CapyroApp {
                 self.set_speed(ctx, next);
             }
             Action::SpeedReset => self.set_speed(ctx, 1.0),
+            Action::Screenshot => self.take_screenshot(ctx),
             Action::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
         }
     }
@@ -351,6 +444,91 @@ impl CapyroApp {
             Repeat::One => "Repetir este archivo",
         };
         self.toast(ctx, msg, false);
+    }
+
+    /// Guarda el fotograma que se está viendo como PNG (en otro hilo).
+    fn take_screenshot(&mut self, ctx: &egui::Context) {
+        if self.core.media_kind() != MediaKind::Video {
+            self.play_error();
+            self.toast(ctx, "Las capturas son para video", true);
+            return;
+        }
+        if self.shot.is_some() {
+            return;
+        }
+        let Some((rgba, w, h)) = self.core.with_video_frame(|vf| (vf.rgba.to_vec(), vf.width as u32, vf.height as u32)) else {
+            self.toast(ctx, "Todavía no hay imagen para capturar", true);
+            return;
+        };
+        let dir = self.cfg.screenshot_dir.clone().unwrap_or_else(default_screenshot_dir);
+        let stem = Path::new(&self.core.current_file())
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "capyro".to_owned());
+        let at = fmt_time(self.core.position()).replace(':', "-");
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let path = dir.join(format!("{stem}_{at}_{stamp}.png"));
+        let (tx, rx) = mpsc::channel();
+        let ctx2 = ctx.clone();
+        std::thread::spawn(move || {
+            let res = std::fs::create_dir_all(&dir)
+                .map_err(|e| e.to_string())
+                .and_then(|_| {
+                    image::save_buffer(&path, &rgba, w, h, image::ExtendedColorType::Rgba8)
+                        .map_err(|e| e.to_string())
+                })
+                .map(|_| path);
+            let _ = tx.send(res);
+            ctx2.request_repaint();
+        });
+        self.shot = Some(rx);
+    }
+
+    fn poll_screenshot(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.shot else { return };
+        match rx.try_recv() {
+            Ok(Ok(path)) => {
+                self.shot = None;
+                let shown = match std::env::var_os("HOME") {
+                    Some(h) => path.to_string_lossy().replacen(&*h.to_string_lossy(), "~", 1),
+                    None => path.to_string_lossy().into_owned(),
+                };
+                self.toast(ctx, format!("Captura guardada: {}", ellipsize(&shown, 60)), false);
+            }
+            Ok(Err(e)) => {
+                self.shot = None;
+                self.play_error();
+                self.toast(ctx, format!("No se pudo guardar la captura: {e}"), true);
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => self.shot = None,
+        }
+    }
+
+    fn session_snapshot(&self) -> Session {
+        Session {
+            volume: self.core.volume(),
+            muted: self.core.muted(),
+            speed: self.core.speed(),
+            shuffle: self.core.shuffle(),
+            repeat: self.core.repeat(),
+            show_remaining: self.show_remaining,
+            playlist: self.core.playlist(),
+            current: self.core.playlist_current(),
+            position: self.core.position(),
+        }
+    }
+
+    fn save_session(&self) {
+        if !self.cfg.remember_session {
+            return;
+        }
+        if let Err(e) = self.session_snapshot().save() {
+            eprintln!("capyro: no pude guardar la sesión: {e}");
+        }
     }
 
     fn change_volume(&mut self, ctx: &egui::Context, delta: f32) {
@@ -498,6 +676,20 @@ impl CapyroApp {
         }
         for action in fired {
             self.run_action(ctx, action);
+        }
+
+        // 0..9 saltan al 0 %..90 % (como en YouTube).
+        const DIGITS: [Key; 10] = [
+            Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4,
+            Key::Num5, Key::Num6, Key::Num7, Key::Num8, Key::Num9,
+        ];
+        let duration = self.core.duration();
+        if duration > 0.0 {
+            for (i, key) in DIGITS.iter().enumerate() {
+                if ctx.input_mut(|inp| inp.consume_key(Modifiers::NONE, *key)) {
+                    self.core.seek(duration * i as f64 / 10.0);
+                }
+            }
         }
     }
 
@@ -684,6 +876,14 @@ impl CapyroApp {
                     }
                 }
                 MediaKind::Audio => {
+                    if self.cfg.visualizer && !self.viz.is_silent() {
+                        // barras de frecuencia de fondo, en la parte de abajo
+                        let band = Rect::from_min_max(
+                            pos2(rect.left() + 24.0, rect.bottom() - rect.height() * 0.30),
+                            pos2(rect.right() - 24.0, rect.bottom() - 12.0),
+                        );
+                        self.viz.draw(&painter, band, accent.gamma_multiply(0.55));
+                    }
                     let (title, artist) = self.track_labels();
                     let has_cover = self.video_tex.is_some();
                     let side = (rect.height() * 0.5).clamp(80.0, 260.0);
@@ -969,7 +1169,23 @@ impl CapyroApp {
         /* --- tiempos (+ velocidad si no es 1×) --- */
         let tty = video_bottom + TIMES_Y;
         painter.text(pos2(left, tty), Align2::LEFT_CENTER, fmt_time(position), regular(12.0), TEXT_DIM);
-        let dur_rect = painter.text(pos2(right, tty), Align2::RIGHT_CENTER, fmt_time(duration), regular(12.0), TEXT_DIM);
+        // Clic en el tiempo de la derecha: duración total ↔ tiempo que falta.
+        let right_label = if self.show_remaining && duration > 0.0 {
+            format!("-{}", fmt_time((duration - position).max(0.0)))
+        } else {
+            fmt_time(duration)
+        };
+        let g = painter.layout_no_wrap(right_label, regular(12.0), TEXT_DIM);
+        let dur_rect = Rect::from_min_size(pos2(right - g.size().x, tty - g.size().y / 2.0), g.size());
+        let dur_btn = animate_button(ui, Id::unique("capyro-time-toggle"), dur_rect.expand2(vec2(6.0, 4.0)), duration > 0.0);
+        if dur_btn.hover > 0.001 {
+            painter.rect_filled(dur_rect.expand2(vec2(6.0, 3.0)), 5.0, Color32::from_white_alpha((12.0 * dur_btn.hover) as u8));
+        }
+        painter.galley(dur_rect.min, g, dur_btn.tint(TEXT_DIM, TEXT));
+        if dur_btn.resp.clicked() {
+            self.show_remaining = !self.show_remaining;
+        }
+        dur_btn.resp.on_hover_text(if self.show_remaining { "Mostrar duración total" } else { "Mostrar tiempo restante" });
         let speed = self.core.speed();
         if (speed - 1.0).abs() > 1e-6 {
             let g = painter.layout_no_wrap(fmt_speed(speed), bold(11.0), accent);
@@ -1390,7 +1606,7 @@ impl CapyroApp {
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(272.0, 156.0);
+        let size = vec2(272.0, 196.0);
         let anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
@@ -1472,6 +1688,35 @@ impl CapyroApp {
             self.reload_config(&ctx);
         }
 
+        /* captura del fotograma */
+        y += 40.0;
+        let is_video = self.core.media_kind() == MediaKind::Video;
+        let row = Rect::from_min_max(pos2(x0 - 6.0, y - 18.0), pos2(x1 + 6.0, y + 18.0));
+        let shot = animate_button(ui, Id::unique("capyro-settings-shot"), row, interactive);
+        if shot.hover > 0.001 || shot.press > 0.001 {
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * shot.hover + 10.0 * shot.press) as u8));
+        }
+        let col = if is_video { shot.tint(ICON, Color32::WHITE) } else { TEXT_FAINT };
+        icons::camera(&painter, pos2(x0 + 8.0, y - 1.0), 15.0 * shot.scale(), col);
+        painter.text(
+            pos2(x0 + 24.0, y - 7.0),
+            Align2::LEFT_CENTER,
+            "Capturar fotograma",
+            regular(12.5),
+            if is_video { TEXT } else { TEXT_FAINT },
+        );
+        painter.text(
+            pos2(x0 + 24.0, y + 8.0),
+            Align2::LEFT_CENTER,
+            if is_video { "Shift+S · se guarda como PNG" } else { "Solo con video" },
+            regular(10.5),
+            TEXT_FAINT,
+        );
+        if shot.resp.clicked() {
+            self.show_settings = false;
+            self.take_screenshot(&ctx);
+        }
+
         // Esc también lo cierra
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.show_settings = false;
@@ -1517,6 +1762,10 @@ impl CapyroApp {
 }
 
 impl eframe::App for CapyroApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_session();
+    }
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0] // esquinas redondeadas transparentes
     }
@@ -1527,13 +1776,35 @@ impl eframe::App for CapyroApp {
         self.first_pass = frame != self.last_frame;
         self.last_frame = frame;
         if let Some(msg) = self.startup_notice.take() {
-            self.toast(&ctx, msg, true);
+            let is_error = msg.starts_with("No encontré");
+            self.toast(&ctx, msg, is_error);
         }
         self.core.update();
         self.handle_input(&ctx);
         self.update_title(&ctx);
         self.sync_video_texture(&ctx);
         self.poll_file_dialog(&ctx);
+        self.poll_screenshot(&ctx);
+
+        // visualizador: se alimenta con lo último que sonó
+        let now = ctx.input(|i| i.time);
+        let dt = ((now - self.last_time) as f32).clamp(0.0, 0.1);
+        self.last_time = now;
+        if self.cfg.visualizer && self.first_pass && self.core.media_kind() == MediaKind::Audio {
+            let playing = self.core.state() == State::Playing;
+            let n = self.viz.len();
+            let got = if playing { self.core.scope(&mut self.viz.samples[..n]) } else { 0 };
+            self.viz.update(self.core.audio_rate() as f32, dt, playing && got == n);
+            if !self.viz.is_silent() {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
+        }
+
+        // la sesión se guarda cada 15 s (y al cerrar)
+        if self.cfg.remember_session && now - self.last_session_save > 15.0 {
+            self.last_session_save = now;
+            self.save_session();
+        }
 
         let (maximized, fullscreen) = ctx.input(|i| {
             (

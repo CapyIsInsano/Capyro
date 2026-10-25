@@ -19,6 +19,7 @@ struct ma_device;
 
 #define VQ_MAX   3              /* frames decodificados por delante */
 #define CAPYRO_SFX_SLOTS 8      /* efectos de sonido cargados a la vez */
+#define CAPYRO_SCOPE_LEN 4096   /* muestras guardadas para el visualizador */
 #define VQ_SLOTS (VQ_MAX + 2)   /* + el que se está mostrando + uno de repuesto */
 
 typedef struct {
@@ -96,6 +97,11 @@ struct CapyroCore {
     size_t            sfx_len[CAPYRO_SFX_SLOTS]; /* en frames */
     int               sfx_playing;               /* -1 = ninguno */
     size_t            sfx_pos;
+
+    /* "osciloscopio": últimas muestras que sonaron (mono, antes del volumen)
+     * para el visualizador de la GUI */
+    float             scope[CAPYRO_SCOPE_LEN];
+    size_t            scope_pos;
 
     /* video */
     VideoSlot slots[VQ_SLOTS];

@@ -131,6 +131,10 @@ static void audio_callback(ma_device *dev, void *output, const void *input, ma_u
             for (size_t i = 0; i < chunk * 2; i++) {
                 dst[i] = src[i] * gain;
             }
+            for (size_t i = 0; i < chunk; i++) {
+                core->scope[core->scope_pos] = 0.5f * (src[2 * i] + src[2 * i + 1]);
+                core->scope_pos = (core->scope_pos + 1) % CAPYRO_SCOPE_LEN;
+            }
             core->ring_read = (core->ring_read + chunk) % core->ring_cap;
             core->ring_len -= chunk;
             done += (ma_uint32)chunk;

@@ -24,7 +24,10 @@
 --    play_pause, stop, seek_forward, seek_backward,
 --    volume_up, volume_down, mute,
 --    next_file, prev_file, toggle_playlist, fullscreen, open_files,
---    toggle_shuffle, cycle_repeat, speed_up, speed_down, speed_reset, quit
+--    toggle_shuffle, cycle_repeat, speed_up, speed_down, speed_reset,
+--    screenshot, quit
+--
+--  Además, las teclas 0..9 (sin modificadores) saltan al 0 %..90 % del archivo.
 -- ------------------------------------------------------------
 local keys = {
     play_pause      = { "Space", "K" },
@@ -44,6 +47,7 @@ local keys = {
     speed_down      = "[",
     speed_up        = "]",
     speed_reset     = "Backspace",
+    screenshot      = "Shift+S",       -- guarda el fotograma actual como PNG
     quit            = "Ctrl+Q",
 }
 
@@ -60,6 +64,10 @@ local options = {
     shuffle      = false,      -- aleatorio al abrir
     ["repeat"]   = "off",      -- "off", "all" (toda la lista) u "one" (el actual)
     accent       = "#FF7417",  -- color de acento (botón play, barra de progreso)
+
+    remember_session = true,   -- al abrir, retomar la lista, el archivo y la posición
+    visualizer       = true,   -- barras de frecuencia mientras suena un audio
+    screenshot_dir   = "",     -- "" = Imágenes/Capyro; o una ruta, ej. "~/Capturas"
 
     -- Solo Linux: "auto", "x11" o "wayland" (hay que reabrir Capyro).
     -- En Wayland nativo todavía no se pueden arrastrar archivos a la ventana

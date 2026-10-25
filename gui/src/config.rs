@@ -28,6 +28,7 @@ pub enum Action {
     SpeedUp,
     SpeedDown,
     SpeedReset,
+    Screenshot,
     Quit,
 }
 
@@ -60,6 +61,7 @@ impl Action {
             "speed_up" => Self::SpeedUp,
             "speed_down" => Self::SpeedDown,
             "speed_reset" => Self::SpeedReset,
+            "screenshot" => Self::Screenshot,
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -84,6 +86,12 @@ pub struct Config {
     pub accent: Color32,
     pub auto_next: bool,
     pub backend: Backend,
+    /// Recordar lista, posición, volumen... entre una vez y otra.
+    pub remember_session: bool,
+    /// Barras de frecuencia de fondo mientras suena un audio.
+    pub visualizer: bool,
+    /// Carpeta de las capturas (vacío = la de Imágenes del sistema + /Capyro).
+    pub screenshot_dir: Option<std::path::PathBuf>,
     /// Valores con los que arranca Capyro.
     pub start_speed: f64,
     pub start_shuffle: bool,
@@ -147,6 +155,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         accent: Color32::from_rgb(0xFF, 0x74, 0x17),
         auto_next: true,
         backend: Backend::Auto,
+        remember_session: true,
+        visualizer: true,
+        screenshot_dir: None,
         start_speed: 1.0,
         start_shuffle: false,
         start_repeat: crate::ffi::Repeat::Off,
@@ -209,6 +220,22 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                     crate::ffi::Repeat::Off
                 }
             };
+        }
+        if let Some(v) = opts.get::<Option<bool>>("remember_session")? {
+            cfg.remember_session = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("visualizer")? {
+            cfg.visualizer = v;
+        }
+        if let Some(v) = opts.get::<Option<String>>("screenshot_dir")? {
+            let v = v.trim();
+            if !v.is_empty() {
+                let expanded = match (v.strip_prefix("~/"), std::env::var_os("HOME")) {
+                    (Some(rest), Some(home)) => std::path::PathBuf::from(home).join(rest),
+                    _ => std::path::PathBuf::from(v),
+                };
+                cfg.screenshot_dir = Some(expanded);
+            }
         }
         if let Some(v) = opts.get::<Option<bool>>("auto_next")? {
             cfg.auto_next = v;
@@ -279,7 +306,8 @@ mod tests {
     #[test]
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
-        assert!(cfg.bindings.len() >= 18);
+        assert!(cfg.bindings.len() >= 19);
+        assert!(cfg.remember_session && cfg.visualizer);
         assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);
         // Ctrl+L tiene que quedar antes que cualquier binding sin modificadores

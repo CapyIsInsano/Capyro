@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.4-alpha"
+#define CAPYRO_VERSION "0.2.5-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -82,6 +82,12 @@ void capyro_core_set_auto_next(CapyroCore *core, bool enabled);
 /* Nombre del backend de audio ("PulseAudio", "ALSA", "WASAPI"...) o "" si
  * no hay dispositivo: en ese caso Capyro sigue andando con reloj de pared. */
 const char *capyro_core_audio_backend(CapyroCore *core);
+/* Frecuencia de muestreo del dispositivo (0 si no hay audio). */
+unsigned    capyro_core_audio_rate(CapyroCore *core);
+/* Copia en `out` las últimas `n` muestras que sonaron (mono, antes del
+ * volumen, de la más vieja a la más nueva; máximo 4096). Devuelve cuántas
+ * copió. Es lo que usa la GUI para dibujar el visualizador. */
+size_t      capyro_core_get_scope(CapyroCore *core, float *out, size_t n);
 
 /* ---------- abrir / formato ---------- */
 /* Agrega el archivo a la lista y lo deja cargado (estado STOPPED). */

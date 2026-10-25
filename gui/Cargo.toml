@@ -1,6 +1,6 @@
 [package]
 name = "capyro_gui"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 rust-version = "1.95"
 description = "Interfaz gráfica de Capyro (egui) — se compila como staticlib y se linkea al núcleo en C"
@@ -20,7 +20,32 @@ pollster = "0.4"
 # Solo para elegir el backend X11/Wayland en Linux (misma versión que usa eframe)
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
 
+# ---------------------------------------------------------------------------
+# Perfiles de compilación
+#
+# release → el de siempre (cmake --build). Todo optimizado (-O3), pero sin LTO:
+#           la primera vez compila las dependencias y después, si cambiás algo
+#           de la GUI, recompila en segundos en vez de más de un minuto.
+# dist    → cmake -DCAPYRO_DIST=ON. LTO completo: binario ~15 % más chico,
+#           para empaquetar o instalar. Tarda bastante más en compilar.
+# ---------------------------------------------------------------------------
 [profile.release]
-lto = true
-codegen-units = 1
+opt-level = 3
+lto = false
+codegen-units = 16
+incremental = true
+debug = false
 strip = true
+
+# Scripts de build y macros (syn, serde_derive, ...): corren una vez al
+# compilar y nunca dentro de Capyro, no vale la pena optimizarlos.
+[profile.release.build-override]
+opt-level = 0
+codegen-units = 256
+debug = false
+
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+incremental = false

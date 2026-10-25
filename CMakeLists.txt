@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.2.4
+    VERSION 0.2.5
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -18,6 +18,36 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(CAPYRO_BUILD_TESTS "Compilar las pruebas del núcleo" ON)
+option(CAPYRO_DIST   "Build de distribución: LTO en C y Rust (más lento de compilar, binario más chico)" OFF)
+option(CAPYRO_NATIVE "Optimizar para el procesador de esta máquina (el binario no sirve en otras)" OFF)
+option(CAPYRO_CCACHE "Usar ccache para el C si está instalado" ON)
+
+# --- velocidad de compilación y optimización ----------------------------
+if(CAPYRO_CCACHE)
+    find_program(CCACHE_PROGRAM ccache)
+    if(CCACHE_PROGRAM)
+        set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+        message(STATUS "Capyro: usando ccache")
+    endif()
+endif()
+
+# Cada función en su propia sección: así el linker tira lo que no se usa.
+add_compile_options(-ffunction-sections -fdata-sections)
+
+if(CAPYRO_NATIVE)
+    add_compile_options(-march=native)
+endif()
+
+if(CAPYRO_DIST)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT CAPYRO_IPO OUTPUT CAPYRO_IPO_MSG LANGUAGES C)
+    if(CAPYRO_IPO)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+    else()
+        message(WARNING "Capyro: el compilador no soporta LTO (${CAPYRO_IPO_MSG})")
+    endif()
+endif()
+message(STATUS "Capyro: dist=${CAPYRO_DIST} native=${CAPYRO_NATIVE}")
 
 # --- Corrosion: integra Cargo dentro de CMake --------------------------
 # Usa el Corrosion del sistema si existe; si no, lo baja de GitHub.
@@ -39,6 +69,10 @@ add_subdirectory(gui)
 # --- ejecutable final ---------------------------------------------------
 add_executable(capyro core/src/main.c)
 target_link_libraries(capyro PRIVATE capyro_gui capyro_core)
+# Tirar el código que nadie usa (de las dependencias de Rust sobre todo) y,
+# en Release, sacar los símbolos: el ejecutable pasa de ~21 MB a ~10 MB.
+target_link_options(capyro PRIVATE -Wl,--gc-sections -Wl,-O1 -Wl,--as-needed
+    $<$<CONFIG:Release,MinSizeRel>:-s>)
 
 # --- pruebas ------------------------------------------------------------
 if(CAPYRO_BUILD_TESTS)

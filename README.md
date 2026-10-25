@@ -16,7 +16,7 @@
 
 ---
 
-## Estado: `v0.2.4-alpha`
+## Estado: `v0.2.5-alpha`
 
 Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **aleatorio** y
 **repetir**, **velocidad** de 0.5× a 2× sin cambiar el tono, y animaciones en los botones.
@@ -40,6 +40,7 @@ Reproduce audio y video con seek, carátulas y metadatos; tiene lista con **alea
 | Botones animados (hover, clic, transiciones) | |
 | Menú ⓘ con la versión y un resumen de cada formato | |
 | Sonidos: capibara al tocar el logo, aviso de error | |
+| Retoma la sesión, visualizador, capturas, tiempo restante, saltos 0–9 | |
 | Volumen, silencio, pausa, stop, pantalla completa | |
 | Atajos y opciones en `capyro.lua` (recarga en caliente) | |
 | Sigue andando sin placa de sonido (reloj de pared, sin audio) | |
@@ -151,10 +152,40 @@ cmake --build build -j"$(nproc)"
 ./build/capyro
 ```
 
-> La primera compilación tarda unos minutos: Cargo baja las dependencias y el perfil
-> Release usa LTO. Las siguientes son incrementales.
->
-> Para un build de desarrollo más rápido: `-DCMAKE_BUILD_TYPE=Debug`.
+Si tenés [Ninja](https://ninja-build.org/) (`dev-build/ninja`), usalo: reparte mejor los
+núcleos entre C y Rust. Agregá `-G Ninja` al primer comando.
+
+### Tiempos de compilación
+
+La **primera** vez se compilan ~160 dependencias de Rust (egui, winit...) y eso es lo que
+más tarda: unos 4 minutos con 2 núcleos, bastante menos con más. Después:
+
+| Cambiaste... | Recompila en |
+|---|---|
+| algo de la GUI (`gui/src/*.rs`) | ~3 s |
+| algo del núcleo (`core/src/*.c`) | ~3 s |
+
+(Antes de la v0.2.5 cualquier cambio en la GUI tardaba más de un minuto por el LTO.)
+
+### Opciones de compilación
+
+| Opción | Qué hace |
+|---|---|
+| *(nada)* | `-O3` en C y Rust, sin LTO: rápido de recompilar. Binario de ~10 MB. |
+| `-DCAPYRO_DIST=ON` | LTO completo en C y Rust: binario ~15 % más chico (~8,4 MB). Para instalar o empaquetar; cada recompilación tarda ~1 min más. |
+| `-DCAPYRO_NATIVE=ON` | Optimiza para **tu** procesador (`-march=native`). El binario no sirve en otras PCs. |
+| `-DCAPYRO_CCACHE=OFF` | No usar `ccache` (se usa solo si está instalado). |
+| `-DCAPYRO_BUILD_TESTS=OFF` | No compilar las pruebas. |
+
+Por ejemplo, la versión "lo más optimizada posible" para tu máquina:
+
+```sh
+cmake -B build-dist -G Ninja -DCMAKE_BUILD_TYPE=Release -DCAPYRO_DIST=ON -DCAPYRO_NATIVE=ON
+cmake --build build-dist
+```
+
+Siempre se tira el código que no se usa (`--gc-sections`) y en Release se sacan los
+símbolos, así que el ejecutable queda chico aunque traiga egui adentro.
 
 ### Instalar
 
@@ -204,6 +235,16 @@ capyro --version
   audio en uso. Tocá un formato para ver un resumen; solo se abre uno a la vez y tocarlo de
   nuevo lo cierra.
 - **Logo**: tocalo y suena un capibara (uno de tres, al azar).
+- **Retoma donde lo dejaste**: al abrir Capyro sin archivos vuelve la lista, el archivo y la
+  posición de la última vez (en pausa), además del volumen, la velocidad, aleatorio y
+  repetir. Se guarda en `~/.local/state/capyro/session.lua`; se apaga con
+  `remember_session = false`.
+- **Visualizador**: mientras suena un audio, barras de frecuencia de fondo (FFT propia, sin
+  dependencias). Se apaga con `visualizer = false`.
+- **Tiempo restante**: clic en el tiempo de la derecha para alternar entre la duración total
+  y lo que falta (`-03:21`).
+- **Capturas**: `Shift+S` o ⚙ → *Capturar fotograma* guarda la imagen del video como PNG en
+  `~/Imágenes/Capyro` (respeta tu carpeta de Imágenes; se cambia con `screenshot_dir`).
 - Si intentás abrir un archivo no soportado o tocás subtítulos (todavía no disponibles),
   suena un aviso de error. Los sonidos siguen el volumen y el silencio generales.
 - **⚙ Ajustes**: velocidad (0.5×, 0.75×, 1×, 1.25×, 1.5×, 2×) y recargar `capyro.lua` sin
@@ -226,6 +267,8 @@ capyro --version
 | Repetir (no → lista → uno) | `Ctrl+R` |
 | Velocidad − / + / normal | `[` / `]` / `Backspace` |
 | Pantalla completa | `F`, `F11` (salir: `Esc`) |
+| Saltar al 0 %, 10 % ... 90 % | `0` ... `9` |
+| Capturar fotograma (PNG) | `Shift+S` |
 | Salir | `Ctrl+Q` |
 
 ---
@@ -267,6 +310,9 @@ return {
         shuffle      = false,      -- aleatorio al abrir
         ["repeat"]   = "off",      -- "off", "all" u "one" (repeat es palabra reservada de Lua)
         backend      = "auto",     -- "auto", "x11" o "wayland"
+        remember_session = true,   -- retomar lista y posición al abrir
+        visualizer   = true,       -- barras de frecuencia en los audios
+        screenshot_dir = "",       -- "" = ~/Imágenes/Capyro
         accent       = "#FF7417",  -- color del botón play y la barra
     },
 }
@@ -274,7 +320,8 @@ return {
 
 Acciones disponibles: `play_pause`, `stop`, `seek_forward`, `seek_backward`, `volume_up`,
 `volume_down`, `mute`, `next_file`, `prev_file`, `toggle_playlist`, `fullscreen`,
-`open_files`, `toggle_shuffle`, `cycle_repeat`, `speed_up`, `speed_down`, `speed_reset`, `quit`.
+`open_files`, `toggle_shuffle`, `cycle_repeat`, `speed_up`, `speed_down`, `speed_reset`,
+`screenshot`, `quit`.
 La lista completa de nombres de teclas está comentada en [`config/capyro.lua`](config/capyro.lua).
 
 ---
@@ -283,7 +330,7 @@ La lista completa de nombres de teclas está comentada en [`config/capyro.lua`](
 
 ```sh
 ctest --test-dir build --output-on-failure   # núcleo en C
-cd gui && cargo test                         # parser de config Lua y de atajos
+cd gui && cargo test                         # config Lua, sesión y visualizador (FFT)
 ```
 
 Si está el `ffmpeg` de línea de comandos, `ctest` genera primero archivos de prueba en todos
@@ -329,7 +376,9 @@ capyro/
 │       ├── icons.rs          #    íconos dibujados a mano
 │       ├── theme.rs          #    colores y fuentes
 │       ├── config.rs         #    lectura de capyro.lua (mlua)
-│       └── formats.rs        #    resúmenes de cada formato (menú ⓘ)
+│       ├── formats.rs        #    resúmenes de cada formato (menú ⓘ)
+│       ├── session.rs        #    guardar/retomar la sesión
+│       └── viz.rs            #    visualizador de audio (FFT)
 ├── config/capyro.lua         # configuración por defecto
 ├── assets/                   # logo en 128/256/512 px + sounds/ (efectos)
 ├── packaging/capyro.desktop  # lanzador para Linux
@@ -347,6 +396,8 @@ capyro/
 - [x] Carátulas y metadatos
 - [x] wav, ogg y mov
 - [x] avi y aac, resúmenes de formatos, efectos de sonido
+- [x] Compilación rápida (sin LTO por defecto) y modo `CAPYRO_DIST`
+- [x] Retomar sesión, visualizador, capturas, tiempo restante
 - [x] Paso automático al siguiente de la lista
 - [x] Aleatorio y repetir (lista / uno)
 - [x] Menú de ajustes con velocidad de reproducción

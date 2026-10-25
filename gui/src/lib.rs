@@ -8,6 +8,8 @@ mod app;
 mod config;
 mod ffi;
 mod formats;
+mod session;
+mod viz;
 mod icons;
 mod theme;
 

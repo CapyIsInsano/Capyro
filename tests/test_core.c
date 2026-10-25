@@ -341,6 +341,26 @@ static void test_media(const char *dir) {
         CHECK(p > 0.2 && p < 0.7);
     }
 
+    /* --- visualizador: el núcleo guarda lo último que sonó --- */
+    if (core->audio_ok) {
+        capyro_core_playlist_clear(core);
+        CHECK(capyro_core_open(core, has_tone ? tone : clip) == CAPYRO_OK);
+        capyro_core_play(core);
+        pump(core, 400);
+        static float scope[4096];
+        CHECK(capyro_core_get_scope(core, scope, 1024) == 1024);
+        CHECK(capyro_core_get_scope(core, scope, 999999) == 4096); /* se limita a 4096 */
+        CHECK(capyro_core_get_scope(core, scope, 1024) == 1024);
+        double energy = 0.0;
+        for (int i = 0; i < 1024; i++) {
+            energy += (double)scope[i] * scope[i];
+        }
+        printf("visualizador: energía de las últimas 1024 muestras = %.2f\n", energy);
+        CHECK(energy > 1.0); /* un tono, no silencio */
+        CHECK(capyro_core_audio_rate(core) == core->out_rate);
+        capyro_core_pause(core);
+    }
+
     /* --- efectos de sonido: se cargan desde memoria y se mezclan --- */
     char wav[1024];
     snprintf(wav, sizeof(wav), "%s/tono.wav", dir);

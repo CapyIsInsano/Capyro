@@ -278,3 +278,15 @@ pub fn info(pt: &Painter, c: Pos2, s: f32, col: Color32) {
     pt.circle_filled(p(c, s, 0.0, -0.19), 0.06 * s + 0.4, col);
     pt.line_segment([p(c, s, 0.0, -0.04), p(c, s, 0.0, 0.22)], Stroke::new(W + 0.2, col));
 }
+
+/// Cámara de fotos (capturar fotograma).
+pub fn camera(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    let body = Rect::from_center_size(p(c, s, 0.0, 0.06), vec2(0.9 * s, 0.62 * s));
+    pt.rect_stroke(body, 2.5, st, StrokeKind::Middle);
+    pt.add(Shape::line(
+        vec![p(c, s, -0.18, -0.25), p(c, s, -0.1, -0.38), p(c, s, 0.1, -0.38), p(c, s, 0.18, -0.25)],
+        st,
+    ));
+    pt.circle_stroke(p(c, s, 0.0, 0.07), 0.17 * s, st);
+}

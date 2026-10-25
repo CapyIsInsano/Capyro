@@ -37,6 +37,8 @@ extern "C" {
     fn capyro_core_supported_audio() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
     fn capyro_core_update(core: *mut CapyroCore);
+    fn capyro_core_audio_rate(core: *mut CapyroCore) -> std::ffi::c_uint;
+    fn capyro_core_get_scope(core: *mut CapyroCore, out: *mut f32, n: usize) -> usize;
     fn capyro_core_sfx_load(core: *mut CapyroCore, slot: c_int, data: *const u8, size: usize) -> c_int;
     fn capyro_core_sfx_play(core: *mut CapyroCore, slot: c_int);
     fn capyro_core_set_speed(core: *mut CapyroCore, speed: f64);
@@ -215,6 +217,13 @@ impl Core {
     }
     pub fn set_shuffle(&self, on: bool) {
         unsafe { capyro_core_set_shuffle(self.ptr, on) }
+    }
+    pub fn audio_rate(&self) -> u32 {
+        unsafe { capyro_core_audio_rate(self.ptr) }
+    }
+    /// Llena `out` con las últimas muestras que sonaron (mono).
+    pub fn scope(&self, out: &mut [f32]) -> usize {
+        unsafe { capyro_core_get_scope(self.ptr, out.as_mut_ptr(), out.len()) }
     }
     pub fn audio_backend(&self) -> String {
         cstr_to_string(unsafe { capyro_core_audio_backend(self.ptr) })
