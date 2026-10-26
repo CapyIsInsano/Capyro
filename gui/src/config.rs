@@ -185,7 +185,7 @@ pub struct Config {
     /// Repo y rama de donde se bajan las actualizaciones (vacío = de donde se compiló).
     pub update_repo: Option<String>,
     pub update_branch: Option<String>,
-    /// Sonidito al tocar un botón.
+    /// Sonidos de la interfaz: clic al tocar un botón y "retraction" al cerrar menús.
     pub click_sound: bool,
     /// Formato del archivo arriba a la izquierda del video.
     pub show_format: bool,

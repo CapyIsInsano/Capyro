@@ -37,8 +37,8 @@ const LOGO_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_128.png");
 const ICON_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_256.png");
 
 /// Slots de efectos: 0..=2 capibara (logo), 3 error, 4 inicio, 5 actualización,
-/// 6 clic de botón, 7 captura, 8 "lista para descargar".
-const SOUNDS: [&[u8]; 9] = [
+/// 6 clic de botón, 7 captura, 8 "lista para descargar", 9 cerrar/retraer.
+const SOUNDS: [&[u8]; 10] = [
     include_bytes!("../../assets/sounds/capybara1.mp3"),
     include_bytes!("../../assets/sounds/capybara2.mp3"),
     include_bytes!("../../assets/sounds/capybara3.mp3"),
@@ -48,6 +48,7 @@ const SOUNDS: [&[u8]; 9] = [
     include_bytes!("../../assets/sounds/click.mp3"),
     include_bytes!("../../assets/sounds/photo.mp3"),
     include_bytes!("../../assets/sounds/ready.mp3"),
+    include_bytes!("../../assets/sounds/retraction.mp3"),
 ];
 const SFX_CAPYBARAS: usize = 3;
 const SFX_ERROR: usize = 3;
@@ -56,10 +57,12 @@ const SFX_UPDATE: usize = 5;
 const SFX_CLICK: usize = 6;
 const SFX_PHOTO: usize = 7;
 const SFX_READY: usize = 8;
+const SFX_RETRACT: usize = 9;
 /// Con `CAPYRO_DEBUG_SFX=1` cada sonido se anota en la terminal (para probar
 /// sin parlantes o ver cuál suena).
 fn debug_sfx(slot: usize) {
-    const NAMES: [&str; 9] = ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "click", "photo", "ready"];
+    const NAMES: [&str; 10] =
+        ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "click", "photo", "ready", "retraction"];
     if std::env::var_os("CAPYRO_DEBUG_SFX").is_some() {
         eprintln!("capyro: sonido {}", NAMES.get(slot).copied().unwrap_or("?"));
     }
@@ -232,6 +235,8 @@ pub struct CapyroApp {
     hwdec_warned: u64,
     /// Frame en el que sonó el último efecto (para no tapar con el clic).
     sfx_frame: std::cell::Cell<u64>,
+    /// Qué menús/paneles estaban abiertos el frame anterior (para el sonido de cerrar).
+    ui_open: std::cell::Cell<u32>,
     /// Se está reiniciando para aplicar una actualización.
     restarting: bool,
     /// Playlists guardadas y qué pestaña de la Lista se ve (None = la Cola).
@@ -403,6 +408,7 @@ impl CapyroApp {
             show_offer: false,
             hwdec_warned: 0,
             sfx_frame: std::cell::Cell::new(u64::MAX - 1),
+            ui_open: std::cell::Cell::new(0),
             restarting: false,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -496,9 +502,35 @@ impl CapyroApp {
     }
 
     /// Final del frame: si se tocó un botón y nada sonó, suena el clic.
+    /// Cerrar/retraer suena al revés que abrir: si en este frame algo se
+    /// cerró (y nada se abrió), suena "retraction" en vez del clic.
     fn play_click_if_needed(&self, ctx: &egui::Context) {
         let clicked = ctx.data_mut(|d| d.remove_temp::<bool>(Id::unique(CLICK_FLAG))).unwrap_or(false);
-        if clicked && self.cfg.click_sound && self.sfx_frame.get() != self.last_frame {
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        // menús, paneles y pantalla completa: un bit cada uno
+        let open = [
+            self.show_settings,
+            self.show_info,
+            self.show_fx,
+            self.show_changes,
+            self.show_keys,
+            self.show_playlist,
+            self.show_offer,
+            fullscreen,
+        ]
+        .iter()
+        .enumerate()
+        .fold(0u32, |m, (i, &on)| m | (u32::from(on) << i));
+        let before = self.ui_open.replace(open);
+        let closed = before & !open != 0;
+        let opened = open & !before != 0;
+        if !self.cfg.click_sound || self.sfx_frame.get() == self.last_frame {
+            return; // apagado, o ya sonó algo propio (error, ready, captura...)
+        }
+        if closed && !opened {
+            debug_sfx(SFX_RETRACT);
+            self.core.sfx_play(SFX_RETRACT);
+        } else if clicked {
             debug_sfx(SFX_CLICK);
             self.core.sfx_play(SFX_CLICK);
         }

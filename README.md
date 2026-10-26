@@ -404,7 +404,7 @@ return {
         backend          = "auto",     -- "auto", "x11" o "wayland"
         splash           = true,       -- pantalla de carga al abrir
         startup_sound    = true,       -- sonido de inicio
-        click_sound      = true,       -- sonidito al tocar un botón
+        click_sound      = true,       -- clic en botones y sonido al cerrar menús
         show_format      = true,       -- "MP4 · H.264" arriba a la izquierda del video
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
