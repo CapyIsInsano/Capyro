@@ -187,7 +187,7 @@ const CapyroBuildInfo *capyro_core_build_info(void);
 /* ---------- efectos de sonido ----------
  * Sonidos cortos (logo, error...) que se mezclan encima de lo que esté
  * sonando. `data` es el archivo entero en memoria (mp3, wav, ogg...): se
- * decodifica al cargar. Slots 0..7. Suenan con el volumen y el silencio
+ * decodifica al cargar. Slots 0..15. Suenan con el volumen y el silencio
  * generales. Si no hay dispositivo de audio no hacen nada. */
 int  capyro_core_sfx_load(CapyroCore *core, int slot, const uint8_t *data, size_t size);
 void capyro_core_sfx_play(CapyroCore *core, int slot);

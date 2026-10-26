@@ -36,19 +36,32 @@ use crate::theme::{self, *};
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_128.png");
 const ICON_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_256.png");
 
-/// Slots de efectos: 0..=2 capibara (logo), 3 error, 4 inicio, 5 actualización.
-const SOUNDS: [&[u8]; 6] = [
+/// Slots de efectos: 0..=2 capibara (logo), 3 error, 4 inicio, 5 actualización,
+/// 6 "lista para descargar".
+const SOUNDS: [&[u8]; 7] = [
     include_bytes!("../../assets/sounds/capybara1.mp3"),
     include_bytes!("../../assets/sounds/capybara2.mp3"),
     include_bytes!("../../assets/sounds/capybara3.mp3"),
     include_bytes!("../../assets/sounds/error.mp3"),
     include_bytes!("../../assets/sounds/inicio.mp3"),
     include_bytes!("../../assets/sounds/actualizacion.mp3"),
+    include_bytes!("../../assets/sounds/ready.mp3"),
 ];
 const SFX_CAPYBARAS: usize = 3;
 const SFX_ERROR: usize = 3;
 const SFX_START: usize = 4;
 const SFX_UPDATE: usize = 5;
+const SFX_READY: usize = 6;
+
+/// Con `CAPYRO_DEBUG_SFX=1` cada sonido se anota en la terminal (para probar
+/// sin parlantes o ver cuál suena).
+fn debug_sfx(slot: usize) {
+    const NAMES: [&str; 7] = ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "ready"];
+    if std::env::var_os("CAPYRO_DEBUG_SFX").is_some() {
+        eprintln!("capyro: sonido {}", NAMES.get(slot).copied().unwrap_or("?"));
+    }
+}
+
 
 /// Arranque: la pantalla de "Cargando" dura al menos esto, y después la
 /// interfaz entra animada en INTRO_TIME.
@@ -455,11 +468,17 @@ impl CapyroApp {
             pick = (pick + 1) % SFX_CAPYBARAS;
         }
         self.last_capy = pick;
-        self.core.sfx_play(pick);
+        self.sfx(pick);
     }
 
     fn play_error(&self) {
-        self.core.sfx_play(SFX_ERROR);
+        self.sfx(SFX_ERROR);
+    }
+
+    /// Todos los sonidos pasan por acá.
+    fn sfx(&self, slot: usize) {
+        debug_sfx(slot);
+        self.core.sfx_play(slot);
     }
 
     fn toast(&mut self, ctx: &egui::Context, text: impl Into<String>, error: bool) {
@@ -531,7 +550,7 @@ impl CapyroApp {
                 self.show_offer = true;
             }
             Outcome::Installed { commits, total } => {
-                self.core.sfx_play(SFX_UPDATE);
+                self.sfx(SFX_UPDATE);
                 self.update_banner = Some(UpdateBanner { start: now, until: now + BANNER_TIME, commits, total });
             }
             Outcome::Failed { message, .. } => {
@@ -2236,6 +2255,7 @@ impl CapyroApp {
             self.show_offer = false;
         }
         if install {
+            self.sfx(SFX_READY); // a descargar
             self.show_offer = false;
             self.show_info = true; // para ver el progreso
             self.start_update(&ctx, true);
@@ -2488,7 +2508,7 @@ impl eframe::App for CapyroApp {
         if ready && !self.boot.announced {
             self.boot.announced = true;
             if self.cfg.startup_sound {
-                self.core.sfx_play(SFX_START);
+                self.sfx(SFX_START);
             }
             if self.boot.autoplay && self.core.state() == State::Stopped {
                 self.core.toggle(); // archivos por línea de comandos: just press play

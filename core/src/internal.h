@@ -19,7 +19,7 @@ struct SwsContext;
 struct ma_device;
 
 #define VQ_MAX   3              /* frames decodificados por delante */
-#define CAPYRO_SFX_SLOTS 8      /* efectos de sonido cargados a la vez */
+#define CAPYRO_SFX_SLOTS 16     /* efectos de sonido cargados a la vez */
 #define CAPYRO_SCOPE_LEN 4096   /* muestras guardadas para el visualizador */
 #define VQ_SLOTS (VQ_MAX + 2)   /* + el que se está mostrando + uno de repuesto */
 #define HWDEV_COUNT 3           /* VA-API, CUDA (NVDEC), VDPAU */
