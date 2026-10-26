@@ -287,7 +287,9 @@ Una vez instalado, Capyro se actualiza solo: **ⓘ → Buscar actualizaciones**.
 
 1. Le pregunta al repo de GitHub cuál es el último commit (`git ls-remote`). Si es el mismo
    de tu Capyro, te dice que ya tenés la última.
-2. Si hay algo nuevo, baja el código a `~/.cache/capyro/src`.
+2. Si hay algo nuevo, baja el código a `~/.cache/capyro/src` y te **muestra qué commits se van a
+   instalar**: los que son más nuevos que el tuyo, con su hash, título y fecha. Recién cuando tocás
+   **Instalar** sigue. Con **Ahora no** no se toca nada, y desde ⓘ lo volvés a ver con **Ver**.
 3. Lo compila en `~/.cache/capyro/build` con las mismas opciones que usaste vos (prefijo,
    `CAPYRO_DIST`, `CAPYRO_NATIVE`), con prioridad baja para no trabar lo que estés mirando.
 4. Lo instala en el mismo lugar donde está. Si es una carpeta del sistema (`/usr/local`), te

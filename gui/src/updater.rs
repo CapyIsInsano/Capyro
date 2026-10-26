@@ -73,8 +73,10 @@ pub enum Outcome {
     UpToDate { hash: String },
     /// Este binario es más nuevo que lo que hay en el repo.
     Ahead,
-    /// Hay algo nuevo, pero este Capyro no está instalado (se corre desde build/).
-    NotInstalled { latest: CommitInfo },
+    /// Hay commits nuevos (todavía no se instaló nada). `commits` = los que se
+    /// instalarían, el primero es el último; `total` = cuántos son en total.
+    /// `installable` = false si este Capyro corre desde build/ (sin instalar).
+    Available { commits: Vec<CommitInfo>, total: usize, installable: bool },
     /// Instalado: hay que reiniciar. `commits` = los nuevos (el primero es el último).
     Installed { commits: Vec<CommitInfo>, total: usize },
     Failed { kind: FailKind, message: String },
@@ -95,6 +97,8 @@ pub struct Job {
     pub build_type: String,
     pub dist: bool,
     pub native: bool,
+    /// false = solo buscar y mostrar los commits; true = compilar e instalar.
+    pub install_now: bool,
 }
 
 impl Job {
@@ -130,6 +134,7 @@ impl Job {
             build_type: if info.build_type.is_empty() { "Release".into() } else { info.build_type.clone() },
             dist: info.dist,
             native: info.native,
+            install_now: false,
         })
     }
 }
@@ -683,11 +688,12 @@ impl Worker {
         } else {
             1
         };
-        let Some(latest) = commits.first().cloned() else {
+        if commits.is_empty() {
             return Err((FailKind::Other, "No pude leer los commits nuevos".into()));
-        };
-        if !job.installed {
-            return Ok(Outcome::NotInstalled { latest });
+        }
+        // primero se muestra qué hay de nuevo; se instala solo si el usuario dice que sí
+        if !job.installed || !job.install_now {
+            return Ok(Outcome::Available { commits, total, installable: job.installed });
         }
         let Some(cmake) = find_tool("cmake") else {
             return Err((FailKind::MissingTool, "Para actualizarse Capyro necesita cmake".into()));
