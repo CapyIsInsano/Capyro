@@ -4,7 +4,10 @@
 --
 --  Capyro busca este archivo en este orden:
 --    1. la ruta en la variable de entorno CAPYRO_CONFIG
---    2. $XDG_CONFIG_HOME/capyro/capyro.lua   (o ~/.config/capyro/capyro.lua)
+--    2. Linux:   $XDG_CONFIG_HOME/capyro/capyro.lua (o ~/.config/capyro/capyro.lua)
+--       Windows: la que eligió el instalador (por defecto
+--                Documentos\Capyro\Config\Capyro.lua; la ruta queda anotada
+--                en capyro-config.txt, junto a capyro.exe)
 --    3. ./config/capyro.lua                  (junto al binario o en el cwd)
 --  Si no encuentra ninguno usa esta misma configuración, que va embebida
 --  en el binario. No hace falta recompilar para cambiarla: editás y
@@ -77,13 +80,22 @@ local options = {
     show_millis      = true,   -- debajo, los milisegundos del segundo actual (000..999)
 
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
-    -- "gpu" (VA-API / NVDEC / VDPAU; si no hay, avisa y usa la CPU) o "cpu".
+    -- "gpu" (Linux: VA-API / NVDEC / VDPAU; Windows: D3D11VA / NVDEC / DXVA2;
+    -- si no hay, avisa y usa la CPU) o "cpu".
     -- También se cambia en ⚙ → Decodificación.
     decoding         = "auto",
+
+    -- Sistema para el que está compilado e instalado Capyro: "Lin" (Linux)
+    -- o "Win" (Windows). Lo escribe la instalación según el sistema que
+    -- detecta, y el actualizador lo usa para instalar solo lo de ese sistema
+    -- (en Linux nada de Windows y al revés). "auto" = detectarlo al abrir.
+    system        = "auto",
 
     -- Actualizaciones (menú ⓘ → "Buscar actualizaciones").
     -- Vacío = el repo de git desde el que se compiló Capyro. Si lo compilaste
     -- desde un .zip, poné el tuyo: "usuario/Capyro" o la URL completa.
+    -- En Windows se baja el capyro-windows-x64.zip de la última versión
+    -- publicada (Releases) del repo.
     update_repo   = "",
     update_branch = "",        -- vacío = la rama principal del repo
 

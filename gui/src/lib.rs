@@ -8,6 +8,7 @@ mod app;
 mod changes;
 mod config;
 mod ffi;
+mod paths;
 mod playlists;
 mod formats;
 mod session;
@@ -57,11 +58,14 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
         viewport = viewport.with_icon(Arc::new(icon));
     }
 
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut options = eframe::NativeOptions {
         viewport,
         centered: true,
         ..Default::default()
     };
+    // X11 o Wayland: solo existe en Linux (en Windows no se compila).
+    #[cfg(target_os = "linux")]
     {
         use winit::platform::{wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11};
         match cfg.backend {

@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.9-alpha"
+#define CAPYRO_VERSION "0.3.0-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -165,6 +165,23 @@ void capyro_core_set_hwdec(CapyroCore *core, int mode); /* CapyroHwdec */
 int  capyro_core_get_hwdec(CapyroCore *core);
 void capyro_core_get_decode_info(CapyroCore *core, CapyroDecodeInfo *out);
 
+/* ---------- sistema operativo ----------
+ * En qué sistema corre Capyro: Linux o Windows (10 u 11). */
+enum {
+    CAPYRO_OS_LINUX   = 1,
+    CAPYRO_OS_WINDOWS = 2
+};
+
+typedef struct CapyroOsInfo {
+    int  family;       /* CAPYRO_OS_LINUX o CAPYRO_OS_WINDOWS */
+    int  major;        /* Windows: 10 u 11; Linux: 0 */
+    char code[4];      /* "Lin" o "Win" (como en capyro.lua) */
+    char name[64];     /* "Windows 11", "Gentoo Linux", "Ubuntu 24.04 LTS"... */
+    char version[64];  /* "23H2 · build 22631", "kernel 6.18.0"... */
+} CapyroOsInfo;
+
+void capyro_core_os_info(CapyroOsInfo *out);
+
 /* ---------- datos del build ----------
  * De qué commit de git sale este binario y dónde se instala. Los usa el
  * actualizador. Si se compiló sin git (desde un .zip), commit es "". */
@@ -180,6 +197,7 @@ typedef struct CapyroBuildInfo {
     const char *build_type; /* Release, Debug... */
     bool        dist;       /* -DCAPYRO_DIST=ON */
     bool        native;     /* -DCAPYRO_NATIVE=ON */
+    const char *system;     /* para qué sistema se compiló: "Lin" o "Win" */
 } CapyroBuildInfo;
 
 const CapyroBuildInfo *capyro_core_build_info(void);

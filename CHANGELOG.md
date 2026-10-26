@@ -8,6 +8,28 @@
 
 ---
 
+## v0.3.0-alpha · El salto a Windows
+
+- **Capyro corre en Windows 10 y 11**, además de Linux.
+  - El núcleo en C usa hilos, reloj y archivos de Win32 (nombres con tildes y ñ incluidos), y el audio sale por WASAPI.
+  - La GPU en Windows: D3D11VA, NVDEC o DXVA2, con la misma vuelta a la CPU si no se puede.
+  - Fuente Segoe UI, ícono y versión adentro del `.exe`, y sin ventana de consola (salvo que le pases opciones).
+- **Cada sistema compila e instala solo lo suyo:**
+  - CMake detecta el sistema (`CAPYRO_SYSTEM` = `Lin` o `Win`); en Linux no entra nada de Windows y al revés (dependencias de Rust, `.desktop` e íconos, DLL, recursos `.rc`...);
+  - la config instalada lleva el sistema: `system = "Lin"` o `"Win"` (opción nueva en `capyro.lua`; `"auto"` lo detecta solo);
+  - el actualizador instala solo lo de tu sistema: en Linux compila como siempre; en Windows baja la versión para Windows publicada en el repo y reemplaza los archivos, sin compilar nada.
+- **CapyroInstaller** (repo aparte): el instalador para Windows, con la cara de Capyro.
+  - Elegís dónde se instala y dónde va la config (por defecto `Documentos\Capyro\Config\Capyro.lua`).
+  - Botón Instalar gris que crece y se pone amarillo con el mouse encima, y suena el clic de Capyro.
+  - Barra de progreso verde; al terminar, la versión instalada y "¿Lanzar Capyro?" Sí/No.
+  - Accesos directos, desinstalar desde Configuración → Aplicaciones, y no pide administrador.
+- **Tutorial:**
+  - antes de "¡Bienvenido a la manada!" aparece el **sistema detectado**: Linux (con tu distro y el kernel) o Windows 10/11 (con su versión);
+  - al lado de "Potenciado por Claude" hay un destello que gira cuando le pasás el mouse, como pensando, y da una vuelta rápida con el clic.
+- En Windows todo se guarda donde corresponde: la config donde la puso el instalador, las listas en `Documentos\Capyro`, la sesión y la caché en `%LOCALAPPDATA%\Capyro` y las capturas en tu carpeta de Imágenes.
+- El menú ⓘ dice para qué sistema está compilado tu Capyro, y `capyro --version` también.
+- CI: cada push a `main` compila Capyro para Windows y lo publica en la release `windows` (de ahí bajan el actualizador y el instalador).
+
 ## v0.2.9-alpha · Decodificación por GPU
 
 - **Decodificación de video por GPU** en el núcleo en C:

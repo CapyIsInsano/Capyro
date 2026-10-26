@@ -164,7 +164,7 @@ static int load_index(CapyroCore *core, size_t index) {
     }
     const char *path = core->playlist[index];
 
-    FILE *f = fopen(path, "rb");
+    FILE *f = cp_fopen(path, "rb"); /* UTF-8 también en Windows */
     if (!f) {
         player_close(core);
         set_idle(core);
@@ -241,6 +241,12 @@ void capyro_core_shutdown(CapyroCore *core) {
     free(core->order);
     cp_mutex_destroy(&core->lock);
     free(core);
+}
+
+void capyro_core_os_info(CapyroOsInfo *out) {
+    if (out) {
+        cp_os_info(out);
+    }
 }
 
 const char *capyro_core_version(void) {

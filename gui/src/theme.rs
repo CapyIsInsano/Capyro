@@ -38,23 +38,38 @@ pub fn apply_visuals(ctx: &egui::Context, accent: Color32) {
     ctx.set_theme(egui::Theme::Dark);
 }
 
-/// Si el sistema tiene DejaVu Sans la usamos (se parece más al
-/// mockup y trae negrita). Si no, quedan las fuentes que trae egui.
+/// Linux: DejaVu Sans si está (se parece más al mockup y trae negrita).
+/// Windows: Segoe UI, la del sistema. Si no, quedan las fuentes de egui.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
 
+    #[cfg(not(windows))]
     const REGULAR: &[&str] = &[
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",          // Gentoo
         "/usr/share/fonts/TTF/DejaVuSans.ttf",             // Arch / Artix
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // Debian / Devuan / Ubuntu
     ];
+    #[cfg(not(windows))]
     const BOLD: &[&str] = &[
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     ];
+    // relativas a %WINDIR%\Fonts
+    #[cfg(windows)]
+    const REGULAR: &[&str] = &["segoeui.ttf", "arial.ttf"];
+    #[cfg(windows)]
+    const BOLD: &[&str] = &["segoeuib.ttf", "arialbd.ttf"];
 
-    let load = |list: &[&str]| list.iter().find_map(|p| std::fs::read(p).ok());
+    let load = |list: &[&str]| {
+        list.iter().find_map(|p| {
+            #[cfg(windows)]
+            let p = std::path::PathBuf::from(std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into()))
+                .join("Fonts")
+                .join(p);
+            std::fs::read(p).ok()
+        })
+    };
 
     let mut proportional = fonts
         .families
@@ -75,6 +90,18 @@ pub fn install_fonts(ctx: &egui::Context) {
             .font_data
             .insert("capyro-bold".into(), Arc::new(FontData::from_owned(bytes)));
         bold_family.insert(0, "capyro-bold".into());
+    }
+
+    // Windows: los símbolos (▸, ✓...) que no trae Segoe UI salen de Segoe UI Symbol
+    #[cfg(windows)]
+    if let Some(bytes) = load(&["seguisym.ttf"]) {
+        fonts
+            .font_data
+            .insert("capyro-symbols".into(), Arc::new(FontData::from_owned(bytes)));
+        let at = proportional.len().min(1);
+        proportional.insert(at, "capyro-symbols".into());
+        let at = bold_family.len().min(1);
+        bold_family.insert(at, "capyro-symbols".into());
     }
 
     fonts.families.insert(FontFamily::Proportional, proportional);

@@ -1,6 +1,6 @@
 [package]
 name = "capyro_gui"
-version = "0.2.9"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.95"
 description = "Interfaz gráfica de Capyro (egui) — se compila como staticlib y se linkea al núcleo en C"
@@ -10,17 +10,33 @@ publish = false
 [lib]
 crate-type = ["staticlib"]
 
+# Lo que es de un solo sistema se compila solo en ese sistema: en Linux no
+# entra nada de Windows (y al revés).
 [dependencies]
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 # Diálogo nativo para abrir archivos (en Linux usa el portal de escritorio)
 rfd = "0.17"
 pollster = "0.4"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["wayland", "x11"] }
 # Actualizador: prioridad baja para la compilación, kill() y flock()
 libc = "0.2"
 # Solo para elegir el backend X11/Wayland en Linux (misma versión que usa eframe)
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
+
+[target.'cfg(windows)'.dependencies]
+# Carpetas conocidas de Windows (Documentos, Imágenes, AppData), aunque
+# estén movidas a OneDrive u otro disco.
+dirs = "6"
+# Actualizador: lee las respuestas de la API de GitHub (Releases)
+serde_json = "1"
+
+[dev-dependencies]
+# Las pruebas del actualizador de Windows corren en cualquier sistema
+serde_json = "1"
 
 # ---------------------------------------------------------------------------
 # Perfiles de compilación

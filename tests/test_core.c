@@ -17,11 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <time.h>
-
 static void sleep_ms(int ms) {
-    struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
-    nanosleep(&ts, NULL);
+    cp_sleep_ms(ms); /* de platform.h: anda en Linux y en Windows */
 }
 
 static int failures = 0;
@@ -34,7 +31,7 @@ static int failures = 0;
         }                                                                    \
     } while (0)
 
-#define NEAR(a, b, tol) (fabs((double)(a) - (double)(b)) <= (tol))
+#define CLOSE_TO(a, b, tol) (fabs((double)(a) - (double)(b)) <= (tol))
 
 static void touch(const char *path) {
     FILE *f = fopen(path, "wb");
@@ -49,6 +46,20 @@ static void pump(CapyroCore *core, int ms) {
         capyro_core_update(core);
         sleep_ms(10);
     }
+}
+
+/* Sistema operativo detectado */
+static void test_os(void) {
+    CapyroOsInfo os;
+    capyro_core_os_info(&os);
+    printf("sistema: %s · %s · %s\n", os.name, os.version, os.code);
+    CHECK(os.name[0] != '\0');
+#ifdef _WIN32
+    CHECK(os.family == CAPYRO_OS_WINDOWS && strcmp(os.code, "Win") == 0);
+#else
+    CHECK(os.family == CAPYRO_OS_LINUX && strcmp(os.code, "Lin") == 0);
+#endif
+    CHECK(strcmp(capyro_core_build_info()->system, os.code) == 0);
 }
 
 static void test_basics(void) {
@@ -266,7 +277,7 @@ static void test_media(const char *dir) {
     if (has_tone) {
     CHECK(capyro_core_open(core, tone) == CAPYRO_OK);
     CHECK(capyro_core_get_media_kind(core) == CAPYRO_MEDIA_AUDIO);
-    CHECK(NEAR(capyro_core_get_duration(core), 3.0, 0.15));
+    CHECK(CLOSE_TO(capyro_core_get_duration(core), 3.0, 0.15));
     CHECK(strcmp(capyro_core_get_title(core), "Tono de prueba") == 0);
     CHECK(strcmp(capyro_core_get_artist(core), "Capyro") == 0);
     CHECK(!capyro_core_lock_video_frame(core, &vf)); /* sin carátula */
@@ -280,14 +291,14 @@ static void test_media(const char *dir) {
     capyro_core_pause(core);
     double paused_at = capyro_core_get_position(core);
     pump(core, 300);
-    CHECK(NEAR(capyro_core_get_position(core), paused_at, 0.02));
+    CHECK(CLOSE_TO(capyro_core_get_position(core), paused_at, 0.02));
 
     capyro_core_seek(core, 2.5);
-    CHECK(NEAR(capyro_core_get_position(core), 2.5, 0.01));
+    CHECK(CLOSE_TO(capyro_core_get_position(core), 2.5, 0.01));
     capyro_core_play(core);
     pump(core, 1500);
     CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PAUSED); /* llegó al final */
-    CHECK(NEAR(capyro_core_get_position(core), capyro_core_get_duration(core), 0.01));
+    CHECK(CLOSE_TO(capyro_core_get_position(core), capyro_core_get_duration(core), 0.01));
 
     capyro_core_play(core); /* play al final = desde el principio */
     pump(core, 100);
@@ -317,7 +328,7 @@ static void test_media(const char *dir) {
     /* --- mp4: primer frame visible sin play, frames nuevos al reproducir --- */
     CHECK(capyro_core_open(core, clip) == CAPYRO_OK);
     CHECK(capyro_core_get_media_kind(core) == CAPYRO_MEDIA_VIDEO);
-    CHECK(NEAR(capyro_core_get_duration(core), 2.0, 0.15));
+    CHECK(CLOSE_TO(capyro_core_get_duration(core), 2.0, 0.15));
     bool ready = false;
     for (int t = 0; t < 3000 && !ready; t += 10) { /* holgado para sanitizers */
         ready = capyro_core_lock_video_frame(core, &vf);
@@ -328,7 +339,7 @@ static void test_media(const char *dir) {
     uint64_t first_serial = 0;
     if (ready) {
         CHECK(vf.width == 320 && vf.height == 240);
-        CHECK(NEAR(vf.aspect, 320.0 / 240.0, 0.01));
+        CHECK(CLOSE_TO(vf.aspect, 320.0 / 240.0, 0.01));
         first_serial = vf.serial;
         capyro_core_unlock_video_frame(core);
     } else {
@@ -378,7 +389,7 @@ static void test_media(const char *dir) {
     CHECK(fast > 0.7 && fast < 1.3);
     double before = capyro_core_get_position(core);
     capyro_core_set_speed(core, 1.0);
-    CHECK(NEAR(capyro_core_get_position(core), before, 0.05));
+    CHECK(CLOSE_TO(capyro_core_get_position(core), before, 0.05));
     capyro_core_set_speed(core, 0.5);
     double slow_start = capyro_core_get_position(core);
     pump(core, 600);
@@ -470,7 +481,7 @@ static void test_media(const char *dir) {
         capyro_core_playlist_clear(core);
         CHECK(capyro_core_open(core, path) == CAPYRO_OK);
         CHECK(capyro_core_get_media_kind(core) == kinds[i]);
-        CHECK(NEAR(capyro_core_get_duration(core), 2.0, 0.25)); /* .aac: estimada por bitrate */
+        CHECK(CLOSE_TO(capyro_core_get_duration(core), 2.0, 0.25)); /* .aac: estimada por bitrate */
         capyro_core_play(core);
         pump(core, 400);
         double p = capyro_core_get_position(core);
@@ -644,6 +655,7 @@ static void test_hwdec(const char *dir) {
 }
 
 int main(int argc, char **argv) {
+    test_os();
     test_basics();
     test_dsp();
     if (argc > 1) {

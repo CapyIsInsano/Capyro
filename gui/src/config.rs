@@ -34,6 +34,51 @@ pub enum Action {
     Quit,
 }
 
+/// Sistema para el que está compilado/instalado Capyro (`options.system`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum System {
+    /// Linux
+    Lin,
+    /// Windows
+    Win,
+}
+
+impl System {
+    /// El sistema en el que corre este binario (decidido al compilar).
+    pub const fn current() -> Self {
+        if cfg!(windows) {
+            System::Win
+        } else {
+            System::Lin
+        }
+    }
+
+    /// Como se escribe en capyro.lua: "Lin" o "Win".
+    pub fn code(self) -> &'static str {
+        match self {
+            System::Lin => "Lin",
+            System::Win => "Win",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            System::Lin => "Linux",
+            System::Win => "Windows",
+        }
+    }
+
+    /// `Some(None)` = "auto".
+    fn parse(s: &str) -> Option<Option<Self>> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "lin" | "linux" => Some(Some(System::Lin)),
+            "win" | "windows" => Some(Some(System::Win)),
+            "auto" | "" => Some(None),
+            _ => None,
+        }
+    }
+}
+
 /// Backend de ventana en Linux. Con Wayland nativo winit todavía no recibe
 /// archivos arrastrados; con X11 (vía XWayland) sí.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,11 +238,22 @@ pub struct Config {
     pub show_millis: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
+    /// `options.system` tal cual (None = "auto"). Usar [`Config::system`].
+    pub system_setting: Option<System>,
     /// De dónde salió (para el log): ruta o "embebida".
     pub source: String,
 }
 
 impl Config {
+    /// El sistema de esta instalación. Si la config dice otro (por ejemplo
+    /// se copió un capyro.lua de Linux a Windows) manda el real.
+    pub fn system(&self) -> System {
+        match self.system_setting {
+            Some(s) if s == System::current() => s,
+            _ => System::current(),
+        }
+    }
+
     /// Busca y carga `capyro.lua`. Nunca falla: ante cualquier problema
     /// avisa por stderr y usa la configuración embebida.
     pub fn load() -> Self {
@@ -223,17 +279,11 @@ impl Config {
 /* ------------------------------------------------------------------------ */
 
 /// Donde se guarda lo que se edita desde Capyro: `CAPYRO_CONFIG` si está,
-/// si no `~/.config/capyro/capyro.lua` (el primero que se busca al abrir).
-/// Nunca el de ejemplo del repo ni el de /usr/share.
+/// si no `~/.config/capyro/capyro.lua` en Linux o la que eligió el
+/// instalador en Windows (el primero que se busca al abrir). Nunca el de
+/// ejemplo del repo ni el instalado junto al programa.
 pub fn user_config_path() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("CAPYRO_CONFIG") {
-        return Some(PathBuf::from(p));
-    }
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("capyro").join("capyro.lua"))
+    crate::paths::user_config()
 }
 
 /// "Ctrl+Shift+Right": como se escribe en capyro.lua.
@@ -336,7 +386,6 @@ impl Config {
     /// El archivo entero, armado sobre el de ejemplo (con todos sus
     /// comentarios) pero con los atajos y las opciones de esta config.
     pub fn to_lua(&self) -> String {
-        let home = std::env::var("HOME").unwrap_or_default();
         let option_value = |name: &str| -> Option<String> {
             Some(match name {
                 "seek_step" => fmt_num(self.seek_step),
@@ -358,11 +407,7 @@ impl Config {
                 "remember_session" => self.remember_session.to_string(),
                 "visualizer" => self.visualizer.to_string(),
                 "screenshot_dir" => {
-                    let p = self.screenshot_dir.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-                    let p = match p.strip_prefix(&home) {
-                        Some(rest) if !home.is_empty() && rest.starts_with('/') => format!("~{rest}"),
-                        _ => p,
-                    };
+                    let p = self.screenshot_dir.as_deref().map(crate::paths::tilde).unwrap_or_default();
                     lua_quote(&p)
                 }
                 "splash" => self.splash.to_string(),
@@ -373,6 +418,7 @@ impl Config {
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
+                "system" => lua_quote(self.system().code()),
                 "backend" => lua_quote(match self.backend {
                     Backend::Auto => "auto",
                     Backend::X11 => "x11",
@@ -454,7 +500,7 @@ impl Config {
 
     /// Guarda en [`user_config_path`] (con copia `.bak` del anterior).
     pub fn save(&mut self) -> std::io::Result<PathBuf> {
-        let path = user_config_path().ok_or_else(|| std::io::Error::other("no hay HOME"))?;
+        let path = user_config_path().ok_or_else(|| std::io::Error::other("no encontré la carpeta personal"))?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -495,22 +541,21 @@ impl Config {
 
 fn candidate_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Some(p) = std::env::var_os("CAPYRO_CONFIG") {
-        out.push(PathBuf::from(p));
-    }
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-        out.push(PathBuf::from(xdg).join("capyro/capyro.lua"));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        out.push(PathBuf::from(home).join(".config/capyro/capyro.lua"));
+    // CAPYRO_CONFIG, ~/.config/capyro (Linux) o la del instalador (Windows)
+    out.extend(user_config_path());
+    #[cfg(not(windows))]
+    if let Some(home) = crate::paths::home() {
+        out.push(home.join(".config/capyro/capyro.lua"));
     }
     out.push(PathBuf::from("config/capyro.lua"));
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            out.push(dir.join("config/capyro.lua"));
+            out.push(dir.join("config").join("capyro.lua"));
+            #[cfg(not(windows))]
             out.push(dir.join("../share/capyro/capyro.lua"));
         }
     }
+    out.dedup();
     out
 }
 
@@ -541,6 +586,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         click_sound: true,
         show_format: true,
         show_millis: true,
+        system_setting: None,
         source: name.to_owned(),
     };
 
@@ -610,11 +656,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         if let Some(v) = opts.get::<Option<String>>("screenshot_dir")? {
             let v = v.trim();
             if !v.is_empty() {
-                let expanded = match (v.strip_prefix("~/"), std::env::var_os("HOME")) {
-                    (Some(rest), Some(home)) => std::path::PathBuf::from(home).join(rest),
-                    _ => std::path::PathBuf::from(v),
-                };
-                cfg.screenshot_dir = Some(expanded);
+                cfg.screenshot_dir = Some(crate::paths::expand_tilde(v));
             }
         }
         if let Some(v) = opts.get::<Option<bool>>("splash")? {
@@ -648,6 +690,23 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                     crate::ffi::Hwdec::Auto
                 }
             };
+        }
+        if let Some(v) = opts.get::<Option<String>>("system")? {
+            match System::parse(&v) {
+                Some(sys) => {
+                    if let Some(s) = sys.filter(|s| *s != System::current()) {
+                        eprintln!(
+                            "capyro: {name}: system = \"{}\" pero este Capyro es de {} ({}); uso \"{}\"",
+                            s.code(),
+                            System::current().name(),
+                            System::current().code(),
+                            System::current().code()
+                        );
+                    }
+                    cfg.system_setting = sys;
+                }
+                None => eprintln!("capyro: {name}: system desconocido '{v}' (Lin, Win o auto)"),
+            }
         }
         if let Some(v) = opts.get::<Option<bool>>("auto_next")? {
             cfg.auto_next = v;
@@ -770,6 +829,10 @@ mod tests {
         assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
         assert!(!back.show_format && !back.show_millis);
         assert_eq!(back.splash, cfg.splash);
+        // "auto" se guarda ya resuelto: Lin o Win según dónde corre
+        assert_eq!(cfg.system_setting, None);
+        assert_eq!(back.system_setting, Some(System::current()));
+        assert!(text.contains(&format!("system        = \"{}\",", System::current().code())), "{text}");
         // los comentarios del ejemplo siguen ahí
         assert!(text.contains("-- segundos que avanza/retrocede"));
     }
@@ -784,6 +847,19 @@ mod tests {
             assert_eq!(parse_key_spec(&spec), Some((Modifiers::COMMAND | Modifiers::SHIFT, key)), "{spec}");
         }
         assert_eq!(key_label(Modifiers::COMMAND, Key::ArrowRight), "Ctrl+→");
+    }
+
+    #[test]
+    fn sistema() {
+        let lua = |v: &str| format!("return {{ options = {{ system = \"{v}\" }} }}");
+        assert_eq!(parse(&lua("Lin"), "t").unwrap().system_setting, Some(System::Lin));
+        assert_eq!(parse(&lua("win"), "t").unwrap().system_setting, Some(System::Win));
+        assert_eq!(parse(&lua("auto"), "t").unwrap().system_setting, None);
+        assert_eq!(parse(&lua("Mac"), "t").unwrap().system_setting, None);
+        // el que no corresponde no gana: manda el sistema real
+        let otro = if cfg!(windows) { "Lin" } else { "Win" };
+        assert_eq!(parse(&lua(otro), "t").unwrap().system(), System::current());
+        assert_eq!(System::current(), if cfg!(windows) { System::Win } else { System::Lin });
     }
 
     #[test]

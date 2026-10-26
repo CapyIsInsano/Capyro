@@ -1,0 +1,91 @@
+# Compila Capyro para Windows (desde Linux, con mingw-w64) en cada push a
+# main y lo publica en la release "windows" del repo:
+#
+#   capyro-windows-x64.zip  →  capyro.exe + DLL de FFmpeg + config\capyro.lua
+#
+# De ahí lo bajan el actualizador de Capyro en Windows (ⓘ → Buscar
+# actualizaciones) y CapyroInstaller. En la descripción de la release van el
+# commit y la versión (el actualizador los lee para mostrar "el parche").
+name: Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # el commit y su fecha van adentro del binario
+
+      - name: Herramientas (mingw-w64, cmake, ninja)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mingw-w64 cmake ninja-build pkg-config zip unzip
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: FFmpeg para Windows (BtbN, LGPL, compartido)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ffmpeg && cd ffmpeg
+          # la versión estable más nueva; si no hay, la de desarrollo
+          NAME=$(gh release view latest --repo BtbN/FFmpeg-Builds --json assets -q '.assets[].name' \
+                 | grep -E '^ffmpeg-n[0-9.]+-latest-win64-lgpl-shared-[0-9.]+\.zip$' | sort -V | tail -1 || true)
+          NAME=${NAME:-ffmpeg-master-latest-win64-lgpl-shared.zip}
+          echo "FFmpeg: $NAME"
+          gh release download latest --repo BtbN/FFmpeg-Builds --pattern "$NAME"
+          unzip -q "$NAME"
+          mv ffmpeg-*/ win64
+
+      - name: Compilar
+        run: |
+          cmake -S . -B build-win -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake \
+            -DCAPYRO_FFMPEG_DIR="$PWD/ffmpeg/win64" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCAPYRO_SYSTEM=Win \
+            -DCAPYRO_BUILD_TESTS=OFF
+          cmake --build build-win
+          cmake --install build-win --prefix dist/Capyro
+
+      - name: Empaquetar
+        run: |
+          cd dist/Capyro
+          ls -la
+          zip -r -9 ../../capyro-windows-x64.zip .
+
+      - name: Publicar en la release "windows"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n 's/^#define CAPYRO_VERSION "\(.*\)"/\1/p' core/include/capyro_core.h)
+          printf 'Capyro para Windows 10 y 11 (x64), compilado por el CI.\n\nPara instalarlo usá CapyroInstaller.\n\ncommit: %s\nversion: %s\n' \
+            "$GITHUB_SHA" "$VERSION" > notes.md
+          gh release delete windows --yes --cleanup-tag || true
+          gh release create windows capyro-windows-x64.zip \
+            --target "$GITHUB_SHA" \
+            --title "Capyro $VERSION para Windows" \
+            --notes-file notes.md \
+            --latest=false
+
+      # Opcional: avisarle al repo del instalador que hay paquete nuevo.
+      # Necesita un token con permiso sobre ese repo en el secreto INSTALLER_TOKEN.
+      - name: Avisar a CapyroInstaller
+        env:
+          GH_TOKEN: ${{ secrets.INSTALLER_TOKEN }}
+        if: env.GH_TOKEN != ''
+        run: gh api repos/${{ github.repository_owner }}/CapyroInstaller/dispatches -f event_type=capyro-windows

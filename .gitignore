@@ -1,5 +1,7 @@
 /build*/
 /gui/target/
+/dist*/
+/ffmpeg*/
 compile_commands.json
 *.o
 *.a

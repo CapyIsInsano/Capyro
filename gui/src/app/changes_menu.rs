@@ -12,13 +12,7 @@ use crate::theme::*;
 
 /// Abre una página en el navegador del sistema.
 pub(super) fn open_url(url: &str) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
-        .arg(url)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
+    crate::paths::open_url(url)
 }
 
 impl CapyroApp {

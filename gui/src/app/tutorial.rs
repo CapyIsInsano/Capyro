@@ -8,7 +8,8 @@
 //!   2. Recorrido: aparece la interfaz (todavía sin funcionar) y se ilumina
 //!      cada parte con su explicación.
 //!   3. "¿Estás listo?": No → otra vuelta del recorrido; Sí → ...
-//!   4. "¡Bienvenido a la manada!" y todo vuelve a la normalidad.
+//!   4. "Sistema detectado": Linux o Windows (10 u 11), con su versión.
+//!   5. "¡Bienvenido a la manada!" y todo vuelve a la normalidad.
 
 use std::path::PathBuf;
 
@@ -18,7 +19,8 @@ use eframe::egui::{
 };
 
 use super::{animate_button, decode_png, ease_in_out, ease_out, CapyroApp};
-use crate::ffi::State;
+use crate::ffi::{OsInfo, State};
+use crate::icons;
 use crate::theme::*;
 
 /// Música del tutorial (ya con el volumen al 25 %). Va como un MP3 de
@@ -40,11 +42,7 @@ pub(super) struct SavedQueue {
 
 /// Escribe la canción en ~/.cache/capyro/tutorial/ (si no estaba) y da la ruta.
 fn track_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    let path = base.join("capyro").join("tutorial").join(TRACK_FILE);
+    let path = crate::paths::cache_dir().join("tutorial").join(TRACK_FILE);
     let ok = std::fs::metadata(&path).map(|m| m.len() == TRACK.len() as u64).unwrap_or(false);
     if !ok {
         std::fs::create_dir_all(path.parent()?).ok()?;
@@ -61,8 +59,8 @@ const CLAUDE_URL: &str = "https://www.anthropic.com/claude";
 
 const INTRO: [&str; 4] = [
     "¡Hola! Bienvenido a Capyro.",
-    "Capyro es un reproductor de audio y video para Linux: liviano, rápido y con un capibara de mascota. \
-     Su núcleo está escrito en C, la interfaz en Rust, y todo se configura con Lua.",
+    "Capyro es un reproductor de audio y video para Linux y Windows: liviano, rápido y con un capibara de \
+     mascota. Su núcleo está escrito en C, la interfaz en Rust, y todo se configura con Lua.",
     "La idea es simple: abrís un archivo, apretás play y listo. Just press play.",
     "Ahora te muestro cómo funciona todo. Todavía no toques nada: mirá y seguí con Espacio.",
 ];
@@ -113,8 +111,13 @@ const STEPS: [Step; 16] = [
     Step {
         target: Some("info"),
         title: "Información",
-        text: "La versión, los formatos con un resumen de cada uno, y el botón para buscar actualizaciones: te \
-               muestra qué commits hay de nuevo y, si querés, se baja, se compila y se instala solo.",
+        text: if cfg!(windows) {
+            "La versión, los formatos con un resumen de cada uno, y el botón para buscar actualizaciones: te \
+             muestra qué commits hay de nuevo y, si querés, baja la versión para Windows y se instala solo."
+        } else {
+            "La versión, los formatos con un resumen de cada uno, y el botón para buscar actualizaciones: te \
+             muestra qué commits hay de nuevo y, si querés, se baja, se compila y se instala solo."
+        },
     },
     Step {
         target: Some("changes"),
@@ -174,8 +177,15 @@ pub(super) enum Phase {
     Reveal,
     Tour(usize),
     Ask,
+    /// "Sistema detectado" (después del Sí, antes de la bienvenida).
+    System,
     Welcome,
 }
+
+/// Cuánto dura "Detectando…" antes de mostrar el sistema.
+const SCAN_TIME: f64 = 0.9;
+/// La tarjeta del sistema se va sola a los...
+const SYSTEM_TIME: f64 = 5.5;
 
 pub(super) struct Tutorial {
     phase: Phase,
@@ -196,14 +206,20 @@ pub(super) struct Tutorial {
     rounds: u32,
     /// Duración del fundido de la música al cerrar.
     fade: f64,
+    /// El sistema en el que corre (lo muestra la fase System).
+    os: OsInfo,
+}
+
+/// Estado del destello del crédito: gira cuando le pasás el mouse (como
+/// "pensando") y da una vuelta rápida con el clic.
+#[derive(Clone, Copy, Default)]
+struct Spark {
+    angle: f32,
+    speed: f32,
 }
 
 fn marker_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
-    Some(base.join("capyro").join("tutorial-visto"))
+    crate::paths::state_dir().map(|d| d.join("tutorial-visto"))
 }
 
 /// ¿Es la primera vez que se abre Capyro?
@@ -320,6 +336,7 @@ impl CapyroApp {
             saved,
             rounds: 0,
             fade: 0.8,
+            os: crate::ffi::os_info(),
         });
     }
 
@@ -395,6 +412,12 @@ impl CapyroApp {
                 t.spot_t0 = now;
                 t.go(Phase::Ask, now);
             }
+            Phase::System => {
+                if now - t.t0 > SCAN_TIME {
+                    t.go(Phase::Welcome, now);
+                    self.play_capybara();
+                }
+            }
             Phase::Ask | Phase::Welcome => {}
         }
     }
@@ -443,6 +466,12 @@ impl CapyroApp {
             t.spot_to = to;
             t.spot_t0 = now;
             t.go(Phase::Tour(0), now);
+        }
+        // el sistema detectado: se va solo a la bienvenida
+        if phase == Phase::System && now - phase_t0 > SYSTEM_TIME {
+            let t = self.tutorial.as_mut().expect("tutorial");
+            t.go(Phase::Welcome, now);
+            self.play_capybara();
         }
         // bienvenida: a los 3.6 s se va sola
         if phase == Phase::Welcome && now - phase_t0 > 3.6 {
@@ -497,6 +526,10 @@ impl CapyroApp {
                 p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha(165));
                 answer = self.draw_ask(ui, &p, full, now - t.t0, accent);
             }
+            Phase::System => {
+                p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha(165));
+                draw_system(&p, full, &t.os, (now - t.t0) as f32, now, accent);
+            }
             Phase::Welcome => {
                 p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha(165));
                 self.draw_welcome(&p, full, (now - t.t0) as f32, accent);
@@ -511,8 +544,8 @@ impl CapyroApp {
         } else if let Some(yes) = answer {
             let t = self.tutorial.as_mut().expect("tutorial");
             if yes {
-                t.go(Phase::Welcome, now);
-                self.play_capybara();
+                // antes de la bienvenida: qué sistema se detectó
+                t.go(Phase::System, now);
             } else {
                 // otra vuelta del recorrido, desde el principio
                 t.rounds += 1;
@@ -526,6 +559,7 @@ impl CapyroApp {
         } else if esc {
             self.finish_tutorial(now, 0.8);
         } else if advance && !matches!(phase, Phase::Ask | Phase::Welcome) {
+            // (en System, Espacio pasa a la bienvenida una vez detectado)
             self.tutorial_next(now);
         }
         ctx.request_repaint();
@@ -648,10 +682,44 @@ impl CapyroApp {
         let name = p.layout_no_wrap("Claude".to_owned(), bold(11.0), TEXT_DIM);
         let post = p.layout_no_wrap(" · Anthropic".to_owned(), regular(11.0), TEXT_FAINT);
         let w = pre.size().x + name.size().x + post.size().x;
-        let r = Rect::from_center_size(pos2(full.center().x, cy), vec2(w + 26.0, 20.0));
+        // un poco a la derecha: a la izquierda va el destello
+        let r = Rect::from_center_size(pos2(full.center().x + 12.0, cy), vec2(w + 26.0, 20.0));
         let b = animate_button(ui, Id::unique("capyro-tutorial-claude"), r, appear > 0.9);
         if b.hover > 0.001 {
             p.rect_filled(r, 10.0, Color32::from_white_alpha((8.0 * b.hover) as u8));
+        }
+        // a la izquierda, el destello: gira con el mouse encima y da una
+        // vuelta rápida al hacer clic
+        {
+            let ctx = ui.ctx();
+            let id = Id::unique("capyro-tutorial-spark");
+            let dt = ctx.input(|i| i.stable_dt).min(0.05);
+            let mut sp: Spark = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
+            let target = if b.hover > 0.5 { 7.0 } else { 0.0 };
+            sp.speed += (target - sp.speed) * (dt * 5.0).min(1.0);
+            if b.resp.clicked() || b.resp.is_pointer_button_down_on() && sp.speed < 12.0 {
+                sp.speed = 24.0;
+            }
+            sp.angle += sp.speed * dt;
+            if b.hover < 0.5 && sp.speed.abs() < 1.0 {
+                // se acomoda en la posición de reposo (simetría de 4 puntas)
+                let q = std::f32::consts::FRAC_PI_2;
+                let rest = (sp.angle / q).round() * q;
+                sp.angle += (rest - sp.angle) * (dt * 8.0).min(1.0);
+            }
+            sp.angle %= std::f32::consts::TAU;
+            ctx.data_mut(|d| d.insert_temp(id, sp));
+            if sp.speed.abs() > 0.01 || b.hover > 0.001 {
+                ctx.request_repaint();
+            }
+            let sc = pos2(r.left() - 10.0, cy);
+            let pulse = 1.0 + 0.12 * b.hover * ((now * 6.0).sin() as f32 * 0.5 + 0.5);
+            let col = TEXT_DIM.lerp_to_gamma(accent, b.hover);
+            if b.hover > 0.001 {
+                p.circle_filled(sc, 11.0, accent.gamma_multiply(0.12 * b.hover));
+            }
+            icons::sparkle(&p, sc, 9.0 * pulse, sp.angle, col);
+            icons::sparkle(&p, sc + vec2(7.5, -7.0), 3.6 * pulse, -sp.angle * 1.4, col.gamma_multiply(0.8));
         }
         let mut x = r.left() + 8.0;
         let ty = cy - pre.size().y / 2.0;
@@ -767,6 +835,96 @@ impl CapyroApp {
         ps.multiply_opacity(ease_out((since - 0.7) / 0.4));
         ps.text(c + vec2(0.0, 56.0), Align2::CENTER_CENTER, "Ya podés usar Capyro. Just press play.", regular(14.0), TEXT_DIM);
     }
+}
+
+/// "Sistema detectado": primero un "Detectando…" corto y después el ícono
+/// (original, no el logo del sistema), el nombre y la versión.
+fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64, accent: Color32) {
+    let k = ease_out(since / 0.35);
+    let size = vec2(380.0, 268.0) * (0.92 + 0.08 * k);
+    let card = Rect::from_center_size(full.center(), size);
+    let mut p = p.clone();
+    p.multiply_opacity(k);
+    p.rect_filled(card.translate(vec2(0.0, 6.0)), 18.0, Color32::from_black_alpha(90));
+    p.rect_filled(card, 18.0, BG_PANEL);
+    p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
+    let cx = card.center().x;
+    let icon_c = pos2(cx, card.top() + 74.0);
+
+    let scan = (since as f64 / SCAN_TIME).clamp(0.0, 1.0) as f32;
+    if scan < 1.0 {
+        // "Detectando tu sistema…" con un spinner
+        icons::spinner(&p, icon_c, 54.0, accent, now);
+        p.text(pos2(cx, card.top() + 150.0), Align2::CENTER_CENTER, "Detectando tu sistema…", regular(15.0), TEXT_DIM);
+        return;
+    }
+    let t = since - SCAN_TIME as f32;
+    let pop = ease_out(t / 0.4);
+    let bounce = (-t * 4.0).exp() * (t * 12.0).sin().abs() * 10.0;
+    // brillo detrás del ícono
+    p.circle_filled(icon_c, 44.0 * pop, accent.gamma_multiply(0.12));
+    let side = 72.0 * (0.6 + 0.4 * pop);
+    let mut pi = p.clone();
+    pi.multiply_opacity(pop);
+    let ic = icon_c - vec2(0.0, bounce);
+    if os.windows {
+        icons::app_window(&pi, ic, side, Color32::from_gray(200), accent, os.major >= 11);
+        if os.major >= 10 {
+            // la versión en una pastillita, en la esquina del ícono
+            let chip_c = ic + vec2(side * 0.48, side * 0.36);
+            let g = pi.layout_no_wrap(os.major.to_string(), bold(12.0), Color32::WHITE);
+            let chip = Rect::from_center_size(chip_c, vec2(g.size().x + 14.0, 20.0));
+            pi.rect_filled(chip, 10.0, accent);
+            pi.galley(chip.center() - g.size() / 2.0, g, Color32::WHITE);
+        }
+    } else {
+        icons::terminal(&pi, ic, side, Color32::from_gray(200), accent, now);
+    }
+
+    let mut pt = p.clone();
+    pt.multiply_opacity(ease_out((t - 0.15) / 0.35));
+    pt.text(pos2(cx, card.top() + 136.0), Align2::CENTER_CENTER, "Sistema detectado", regular(12.5), TEXT_FAINT);
+    // grande: la familia ("Linux", "Windows 11"); chico: distro o versión
+    let (big, small) = if os.windows {
+        let big = if os.name.is_empty() { "Windows".to_owned() } else { os.name.clone() };
+        (big, os.version.clone())
+    } else {
+        let distro = if os.name.is_empty() || os.name == "Linux" { String::new() } else { os.name.clone() };
+        let small = match (distro.is_empty(), os.version.is_empty()) {
+            (false, false) => format!("{distro} · {}", os.version),
+            (false, true) => distro,
+            _ => os.version.clone(),
+        };
+        ("Linux".to_owned(), small)
+    };
+    pt.text(pos2(cx, card.top() + 162.0), Align2::CENTER_CENTER, big, bold(24.0), TEXT);
+    if !small.is_empty() {
+        let g = pt.layout_no_wrap(small, regular(12.5), TEXT_DIM);
+        let w = g.size().x.min(card.width() - 40.0);
+        let mut pc = pt.clone();
+        pc.set_clip_rect(Rect::from_center_size(pos2(cx, card.top() + 188.0), vec2(w, 20.0)));
+        pc.galley(pos2(cx - g.size().x.min(w) / 2.0, card.top() + 188.0 - g.size().y / 2.0), g, TEXT_DIM);
+    }
+    let mut pb = p.clone();
+    pb.multiply_opacity(ease_out((t - 0.45) / 0.35));
+    let line = format!(
+        "Capyro está compilado para {} ({}): las actualizaciones instalan solo lo de tu sistema.",
+        if os.windows { "Windows" } else { "Linux" },
+        os.code
+    );
+    let g = pb.layout_job(centered_job(&line, regular(11.5), TEXT_FAINT, card.width() - 56.0));
+    let gy = card.bottom() - 34.0 - g.size().y / 2.0;
+    pb.galley(pos2(cx, gy), g, TEXT_FAINT);
+    // abajo, fuera de la tarjeta: cómo seguir (y una barrita del tiempo que queda)
+    if t > 0.8 {
+        let pulse = 0.55 + 0.45 * ((now * 3.0).sin() as f32).abs();
+        let mut ph = p.clone();
+        ph.multiply_opacity(pulse * ease_out((t - 0.8) / 0.3));
+        ph.text(pos2(cx, card.bottom() + 22.0), Align2::CENTER_CENTER, "Espacio para seguir  ▸", regular(12.0), TEXT_DIM);
+    }
+    let left = 1.0 - ((since as f64 - SCAN_TIME) / (SYSTEM_TIME - SCAN_TIME)).clamp(0.0, 1.0) as f32;
+    let bar = Rect::from_min_size(pos2(card.left() + 18.0, card.bottom() - 6.0), vec2((card.width() - 36.0) * left, 2.0));
+    p.rect_filled(bar, 1.0, accent.gamma_multiply(0.6));
 }
 
 fn uv() -> Rect {

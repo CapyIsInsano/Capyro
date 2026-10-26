@@ -54,6 +54,32 @@ struct RawBuildInfo {
     build_type: *const c_char,
     dist: bool,
     native: bool,
+    system: *const c_char,
+}
+
+/// Debe coincidir con `CapyroOsInfo` de capyro_core.h.
+#[repr(C)]
+struct RawOsInfo {
+    family: c_int,
+    major: c_int,
+    code: [c_char; 4],
+    name: [c_char; 64],
+    version: [c_char; 64],
+}
+
+/// El sistema en el que corre Capyro (lo muestra el tutorial).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OsInfo {
+    /// true = Windows, false = Linux
+    pub windows: bool,
+    /// Windows: 10 u 11. Linux: 0.
+    pub major: i32,
+    /// "Lin" o "Win"
+    pub code: String,
+    /// "Windows 11", "Gentoo Linux"...
+    pub name: String,
+    /// "23H2 · build 22631", "kernel 6.18.0"...
+    pub version: String,
 }
 
 /// De qué commit sale este binario y dónde se instala (lo usa el actualizador).
@@ -70,6 +96,8 @@ pub struct BuildInfo {
     pub build_type: String,
     pub dist: bool,
     pub native: bool,
+    /// Para qué sistema se compiló: "Lin" o "Win".
+    pub system: String,
 }
 
 /// Debe coincidir con `CapyroVideoFrame` de capyro_core.h.
@@ -95,6 +123,7 @@ pub struct VideoFrame<'a> {
 extern "C" {
     fn capyro_core_version() -> *const c_char;
     fn capyro_core_build_info() -> *const RawBuildInfo;
+    fn capyro_core_os_info(out: *mut RawOsInfo);
     fn capyro_core_supported_video() -> *const c_char;
     fn capyro_core_supported_audio() -> *const c_char;
     fn capyro_core_error_string(err: c_int) -> *const c_char;
@@ -281,9 +310,17 @@ fn check(code: c_int) -> Result<(), CoreError> {
 }
 
 fn path_to_cstring(path: &Path) -> Option<CString> {
-    use std::os::unix::ffi::OsStrExt;
-    // En Linux una ruta son bytes: se pasan tal cual (aunque no sean UTF-8).
-    CString::new(path.as_os_str().as_bytes()).ok()
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        // En Linux una ruta son bytes: se pasan tal cual (aunque no sean UTF-8).
+        CString::new(path.as_os_str().as_bytes()).ok()
+    }
+    #[cfg(windows)]
+    {
+        // En Windows el núcleo (y FFmpeg) reciben UTF-8 y lo pasan a UTF-16.
+        CString::new(path.to_str()?).ok()
+    }
 }
 
 /// Extensiones que acepta el núcleo (en minúscula, sin punto).
@@ -314,6 +351,25 @@ pub fn build_info() -> BuildInfo {
         build_type: cstr_to_string(raw.build_type),
         dist: raw.dist,
         native: raw.native,
+        system: cstr_to_string(raw.system),
+    }
+}
+
+/// Qué sistema es este (nombre y versión, para mostrar).
+pub fn os_info() -> OsInfo {
+    let mut raw = RawOsInfo { family: 0, major: 0, code: [0; 4], name: [0; 64], version: [0; 64] };
+    // SAFETY: el núcleo llena el struct; los textos terminan en NUL.
+    unsafe { capyro_core_os_info(&mut raw) };
+    let text = |b: &[c_char]| {
+        let bytes: Vec<u8> = b.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    OsInfo {
+        windows: raw.family == 2,
+        major: raw.major,
+        code: text(&raw.code),
+        name: text(&raw.name),
+        version: text(&raw.version),
     }
 }
 
@@ -562,5 +618,11 @@ mod tests {
         // 2 bool + 16 + 24 + 128 chars = 170 → alineado a 8 para el u64
         assert_eq!(std::mem::size_of::<RawDecodeInfo>(), 184);
         assert_eq!(std::mem::align_of::<RawDecodeInfo>(), 8);
+    }
+
+    #[test]
+    fn os_info_tiene_el_tamanio_de_c() {
+        // (lo que devuelve el núcleo lo prueba test_core.c: acá no se linkea el C)
+        assert_eq!(std::mem::size_of::<RawOsInfo>(), 4 + 4 + 4 + 64 + 64);
     }
 }

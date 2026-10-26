@@ -2,7 +2,8 @@
 //! volumen...) para retomarlo la próxima vez.
 //!
 //! Se guarda como Lua en `$XDG_STATE_HOME/capyro/session.lua`
-//! (normalmente `~/.local/state/capyro/session.lua`) y se lee con el mismo
+//! (normalmente `~/.local/state/capyro/session.lua`; en Windows
+//! `%LOCALAPPDATA%\Capyro\state\session.lua`) y se lee con el mismo
 //! intérprete que la configuración.
 
 use std::path::PathBuf;
@@ -29,11 +30,7 @@ pub struct Session {
 }
 
 pub fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state")))?;
-    Some(base.join("capyro").join("session.lua"))
+    crate::paths::state_dir().map(|d| d.join("session.lua"))
 }
 
 fn repeat_str(r: Repeat) -> &'static str {

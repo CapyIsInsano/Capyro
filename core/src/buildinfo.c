@@ -17,6 +17,7 @@ static const CapyroBuildInfo info = {
     .build_type  = CAPYRO_BUILD_TYPE,
     .dist        = CAPYRO_BUILD_DIST,
     .native      = CAPYRO_BUILD_NATIVE,
+    .system      = CAPYRO_SYSTEM_CODE,
 };
 
 const CapyroBuildInfo *capyro_core_build_info(void) {

@@ -27,7 +27,28 @@ if(NOT MINIAUDIO_INCLUDE_DIR)
 endif()
 message(STATUS "Capyro: miniaudio en ${MINIAUDIO_INCLUDE_DIR}")
 
-find_package(Threads REQUIRED)
+if(WIN32)
+    # Las .dll de FFmpeg (se copian junto a capyro.exe al instalar).
+    if(NOT FFMPEG_DLL_DIR)
+        pkg_get_variable(_ffmpeg_prefix libavcodec prefix)
+        file(GLOB _ffmpeg_dll LIST_DIRECTORIES false
+            "${_ffmpeg_prefix}/bin/avcodec-*.dll" "${CAPYRO_FFMPEG_DIR}/bin/avcodec-*.dll")
+        if(_ffmpeg_dll)
+            list(GET _ffmpeg_dll 0 _ffmpeg_dll)
+            get_filename_component(_ffmpeg_dll "${_ffmpeg_dll}" DIRECTORY)
+            get_filename_component(_ffmpeg_dll "${_ffmpeg_dll}" ABSOLUTE)
+        endif()
+        set(FFMPEG_DLL_DIR "${_ffmpeg_dll}" CACHE PATH "Carpeta con las .dll de FFmpeg" FORCE)
+    endif()
+    if(FFMPEG_DLL_DIR)
+        message(STATUS "Capyro: DLL de FFmpeg en ${FFMPEG_DLL_DIR}")
+    else()
+        message(WARNING "Capyro: no encontré las .dll de FFmpeg (pasá -DFFMPEG_DLL_DIR=...); "
+            "el instalado no va a abrir sin ellas")
+    endif()
+else()
+    find_package(Threads REQUIRED)
+endif()
 
 add_library(capyro_core STATIC
     src/core.c
@@ -48,9 +69,22 @@ target_include_directories(capyro_core
 target_compile_definitions(capyro_core PRIVATE
     MA_NO_DECODING MA_NO_ENCODING MA_NO_GENERATION
     MA_NO_RESOURCE_MANAGER MA_NO_NODE_GRAPH MA_NO_ENGINE)
-target_link_libraries(capyro_core PUBLIC PkgConfig::FFMPEG Threads::Threads ${CMAKE_DL_LIBS})
-
-target_link_libraries(capyro_core PUBLIC m)
+if(WIN32)
+    # COM en modo "apartment" (STA) en el hilo principal: es el que necesitan
+    # la ventana (arrastrar y soltar con OLE) y el diálogo de archivos. Con el
+    # de miniaudio por defecto (MTA) winit no puede abrir la ventana.
+    target_compile_definitions(capyro_core PRIVATE MA_COINIT_VALUE=0x2)
+endif()
+target_link_libraries(capyro_core PUBLIC PkgConfig::FFMPEG)
+if(WIN32)
+    # Hilos y reloj de Win32 (platform.c), versión de Windows del registro
+    # (advapi32) y argumentos en UTF-8 (shell32, en main.c).
+    target_link_libraries(capyro_core PUBLIC advapi32 shell32 ole32)
+    # UNICODE: las funciones de Win32 sin sufijo usan wchar_t (UTF-16).
+    target_compile_definitions(capyro_core PUBLIC UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+else()
+    target_link_libraries(capyro_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
 
 # Warnings solo para nuestro código (miniaudio va aparte).
 set_source_files_properties(src/core.c src/player.c src/sfx.c src/dsp.c src/hwdec.c src/buildinfo.c src/platform.c

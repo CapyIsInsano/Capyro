@@ -18,14 +18,26 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Cada sistema compila solo sus APIs. */
 static const struct {
     enum AVHWDeviceType type;
     const char         *name;
 } APIS[HWDEV_COUNT] = {
+#ifdef _WIN32
+    { AV_HWDEVICE_TYPE_D3D11VA, "D3D11VA" }, /* cualquier GPU con DirectX 11 */
+    { AV_HWDEVICE_TYPE_CUDA,    "NVDEC"   },
+    { AV_HWDEVICE_TYPE_DXVA2,   "DXVA2"   }, /* GPUs más viejas */
+#else
     { AV_HWDEVICE_TYPE_VAAPI, "VA-API" },
     { AV_HWDEVICE_TYPE_CUDA,  "NVDEC"  },
     { AV_HWDEVICE_TYPE_VDPAU, "VDPAU"  },
+#endif
 };
+#ifdef _WIN32
+#  define HW_APIS_LABEL "D3D11VA, NVDEC, DXVA2"
+#else
+#  define HW_APIS_LABEL "VA-API, NVDEC, VDPAU"
+#endif
 
 void hwdec_codec_name(int codec_id, char *out, size_t cap) {
     const char *n;
@@ -131,7 +143,7 @@ AVCodecContext *hwdec_open(CapyroCore *core, const AVStream *st, int *hw_fmt,
     if (!codec_ok) {
         snprintf(why, why_cap, "Tu GPU o tu FFmpeg no decodifican %s", cname);
     } else if (!device_ok) {
-        snprintf(why, why_cap, "No hay GPU compatible (VA-API, NVDEC, VDPAU)");
+        snprintf(why, why_cap, "No hay GPU compatible (" HW_APIS_LABEL ")");
     } else {
         snprintf(why, why_cap, "La GPU no pudo abrir este video");
     }

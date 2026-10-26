@@ -18,3 +18,12 @@ endif()
 # solo resuelve "hacia adelante", así que hay que decirle a CMake que
 # libcapyro_core.a va DESPUÉS de libcapyro_gui.a en la línea de link.
 set_property(TARGET capyro_gui-static APPEND PROPERTY INTERFACE_LINK_LIBRARIES capyro_core)
+
+if(WIN32)
+    # Bibliotecas de Windows que usan las dependencias de Rust (ventana,
+    # OpenGL, diálogos...). Con una staticlib cargo no las pasa solo.
+    set_property(TARGET capyro_gui-static APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        opengl32 gdi32 user32 shell32 ole32 oleaut32 uuid comctl32 comdlg32 dwmapi uxtheme
+        imm32 advapi32 bcrypt ntdll userenv ws2_32 winmm version propsys shlwapi dbghelp
+        synchronization)
+endif()

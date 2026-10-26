@@ -1,27 +1,43 @@
-//! Actualizador de Capyro.
+//! Actualizador de Capyro. Instala solo lo del sistema en el que corre:
 //!
-//! Capyro se instala compilándolo, así que actualizarse es lo mismo que haría
-//! uno a mano, pero solo:
+//! **Linux** (`updater/unix.rs`): Capyro se instala compilándolo, así que
+//! actualizarse es lo mismo que haría uno a mano, pero solo:
 //!
 //!   1. `git ls-remote` al repo → ¿el último commit es distinto al de este binario?
 //!   2. baja el código a `~/.cache/capyro/src` (clon liviano, se reutiliza)
-//!   3. `cmake` + `cmake --build` en `~/.cache/capyro/build` (incremental: la
-//!      primera vez tarda, las siguientes son segundos)
+//!   3. `cmake -DCAPYRO_SYSTEM=Lin` + `cmake --build` en `~/.cache/capyro/build`
+//!      (incremental: la primera vez tarda, las siguientes son segundos)
 //!   4. `cmake --install` al mismo lugar donde está instalado (con `pkexec`
 //!      si esa carpeta es del sistema)
+//!
+//! **Windows** (`updater/windows.rs`): no hace falta compilar nada. Se baja
+//! `capyro-windows-x64.zip` de la versión para Windows publicada en el repo
+//! (GitHub Releases, la arma el CI) y se reemplazan los archivos de la
+//! carpeta donde está instalado.
 //!
 //! Todo corre en un hilo aparte; la interfaz consulta el estado en cada frame
 //! con [`Updater::progress`] y recibe el resultado con [`Updater::poll`].
 
-use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::config::System;
 use crate::ffi::BuildInfo;
+
+// Cada sistema compila solo su forma de actualizarse.
+#[cfg(any(windows, test))]
+mod release;
+#[cfg(unix)]
+mod unix;
+#[cfg(unix)]
+use unix as sys;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as sys;
 
 /// Un commit del repo, para mostrar "el parche".
 #[derive(Debug, Clone, PartialEq)]
@@ -34,6 +50,8 @@ pub struct CommitInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// (en Windows no se compila nada: no hay Building)
+#[cfg_attr(windows, allow(dead_code))]
 pub enum Stage {
     Checking,
     Downloading,
@@ -58,7 +76,7 @@ pub enum FailKind {
     Offline,
     /// El repo no existe, es privado o la URL está mal.
     Repo,
-    /// Falta git, cmake o cargo.
+    /// Falta git, cmake o cargo (Linux) o curl/tar (Windows).
     MissingTool,
     /// Falló la compilación.
     Build,
@@ -87,7 +105,12 @@ pub const DEFAULT_REPO: &str = "CapyIsInsano/Capyro";
 
 /// Qué actualizar y cómo volver a compilarlo (sale de los datos del build).
 #[derive(Debug, Clone)]
+// branch, prefix, build_type... son para compilar (Linux)
+#[cfg_attr(windows, allow(dead_code))]
 pub struct Job {
+    /// Para qué sistema se instala (`options.system`): solo se baja,
+    /// compila e instala lo de este sistema.
+    pub system: System,
     pub repo: String,
     pub branch: Option<String>,
     pub built_commit: String,
@@ -125,6 +148,7 @@ impl Job {
             None => (info.prefix.clone(), PathBuf::from(&info.bindir)),
         };
         Ok(Self {
+            system: System::current(),
             repo: normalize_repo(raw),
             branch: branch.map(str::trim).filter(|b| !b.is_empty()).map(str::to_owned),
             built_commit: info.commit.clone(),
@@ -177,18 +201,32 @@ pub struct Install {
 }
 
 /// `None` si este proceso no es un Capyro instalado (corre desde `build/`).
-/// Reconoce el prefijo con el que se compiló y también uno distinto puesto al
-/// instalar (`cmake --install build --prefix ~/.local`).
+/// En Linux reconoce el prefijo con el que se compiló y también uno distinto
+/// puesto al instalar (`cmake --install build --prefix ~/.local`). En Windows
+/// es la carpeta del .exe, si tiene la config instalada al lado.
 pub fn install_location(info: &BuildInfo) -> Option<Install> {
-    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
-    let configured = Path::new(&info.bindir).join("capyro");
-    if configured.canonicalize().ok().as_deref() == Some(exe.as_path()) {
-        return Some(Install { prefix: PathBuf::from(&info.prefix), bindir: PathBuf::from(&info.bindir) });
-    }
-    let bindir = exe.parent()?;
-    let prefix = bindir.parent()?;
-    let looks_installed = bindir.file_name()? == "bin" && prefix.join("share/capyro/capyro.lua").is_file();
-    looks_installed.then(|| Install { prefix: prefix.to_path_buf(), bindir: bindir.to_path_buf() })
+    sys::install_location(info)
+}
+
+/// "owner/repo" de una URL de GitHub (para la API de Releases).
+#[cfg(any(windows, test))]
+pub fn github_slug(url: &str) -> Option<String> {
+    let rest = url
+        .trim()
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.trim().strip_prefix("http://github.com/"))?;
+    let rest = rest.trim_end_matches('/');
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let mut parts = rest.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    let ok = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    (ok(owner) && ok(repo) && parts.next().is_none()).then(|| format!("{owner}/{repo}"))
+}
+
+/// Al abrir Capyro: borra lo que dejó la actualización anterior (en Windows,
+/// los `.old` de los archivos que estaban en uso). En Linux no hace nada.
+pub fn cleanup_after_update() {
+    sys::cleanup_after_update();
 }
 
 /// "hace 5 min", "hace 3 días"...
@@ -222,8 +260,9 @@ struct Shared {
     detail: String,
     started: Instant,
     outcome: Option<Outcome>,
-    /// Grupo de procesos del comando actual (para cortarlo al cerrar).
-    pgid: Option<i32>,
+    /// Proceso (y en Linux grupo de procesos) del comando actual, para
+    /// cortarlo al cerrar.
+    pid: Option<u32>,
     cancel: bool,
 }
 
@@ -255,7 +294,7 @@ impl Updater {
                 detail: String::new(),
                 started: Instant::now(),
                 outcome: None,
-                pgid: None,
+                pid: None,
                 cancel: false,
             })),
             running: false,
@@ -291,7 +330,7 @@ impl Updater {
                 let outcome = w.run(&job);
                 let mut s = lock(&shared);
                 s.stage = None;
-                s.pgid = None;
+                s.pid = None;
                 if !s.cancel {
                     s.outcome = Some(outcome);
                 }
@@ -314,15 +353,12 @@ impl Updater {
         Some(out)
     }
 
-    /// Al cerrar Capyro: corta lo que se esté compilando.
+    /// Al cerrar Capyro: corta lo que se esté compilando o bajando.
     pub fn cancel(&self) {
         let mut s = lock(&self.shared);
         s.cancel = true;
-        if let Some(pgid) = s.pgid {
-            // SAFETY: kill() a un grupo de procesos que creamos nosotros.
-            unsafe {
-                libc::kill(-pgid, libc::SIGTERM);
-            }
+        if let Some(pid) = s.pid {
+            sys::kill_tree(pid);
         }
     }
 }
@@ -333,12 +369,7 @@ fn lock(m: &Mutex<Shared>) -> std::sync::MutexGuard<'_, Shared> {
 
 /// Vuelve a abrir Capyro (el ejecutable recién instalado).
 pub fn relaunch(bindir: &Path) -> std::io::Result<()> {
-    Command::new(bindir.join("capyro"))
-        .env("CAPYRO_UPDATED", "1") // el nuevo muestra "Capyro actualizado a …"
-        .stdin(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .map(|_| ())
+    sys::relaunch(bindir)
 }
 
 /* ------------------------------------------------------------------------ */
@@ -356,64 +387,12 @@ struct Worker {
 }
 
 fn cache_dir() -> PathBuf {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-        .unwrap_or_else(|| std::env::temp_dir());
-    base.join("capyro")
+    crate::paths::cache_dir()
 }
 
 /// `~/.cache/capyro/update.log` con `~` para mostrar.
 pub fn log_path_display() -> String {
-    let p = cache_dir().join("update.log").to_string_lossy().into_owned();
-    match std::env::var_os("HOME") {
-        Some(h) => p.replacen(&*h.to_string_lossy(), "~", 1),
-        None => p,
-    }
-}
-
-/// PATH + ~/.cargo/bin (Capyro se abre desde el escritorio, donde rustup
-/// muchas veces no está en el PATH).
-fn child_path() -> OsString {
-    let mut parts: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).collect())
-        .unwrap_or_else(|| vec![PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
-    if let Some(home) = std::env::var_os("HOME") {
-        let cargo = PathBuf::from(home).join(".cargo/bin");
-        if cargo.is_dir() && !parts.contains(&cargo) {
-            parts.push(cargo);
-        }
-    }
-    std::env::join_paths(parts).unwrap_or_default()
-}
-
-fn find_tool(name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&child_path())
-        .map(|d| d.join(name))
-        .find(|p| {
-            std::fs::metadata(p)
-                .map(|m| m.is_file() && std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0)
-                .unwrap_or(false)
-        })
-}
-
-fn writable(dir: &Path) -> bool {
-    let Ok(c) = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes()) else { return false };
-    // SAFETY: cadena terminada en NUL válida.
-    unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
-}
-
-/// La carpeta más cercana que exista (para chequear permisos antes de crearla).
-fn existing_ancestor(p: &Path) -> &Path {
-    let mut cur = p;
-    while !cur.exists() {
-        match cur.parent() {
-            Some(parent) => cur = parent,
-            None => break,
-        }
-    }
-    cur
+    crate::paths::tilde(&cache_dir().join("update.log"))
 }
 
 /// Errores de git → sin conexión / repo / otro.
@@ -451,6 +430,7 @@ pub fn classify_git(output: &str) -> FailKind {
 }
 
 /// "   Compiling eframe v0.37.0" → "eframe"; "[ 40%] Building C object core/…/player.c.o" → "player.c"
+#[cfg_attr(windows, allow(dead_code))]
 pub fn progress_detail(line: &str) -> Option<String> {
     let l = line.trim();
     if let Some(rest) = l.strip_prefix("Compiling ") {
@@ -503,7 +483,7 @@ impl Worker {
         cmd.stdin(Stdio::null())
             .stdout(writer)
             .stderr(writer2)
-            .env("PATH", child_path())
+            .env("PATH", sys::child_path())
             .env("LC_ALL", "C")
             .env("LANG", "C")
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -512,22 +492,15 @@ impl Worker {
             .env("TERM", "dumb")
             .env("CARGO_TERM_COLOR", "never")
             .env("CARGO_TERM_PROGRESS_WHEN", "never")
-            .env_remove("CLICOLOR_FORCE")
-            .process_group(0);
-        if nice {
-            // SAFETY: setpriority es async-signal-safe; corre en el hijo antes del exec.
-            unsafe {
-                cmd.pre_exec(|| {
-                    libc::setpriority(libc::PRIO_PROCESS, 0, 10);
-                    Ok(())
-                });
-            }
-        }
+            .env_remove("CLICOLOR_FORCE");
+        // Linux: grupo de procesos propio (y prioridad baja para compilar).
+        // Windows: sin ventana de consola.
+        sys::prepare(&mut cmd, nice);
         let shown = format!("$ {:?} {:?}", cmd.get_program(), cmd.get_args().collect::<Vec<_>>());
         self.logln(&shown);
         let mut child = cmd.spawn().map_err(|e| (None, e.to_string()))?;
         drop(cmd); // suelta nuestras copias del extremo de escritura (si no, nunca llega el EOF)
-        lock(&self.shared).pgid = Some(child.id() as i32);
+        lock(&self.shared).pid = Some(child.id());
 
         self.tail.clear();
         let mut all = String::new();
@@ -543,27 +516,13 @@ impl Worker {
             }
         }
         let status = child.wait().map_err(|e| (None, e.to_string()))?;
-        lock(&self.shared).pgid = None;
+        lock(&self.shared).pid = None;
         self.logln(&format!("→ {status}"));
         if status.success() {
             Ok(all)
         } else {
             Err((status.code(), all))
         }
-    }
-
-    fn git(&mut self, args: &[&str]) -> Result<String, Fail> {
-        let mut cmd = Command::new("git");
-        cmd.args(["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=20"]).args(args);
-        self.exec(cmd, false, |_, _| {}).map_err(|(_, out)| {
-            let kind = classify_git(&out);
-            let msg = match kind {
-                FailKind::Offline => "Sin conexión: no pude llegar a GitHub".to_owned(),
-                FailKind::Repo => "No encontré el repo (¿es privado o está mal la URL?)".to_owned(),
-                _ => format!("git falló: {}", last_meaningful(&out)),
-            };
-            (kind, msg)
-        })
     }
 
     fn run(&mut self, job: &Job) -> Outcome {
@@ -580,227 +539,22 @@ impl Worker {
         let cache = cache_dir();
         std::fs::create_dir_all(&cache).map_err(|e| (FailKind::Other, format!("No pude crear {}: {e}", cache.display())))?;
         self.log = std::fs::File::create(cache.join("update.log")).ok();
-        self.logln(&format!("Capyro {} · actualizando desde {}", crate::ffi::version(), job.repo));
-
-        // Un solo Capyro actualizándose a la vez.
-        let lock_file = std::fs::File::create(cache.join("update.lock"))
-            .map_err(|e| (FailKind::Other, format!("No pude crear el lock: {e}")))?;
-        // SAFETY: descriptor válido mientras viva lock_file (todo este método).
-        if unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock_file), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Err((FailKind::Other, "Otra ventana de Capyro ya se está actualizando".into()));
-        }
-
-        if find_tool("git").is_none() {
-            return Err((FailKind::MissingTool, "Para actualizarse Capyro necesita git".into()));
-        }
-
-        /* 1. ¿hay algo nuevo? */
-        self.set_stage(Stage::Checking);
-        let refspec = match &job.branch {
-            Some(b) => format!("refs/heads/{b}"),
-            None => "HEAD".to_owned(),
-        };
-        let out = self.git(&["ls-remote", "--symref", &job.repo, &refspec])?;
-        let mut remote_hash = None;
-        let mut branch = job.branch.clone();
-        for line in out.lines() {
-            if let Some(rest) = line.strip_prefix("ref: refs/heads/") {
-                branch.get_or_insert_with(|| rest.split('\t').next().unwrap_or("main").to_owned());
-            } else if let Some((hash, _)) = line.split_once('\t') {
-                if hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-                    remote_hash = Some(hash.to_owned());
-                }
-            }
-        }
-        let Some(remote_hash) = remote_hash else {
-            return Err((FailKind::Repo, "El repo está vacío o no tiene esa rama".into()));
-        };
-        let branch = branch.unwrap_or_else(|| "main".to_owned());
-        if remote_hash == job.built_commit {
-            return Ok(Outcome::UpToDate { hash: short(&remote_hash) });
-        }
-        if self.cancelled() {
-            return Err((FailKind::Other, "cancelado".into()));
-        }
-
-        /* 2. bajar el código */
-        self.set_stage(Stage::Downloading);
-        let src = cache.join("src");
-        let src_s = src.to_string_lossy().into_owned();
-        let fetched = if src.join(".git").is_dir() {
-            let r = self
-                .git(&["-C", &src_s, "remote", "set-url", "origin", &job.repo])
-                .and_then(|_| self.git(&["-C", &src_s, "fetch", "--depth", "50", "--no-tags", "origin", &branch]))
-                .and_then(|_| self.git(&["-C", &src_s, "reset", "--hard", "FETCH_HEAD"]))
-                .and_then(|_| self.git(&["-C", &src_s, "clean", "-fdq"]));
-            match r {
-                Ok(_) => true,
-                Err(e) if e.0 == FailKind::Offline => return Err(e),
-                Err(_) => {
-                    // clon roto: se borra y se vuelve a bajar
-                    let _ = std::fs::remove_dir_all(&src);
-                    false
-                }
-            }
-        } else {
-            let _ = std::fs::remove_dir_all(&src);
-            false
-        };
-        if !fetched {
-            self.git(&["clone", "--depth", "50", "--no-tags", "--branch", &branch, &job.repo, &src_s])?;
-        }
-
-        // ¿el binario es más nuevo que el repo? (commits sin subir)
-        let built = job.built_commit.as_str();
-        let built_known = !built.is_empty()
-            && self.git(&["-C", &src_s, "cat-file", "-e", &format!("{built}^{{commit}}")]).is_ok();
-        if built_known && self.git(&["-C", &src_s, "merge-base", "--is-ancestor", "HEAD", built]).is_ok() {
-            return Ok(Outcome::Ahead);
-        }
-
-        // los commits nuevos: "el parche"
-        let range = format!("{built}..HEAD");
-        let mut log_args = vec!["-C", &src_s, "log", "--format=%h%x1f%s%x1f%ct", "-n", "20"];
-        if built_known {
-            log_args.push(&range);
-        } else {
-            log_args.push("HEAD");
-        }
-        let commits: Vec<CommitInfo> = self
-            .git(&log_args)?
-            .lines()
-            .filter_map(|l| {
-                let mut p = l.split('\x1f');
-                Some(CommitInfo {
-                    hash: p.next()?.to_owned(),
-                    subject: p.next()?.to_owned(),
-                    time: p.next()?.trim().parse().unwrap_or(0),
-                })
-            })
-            .collect();
-        let mut commits = commits;
-        if !built_known {
-            // no sé desde dónde: muestro solo el último
-            commits.truncate(1);
-        }
-        let total = if built_known {
-            self.git(&["-C", &src_s, "rev-list", "--count", &range])?.trim().parse().unwrap_or(commits.len())
-        } else {
-            1
-        };
-        if commits.is_empty() {
-            return Err((FailKind::Other, "No pude leer los commits nuevos".into()));
-        }
-        // primero se muestra qué hay de nuevo; se instala solo si el usuario dice que sí
-        if !job.installed || !job.install_now {
-            return Ok(Outcome::Available { commits, total, installable: job.installed });
-        }
-        let Some(cmake) = find_tool("cmake") else {
-            return Err((FailKind::MissingTool, "Para actualizarse Capyro necesita cmake".into()));
-        };
-        if find_tool("cargo").is_none() {
-            return Err((FailKind::MissingTool, "Para actualizarse Capyro necesita Rust (cargo)".into()));
-        }
-        if self.cancelled() {
-            return Err((FailKind::Other, "cancelado".into()));
-        }
-
-        /* 3. compilar */
-        self.set_stage(Stage::Building);
-        let build = cache.join("build");
-        let onoff = |b: bool| if b { "ON" } else { "OFF" };
-        let mut configure = Command::new(&cmake);
-        configure
-            .arg("-S")
-            .arg(&src)
-            .arg("-B")
-            .arg(&build)
-            .arg(format!("-DCMAKE_BUILD_TYPE={}", job.build_type))
-            .arg(format!("-DCMAKE_INSTALL_PREFIX={}", job.prefix))
-            .arg(format!("-DCMAKE_INSTALL_BINDIR={}", job.bindir.display()))
-            .arg(format!("-DCAPYRO_DIST={}", onoff(job.dist)))
-            .arg(format!("-DCAPYRO_NATIVE={}", onoff(job.native)))
-            .arg("-DCAPYRO_BUILD_TESTS=OFF");
-        self.set_detail("configurando".into());
-        self.exec(configure, true, |_, _| {}).map_err(|(_, out)| self.build_error(&out))?;
-
-        let jobs = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2);
-        let mut compile = Command::new(&cmake);
-        compile.arg("--build").arg(&build).args(["--target", "capyro", "--parallel", &jobs.to_string()]);
-        let mut last_detail = Instant::now() - Duration::from_secs(1);
-        self.exec(compile, true, |w, line| {
-            // no despertar a la interfaz por cada línea
-            if let Some(d) = progress_detail(line) {
-                if last_detail.elapsed() > Duration::from_millis(120) {
-                    last_detail = Instant::now();
-                    w.set_detail(d);
-                }
-            }
-        })
-        .map_err(|(_, out)| self.build_error(&out))?;
-        if self.cancelled() {
-            return Err((FailKind::Other, "cancelado".into()));
-        }
-
-        /* 4. instalar */
-        self.set_stage(Stage::Installing);
-        self.install(job, &cmake, &build)?;
-        Ok(Outcome::Installed { commits, total })
+        self.logln(&format!(
+            "Capyro {} · sistema {} ({}) · actualizando desde {}",
+            env!("CARGO_PKG_VERSION"),
+            job.system.name(),
+            job.system.code(),
+            job.repo
+        ));
+        sys::try_run(self, job, &cache)
     }
 
-    fn build_error(&self, out: &str) -> Fail {
+    fn check_cancel(&self) -> Result<(), Fail> {
         if self.cancelled() {
-            return (FailKind::Other, "cancelado".into());
-        }
-        if classify_git(out) == FailKind::Offline {
-            // CMake baja Corrosion/miniaudio la primera vez
-            return (FailKind::Offline, "Sin conexión: no pude bajar las dependencias".into());
-        }
-        let line = out
-            .lines()
-            .rev()
-            .find(|l| l.contains("error") && !l.contains("warning"))
-            .map(|l| l.trim().to_owned())
-            .unwrap_or_else(|| last_meaningful(out));
-        (FailKind::Build, format!("Falló la compilación: {}", ellipsize(&line, 90)))
-    }
-
-    /// `cmake --install`. Antes se borra el ejecutable viejo: no se puede
-    /// sobrescribir un binario que está corriendo ("Text file busy"), pero sí
-    /// borrarlo (este proceso sigue usando su copia hasta que se reinicie).
-    fn install(&mut self, job: &Job, cmake: &Path, build: &Path) -> Result<(), Fail> {
-        const SCRIPT: &str = r#"set -e; rm -f -- "$1/capyro"; exec "$2" --install "$3""#;
-        let share = Path::new(&job.prefix).join("share");
-        let can_write = writable(&job.bindir) && writable(existing_ancestor(&share));
-        let mut cmd = if can_write {
-            let mut c = Command::new("/bin/sh");
-            c.args(["-c", SCRIPT, "sh"]);
-            c
-        } else if let Some(pkexec) = find_tool("pkexec") {
-            self.set_detail("pidiendo permiso de administrador".into());
-            let mut c = Command::new(pkexec);
-            c.args(["/bin/sh", "-c", SCRIPT, "sh"]);
-            c
+            Err((FailKind::Other, "cancelado".into()))
         } else {
-            return Err((
-                FailKind::Permission,
-                format!(
-                    "No tengo permiso para escribir en {}. Instalá a mano: sudo cmake --install {}",
-                    job.bindir.display(),
-                    build.display()
-                ),
-            ));
-        };
-        cmd.arg(&job.bindir).arg(cmake).arg(build);
-        self.exec(cmd, false, |_, _| {}).map(|_| ()).map_err(|(code, out)| match code {
-            // pkexec: 126 = se canceló la contraseña, 127 = sin agente de polkit
-            Some(126) if !can_write => (FailKind::Permission, "Se canceló el permiso de administrador".into()),
-            Some(127) if !can_write => (
-                FailKind::Permission,
-                format!("No hay agente de polkit para pedir la contraseña. Instalá a mano: sudo cmake --install {}", build.display()),
-            ),
-            _ => (FailKind::Permission, format!("No se pudo instalar: {}", last_meaningful(&out))),
-        })
+            Ok(())
+        }
     }
 }
 
@@ -830,6 +584,16 @@ fn ellipsize(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slug_de_github() {
+        assert_eq!(github_slug("https://github.com/CapyIsInsano/Capyro.git").as_deref(), Some("CapyIsInsano/Capyro"));
+        assert_eq!(github_slug("https://github.com/capy/Capyro/").as_deref(), Some("capy/Capyro"));
+        assert_eq!(github_slug(&normalize_repo("git@github.com:capy/Capyro.git")).as_deref(), Some("capy/Capyro"));
+        assert_eq!(github_slug("https://gitlab.com/capy/Capyro"), None);
+        assert_eq!(github_slug("/home/capy/Capyro"), None);
+        assert_eq!(github_slug("https://github.com/capy/Capyro/tree/main"), None);
+    }
 
     #[test]
     fn urls() {
@@ -863,6 +627,77 @@ mod tests {
         );
         assert_eq!(progress_detail("[100%] Linking C executable capyro"), Some("enlazando".into()));
         assert_eq!(progress_detail("warning: algo"), None);
+    }
+
+    /// De punta a punta contra un repo de git local: ve el commit nuevo
+    /// (sin compilar ni instalar nada).
+    #[cfg(unix)]
+    #[test]
+    fn encuentra_commits_nuevos() {
+        use std::process::Command;
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("capyro-upd-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let repo = base.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=Capy", "-c", "user.email=capy@example.com", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "uno").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "Primero"]);
+        let first = git(&["rev-parse", "HEAD"]);
+        std::fs::write(repo.join("a.txt"), "dos").unwrap();
+        git(&["commit", "-q", "-am", "Segundo: el salto a Windows"]);
+
+        // la caché del actualizador, aparte
+        // SAFETY: solo esta prueba usa XDG_CACHE_HOME (las demás no la leen).
+        unsafe { std::env::set_var("XDG_CACHE_HOME", base.join("cache")) };
+        let job = Job {
+            system: System::current(),
+            repo: repo.display().to_string(),
+            branch: None,
+            built_commit: first,
+            installed: true,
+            bindir: base.join("bin"),
+            prefix: base.display().to_string(),
+            build_type: "Release".into(),
+            dist: false,
+            native: false,
+            install_now: false,
+        };
+        let mut up = Updater::new();
+        up.start(job, || {});
+        let start = Instant::now();
+        let out = loop {
+            if let Some(o) = up.poll() {
+                break o;
+            }
+            assert!(start.elapsed() < Duration::from_secs(60), "el actualizador no terminó");
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        match out {
+            Outcome::Available { commits, total, installable } => {
+                assert_eq!(total, 1);
+                assert!(installable);
+                assert_eq!(commits[0].subject, "Segundo: el salto a Windows");
+            }
+            other => panic!("esperaba Available, vino {other:?}"),
+        }
+        let log = std::fs::read_to_string(base.join("cache/capyro/update.log")).unwrap();
+        assert!(log.contains(&format!("sistema {} ({})", System::current().name(), System::current().code())), "{log}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -6,7 +6,7 @@
 # recompila nada. El actualizador usa estos datos para saber si hay una
 # versión nueva en el repo y cómo volver a compilar e instalar Capyro.
 #
-# Entradas (-D): SRC, OUT, PREFIX, BINDIR, BUILD_TYPE, DIST, NATIVE
+# Entradas (-D): SRC, OUT, PREFIX, BINDIR, BUILD_TYPE, DIST, NATIVE, SYSTEM
 # ---------------------------------------------------------------------------
 
 set(commit "")
@@ -68,6 +68,7 @@ set(content "/* Generado por cmake/buildinfo.cmake: no editar. */
 #define CAPYRO_BUILD_TYPE  \"${BUILD_TYPE}\"
 #define CAPYRO_BUILD_DIST  ${DIST}
 #define CAPYRO_BUILD_NATIVE ${NATIVE}
+#define CAPYRO_SYSTEM_CODE \"${SYSTEM}\"
 ")
 
 if(EXISTS "${OUT}")

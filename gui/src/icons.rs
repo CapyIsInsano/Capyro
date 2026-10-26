@@ -408,3 +408,85 @@ pub fn play_small(pt: &Painter, c: Pos2, s: f32, col: Color32) {
         Stroke::NONE,
     ));
 }
+
+/// Destello de 4 puntas (lados curvos hacia adentro), girado `angle`
+/// radianes. Es el adorno del crédito del tutorial.
+pub fn sparkle(pt: &Painter, c: Pos2, r: f32, angle: f32, col: Color32) {
+    // un halo apenas más grande y transparente suaviza el borde (la malla
+    // no tiene antialias)
+    sparkle_mesh(pt, c, r + 0.9, angle, col.gamma_multiply(0.35));
+    sparkle_mesh(pt, c, r, angle, col);
+}
+
+fn sparkle_mesh(pt: &Painter, c: Pos2, r: f32, angle: f32, col: Color32) {
+    let n = 96u32;
+    let (sa, ca) = angle.sin_cos();
+    let mut mesh = eframe::egui::Mesh::default();
+    mesh.colored_vertex(c, col);
+    for i in 0..n {
+        let t = i as f32 / n as f32 * std::f32::consts::TAU;
+        let (st, ct) = t.sin_cos();
+        // astroide un poco más finito: |x|^0.6 + |y|^0.6 = r^0.6
+        let x = r * ct * ct.abs().powf(2.33);
+        let y = r * st * st.abs().powf(2.33);
+        mesh.colored_vertex(pos2(c.x + x * ca - y * sa, c.y + x * sa + y * ca), col);
+    }
+    for i in 1..=n {
+        mesh.add_triangle(0, i, if i == n { 1 } else { i + 1 });
+    }
+    pt.add(Shape::mesh(mesh));
+}
+
+/// Terminal (Linux en el tutorial): ventanita con el prompt `>_`. El
+/// cursor parpadea según `t` (segundos).
+pub fn terminal(pt: &Painter, c: Pos2, s: f32, frame: Color32, accent: Color32, t: f64) {
+    let r = Rect::from_center_size(c, vec2(s, s * 0.78));
+    let round = s * 0.12;
+    pt.rect_filled(r, round, Color32::from_rgb(0x14, 0x15, 0x19));
+    pt.rect_stroke(r, round, Stroke::new(s * 0.035, frame), StrokeKind::Inside);
+    // barra de arriba con tres puntitos
+    let bar_y = r.top() + s * 0.12;
+    pt.line_segment([pos2(r.left() + s * 0.03, bar_y + s * 0.07), pos2(r.right() - s * 0.03, bar_y + s * 0.07)], Stroke::new(s * 0.02, frame.gamma_multiply(0.6)));
+    for (i, k) in [0.6f32, 0.4, 0.25].iter().enumerate() {
+        pt.circle_filled(pos2(r.left() + s * (0.11 + 0.08 * i as f32), bar_y), s * 0.026, frame.gamma_multiply(*k + 0.3));
+    }
+    // ">" y "_"
+    let st = Stroke::new(s * 0.065, accent);
+    let gx = r.left() + s * 0.2;
+    let gy = r.center().y + s * 0.08;
+    pt.add(Shape::line(vec![pos2(gx, gy - s * 0.13), pos2(gx + s * 0.13, gy), pos2(gx, gy + s * 0.13)], st));
+    if (t * 1.8).fract() < 0.6 {
+        pt.line_segment([pos2(gx + s * 0.22, gy + s * 0.13), pos2(gx + s * 0.44, gy + s * 0.13)], Stroke::new(s * 0.065, Color32::WHITE));
+    }
+}
+
+/// Ventana genérica de escritorio (Windows en el tutorial): barra de título
+/// con minimizar, maximizar y cerrar. `rounded` = esquinas redondeadas.
+pub fn app_window(pt: &Painter, c: Pos2, s: f32, frame: Color32, accent: Color32, rounded: bool) {
+    let r = Rect::from_center_size(c, vec2(s, s * 0.78));
+    let round = if rounded { s * 0.12 } else { s * 0.025 };
+    pt.rect_filled(r, round, Color32::from_rgb(0x1B, 0x1D, 0x22));
+    pt.rect_stroke(r, round, Stroke::new(s * 0.035, frame), StrokeKind::Inside);
+    let bar = s * 0.17;
+    let by = r.top() + bar / 2.0 + s * 0.01;
+    pt.line_segment([pos2(r.left() + s * 0.03, r.top() + bar), pos2(r.right() - s * 0.03, r.top() + bar)], Stroke::new(s * 0.02, frame.gamma_multiply(0.6)));
+    let st = Stroke::new(s * 0.022, frame);
+    let g = s * 0.035;
+    // ×  □  –  (de derecha a izquierda)
+    let x3 = r.right() - s * 0.1;
+    pt.line_segment([pos2(x3 - g, by - g), pos2(x3 + g, by + g)], st);
+    pt.line_segment([pos2(x3 - g, by + g), pos2(x3 + g, by - g)], st);
+    let x2 = x3 - s * 0.13;
+    pt.rect_stroke(Rect::from_center_size(pos2(x2, by), vec2(2.0 * g, 2.0 * g)), 0.0, st, StrokeKind::Middle);
+    let x1 = x2 - s * 0.13;
+    pt.line_segment([pos2(x1 - g, by), pos2(x1 + g, by)], st);
+    // contenido: un bloque de color y unas líneas de "texto"
+    let top = r.top() + bar + s * 0.08;
+    let block = Rect::from_min_size(pos2(r.left() + s * 0.1, top), vec2(s * 0.3, s * 0.36));
+    pt.rect_filled(block, if rounded { s * 0.05 } else { s * 0.01 }, accent.gamma_multiply(0.85));
+    for (i, w) in [0.38f32, 0.3, 0.34, 0.2].iter().enumerate() {
+        let y = top + s * (0.03 + 0.1 * i as f32);
+        let x = block.right() + s * 0.08;
+        pt.line_segment([pos2(x, y), pos2(x + s * w, y)], Stroke::new(s * 0.035, Color32::from_white_alpha(70)));
+    }
+}

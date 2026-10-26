@@ -107,15 +107,7 @@ impl CapyroApp {
         painter.circle_filled(ic, 15.0, accent.gamma_multiply(0.16));
         icons::keyboard(&painter, ic, 18.0, accent);
         painter.text(pos2(x0 + 36.0, top + 22.0), Align2::LEFT_CENTER, "Editar configuración", bold(15.0), TEXT);
-        let path = config::user_config_path()
-            .map(|p| {
-                let s = p.display().to_string();
-                match std::env::var("HOME") {
-                    Ok(h) if !h.is_empty() => s.replacen(&h, "~", 1),
-                    _ => s,
-                }
-            })
-            .unwrap_or_default();
+        let path = config::user_config_path().map(|p| crate::paths::tilde(&p)).unwrap_or_default();
         painter.text(
             pos2(x0 + 36.0, top + 40.0),
             Align2::LEFT_CENTER,

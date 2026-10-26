@@ -296,21 +296,9 @@ fn ellipsize(s: &str, max: usize) -> String {
     }
 }
 
-/// Carpeta de Imágenes del usuario (según xdg-user-dirs) + "/Capyro".
+/// Carpeta de Imágenes del usuario + "/Capyro".
 fn default_screenshot_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
-    let pictures = std::fs::read_to_string(config.join("user-dirs.dirs"))
-        .ok()
-        .and_then(|txt| {
-            txt.lines().find_map(|l| {
-                let v = l.trim().strip_prefix("XDG_PICTURES_DIR=")?;
-                let v = v.trim_matches('"').replace("$HOME", &home.to_string_lossy());
-                Some(PathBuf::from(v))
-            })
-        })
-        .unwrap_or_else(|| home.join("Pictures"));
-    pictures.join("Capyro")
+    crate::paths::default_screenshot_dir()
 }
 
 fn fmt_time(seconds: f64) -> String {
@@ -343,6 +331,8 @@ impl CapyroApp {
             .is_empty()
             .then(|| "No encontré dispositivo de audio: reproduzco sin sonido".to_owned());
         let splash = cfg.splash;
+        // Lo que dejó la actualización anterior (Windows: los .old).
+        updater::cleanup_after_update();
         // Recién actualizado (lo abrió el Capyro viejo al reiniciar): contarlo.
         let build_info = ffi::build_info();
         let startup_notice = match std::env::var_os("CAPYRO_UPDATED") {
@@ -796,10 +786,7 @@ impl CapyroApp {
         match rx.try_recv() {
             Ok(Ok(path)) => {
                 self.shot = None;
-                let shown = match std::env::var_os("HOME") {
-                    Some(h) => path.to_string_lossy().replacen(&*h.to_string_lossy(), "~", 1),
-                    None => path.to_string_lossy().into_owned(),
-                };
+                let shown = crate::paths::tilde(&path);
                 self.toast(ctx, format!("Captura guardada: {}", ellipsize(&shown, 60)), false);
             }
             Ok(Err(e)) => {
@@ -1960,7 +1947,7 @@ impl CapyroApp {
         painter.text(
             pos2(x0, panel.bottom() - 16.0),
             Align2::LEFT_CENTER,
-            format!("Audio: {audio}  ·  GPL-3.0  ·  Linux"),
+            format!("Audio: {audio}  ·  GPL-3.0  ·  {} ({})", self.cfg.system().name(), self.build_info.system),
             regular(10.5),
             TEXT_FAINT,
         );
@@ -2230,7 +2217,11 @@ impl CapyroApp {
         let ic = pos2(x0 + 8.0, cy - 1.0);
 
         let mut sub_col = TEXT_FAINT;
-        let mut tooltip = "Busca commits nuevos en el repo de GitHub; si hay, los baja, compila e instala solo".to_owned();
+        let mut tooltip = if cfg!(windows) {
+            "Busca la última versión para Windows en el repo de GitHub; si hay, la baja y la instala sola".to_owned()
+        } else {
+            "Busca commits nuevos en el repo de GitHub; si hay, los baja, compila e instala solo".to_owned()
+        };
         let (title, sub) = if let Some(pr) = &progress {
             icons::spinner(painter, ic, 15.0, accent, now);
             let secs = pr.elapsed.as_secs();
@@ -2258,7 +2249,11 @@ impl CapyroApp {
                             tooltip = if *installable {
                                 "Clic para ver los cambios e instalarlos".to_owned()
                             } else {
-                                "Para que se actualice solo, instalá Capyro (cmake --install build)".to_owned()
+                                if cfg!(windows) {
+                                    "Para que se actualice solo, instalá Capyro con CapyroInstaller".to_owned()
+                                } else {
+                                    "Para que se actualice solo, instalá Capyro (cmake --install build)".to_owned()
+                                }
                             };
                             let s = if *total == 1 { "" } else { "s" };
                             let last = commits.first().map(|c| format!(" · último: {}", c.hash)).unwrap_or_default();

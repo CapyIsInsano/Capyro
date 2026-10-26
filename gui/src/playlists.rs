@@ -3,7 +3,8 @@
 //! La "Cola" de siempre sigue siendo temporal: lo que agregás para escuchar
 //! ahora. Las playlists quedan guardadas en
 //! `$XDG_DATA_HOME/capyro/playlists.lua` (normalmente
-//! `~/.local/share/capyro/playlists.lua`) y se cargan en la cola para sonar.
+//! `~/.local/share/capyro/playlists.lua`; en Windows
+//! `Documentos\Capyro\playlists.lua`) y se cargan en la cola para sonar.
 
 use std::path::PathBuf;
 
@@ -26,11 +27,7 @@ pub struct Playlists {
 }
 
 pub fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(base.join("capyro").join("playlists.lua"))
+    crate::paths::data_dir().map(|d| d.join("playlists.lua"))
 }
 
 fn lua_quote(s: &str) -> String {
