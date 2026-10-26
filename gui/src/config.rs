@@ -187,6 +187,8 @@ pub struct Config {
     pub update_branch: Option<String>,
     /// Sonidito al tocar un botón.
     pub click_sound: bool,
+    /// Formato del archivo arriba a la izquierda del video.
+    pub show_format: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
     /// De dónde salió (para el log): ruta o "embebida".
@@ -364,6 +366,7 @@ impl Config {
                 "splash" => self.splash.to_string(),
                 "startup_sound" => self.startup_sound.to_string(),
                 "click_sound" => self.click_sound.to_string(),
+                "show_format" => self.show_format.to_string(),
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
@@ -533,6 +536,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         update_branch: None,
         decoding: crate::ffi::Hwdec::Auto,
         click_sound: true,
+        show_format: true,
         source: name.to_owned(),
     };
 
@@ -611,6 +615,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<bool>>("splash")? {
             cfg.splash = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("show_format")? {
+            cfg.show_format = v;
         }
         if let Some(v) = opts.get::<Option<bool>>("click_sound")? {
             cfg.click_sound = v;
@@ -737,6 +744,7 @@ mod tests {
         cfg.accent = Color32::from_rgb(0x12, 0xAB, 0xEF);
         cfg.update_repo = Some("CapyIsInsano/Capyro".into());
         cfg.decoding = crate::ffi::Hwdec::Cpu;
+        cfg.show_format = false;
         let text = cfg.to_lua();
         let back = parse(&text, "prueba").unwrap();
         assert!(!back.bindings.iter().any(|b| b.action == Action::Stop));
@@ -752,6 +760,7 @@ mod tests {
         assert_eq!(back.accent, Color32::from_rgb(0x12, 0xAB, 0xEF));
         assert_eq!(back.update_repo.as_deref(), Some("CapyIsInsano/Capyro"));
         assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
+        assert!(!back.show_format);
         assert_eq!(back.splash, cfg.splash);
         // los comentarios del ejemplo siguen ahí
         assert!(text.contains("-- segundos que avanza/retrocede"));

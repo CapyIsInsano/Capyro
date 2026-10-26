@@ -93,7 +93,7 @@ struct SliderOut {
 }
 
 /// Interruptor tipo pastilla. Devuelve true si se tocó.
-fn switch(ui: &Ui, painter: &Painter, id: &str, center: egui::Pos2, on: bool, accent: Color32, interactive: bool) -> bool {
+pub(super) fn switch(ui: &Ui, painter: &Painter, id: &str, center: egui::Pos2, on: bool, accent: Color32, interactive: bool) -> bool {
     let r = Rect::from_center_size(center, vec2(34.0, 18.0));
     let a = animate_button(ui, Id::unique(("capyro-fx-switch", id)), r.expand(4.0), interactive);
     let t = ui.ctx().animate_bool_with_time(Id::unique(("capyro-fx-switch-on", id)), on, 0.15);

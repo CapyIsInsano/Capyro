@@ -25,6 +25,7 @@
   - **ready** al tocar **Instalar** en el aviso de actualización.
   - Si un botón tiene su propio sonido (logo, error, captura, instalar), suena ese y no el clic.
 - `CAPYRO_DEBUG_SFX=1 capyro` anota en la terminal cada sonido que suena.
+- Arriba a la izquierda del video se ve el **formato** del archivo (por ejemplo `MP4 · H.264 · GPU`, o `MP3`). Se oculta en Ajustes → Mostrar el formato del archivo, o con `show_format = false`.
 
 ## v0.2.8-alpha · Playlists y atajos
 

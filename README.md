@@ -405,6 +405,7 @@ return {
         splash           = true,       -- pantalla de carga al abrir
         startup_sound    = true,       -- sonido de inicio
         click_sound      = true,       -- sonidito al tocar un botón
+        show_format      = true,       -- "MP4 · H.264" arriba a la izquierda del video
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
     },

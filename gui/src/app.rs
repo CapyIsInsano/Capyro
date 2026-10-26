@@ -1222,8 +1222,49 @@ impl CapyroApp {
             }
         }
 
+        if !hovering_files && self.core.media_kind() != MediaKind::None {
+            self.format_badge(ui, rect);
+        }
         if self.show_playlist {
             self.playlist_panel(ui, rect);
+        }
+    }
+
+    /// Arriba a la izquierda del área de video: "MP4 · H.264", "MP3"...
+    /// Se oculta en ⚙ → Mostrar el formato del archivo.
+    fn format_badge(&self, ui: &Ui, area: Rect) {
+        let t = ui.ctx().animate_bool_with_time(Id::unique("capyro-format-badge"), self.cfg.show_format, 0.2);
+        if t <= 0.001 {
+            return;
+        }
+        let file = self.core.current_file();
+        let ext = Path::new(&file)
+            .extension()
+            .map(|e| e.to_string_lossy().to_uppercase())
+            .unwrap_or_default();
+        if ext.is_empty() {
+            return;
+        }
+        let info = self.core.decode_info();
+        let detail = if info.active && !info.codec.is_empty() {
+            if info.hw { format!("{} · GPU", info.codec) } else { info.codec.clone() }
+        } else {
+            String::new()
+        };
+        let mut p = ui.painter().clone();
+        p.multiply_opacity(t);
+        let eg = p.layout_no_wrap(ext, bold(11.5), Color32::WHITE);
+        let dg = (!detail.is_empty()).then(|| p.layout_no_wrap(detail, regular(11.0), TEXT_DIM));
+        let w = 12.0 + eg.size().x + dg.as_ref().map_or(0.0, |g| 10.0 + g.size().x) + 12.0;
+        let r = Rect::from_min_size(area.min + vec2(10.0, 10.0 - 4.0 * (1.0 - t)), vec2(w, 24.0));
+        p.rect_filled(r, 12.0, Color32::from_black_alpha(150));
+        p.rect_stroke(r, 12.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
+        // el formato en una pastillita de color
+        let er = Rect::from_min_size(pos2(r.left() + 4.0, r.top() + 4.0), vec2(eg.size().x + 16.0, 16.0));
+        p.rect_filled(er, 8.0, self.cfg.accent);
+        p.galley(er.center() - eg.size() / 2.0, eg, Color32::WHITE);
+        if let Some(g) = dg {
+            p.galley(pos2(er.right() + 6.0, r.center().y - g.size().y / 2.0), g, TEXT_DIM);
         }
     }
 
@@ -1828,7 +1869,7 @@ impl CapyroApp {
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(288.0, 272.0);
+        let size = vec2(288.0, 306.0);
         let anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
@@ -1937,6 +1978,17 @@ impl CapyroApp {
 
         /* separador */
         y += 18.0;
+        painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
+
+        /* mostrar el formato arriba a la izquierda del video */
+        y += 18.0;
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Mostrar el formato del archivo", regular(12.5), TEXT_DIM);
+        if fx_menu::switch(ui, &painter, "show-format", pos2(x1 - 17.0, y), self.cfg.show_format, accent, interactive) {
+            self.cfg.show_format = !self.cfg.show_format;
+            let msg = if self.cfg.show_format { "Formato visible" } else { "Formato oculto" };
+            self.save_config(&ctx, msg.to_owned());
+        }
+        y += 16.0;
         painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
 
         /* editar configuración (atajos) */
