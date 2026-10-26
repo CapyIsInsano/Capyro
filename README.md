@@ -4,7 +4,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.2.8--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.2.8-alpha">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.2.9--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.2.9-alpha">
 <img src="https://img.shields.io/badge/plataforma-Linux-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
@@ -27,9 +27,10 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.2.8:** **playlists** (hasta 3) además de la cola de siempre, un
-> **editor de atajos** adentro de la app (⚙ → Editar configuración) y un botón de
-> **Novedades** al lado de ⓘ que te cuenta qué cambió. [Ver el historial completo →](CHANGELOG.md)
+> **Novedades de la v0.2.9:** **decodificación por GPU**. Los videos se decodifican en la placa
+> de video (VA-API para Intel y AMD, NVDEC para NVIDIA) y el procesador queda libre: se nota
+> en 4K y en H.265. En **⚙ → Decodificación** elegís *Automático*, *GPU* o *CPU*.
+> [Ver el historial completo →](CHANGELOG.md)
 
 <br>
 
@@ -48,7 +49,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-info.png" alt="Menú de información"><br><sub><b>ⓘ</b> versión, formatos y buscar actualizaciones</sub></td>
-<td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, editar la configuración y capturas</sub></td>
+<td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, decodificación GPU/CPU, configuración y capturas</sub></td>
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-playlists.png" alt="Playlists en la lista"><br><sub><b>Playlists</b>: hasta 3, además de la cola</sub></td>
@@ -66,6 +67,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 🎵 **Audio** | Carátula, título y artista, un visualizador de frecuencias propio y efectos de audio en tiempo real. |
 | 📃 **Lista** | Una **cola** temporal y hasta **3 playlists** guardadas. Aleatorio sin repetidos, repetir la lista o un archivo, paso automático al siguiente y quitar archivos aunque estén sonando. |
 | 💾 **Memoria** | Retoma la lista, el archivo, la posición, el volumen y los efectos de la última vez. |
+| 🚀 **GPU** | Decodificación de video por **GPU** (VA-API, NVDEC o VDPAU), con vuelta automática a la CPU si la placa no puede. |
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
 | 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, compila e instala la versión nueva y te muestra qué cambió. |
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
@@ -148,6 +150,9 @@ sudo emerge --ask dev-build/cmake dev-vcs/git dev-lang/rust media-video/ffmpeg d
 sudo emerge --ask sys-apps/xdg-desktop-portal sys-apps/xdg-desktop-portal-gtk
 # opcional, para compilar más rápido:
 sudo emerge --ask dev-build/ninja dev-util/ccache
+# decodificación por GPU: FFmpeg con USE="vaapi" (Intel/AMD) o "nvenc" (NVIDIA), y el driver:
+#   Intel: media-libs/intel-media-driver · AMD: mesa con USE="vaapi" · NVIDIA: nvidia-drivers
+#   para comprobar: sudo emerge --ask media-video/libva-utils && vainfo
 rustc --version   # si es menor a 1.95, usá rustup
 ```
 </details>
@@ -323,6 +328,24 @@ capyro --help
 - **Área de video**: clic para play/pausa, doble clic para pantalla completa.
 - **Ventana**: se arrastra desde arriba, se maximiza con doble clic y se redimensiona desde los bordes.
 
+### Decodificación por GPU
+
+En **⚙ → Decodificación** elegís cómo se decodifican los videos:
+
+| | |
+|---|---|
+| **Automático** | Usa la GPU si se puede, y si no, la CPU, sin avisar. Es lo recomendado. |
+| **GPU** | Igual, pero si la GPU no puede, te avisa (con el sonido de error) y sigue por CPU. |
+| **CPU** | Siempre por software, como hasta la v0.2.8. |
+
+El cambio se aplica **al instante**, aunque haya un video sonando: el decodificador se rearma y
+el video sigue donde estaba. Abajo de los botones dice qué se está usando, por ejemplo
+"H.265 (HEVC) decodificado por la GPU (VA-API)". Si la GPU falla a mitad de un video, Capyro
+pasa solo a la CPU sin cortar. Queda guardado en `capyro.lua` como `decoding = "auto"`.
+
+Prueba, en orden: **VA-API** (Intel, AMD, y NVIDIA con `nvidia-vaapi-driver`), **NVDEC** (NVIDIA
+por CUDA) y **VDPAU**. La GPU decodifica, y el cuadro se copia a memoria para mostrarlo.
+
 ### Cola y playlists
 
 La **Lista** (abajo a la izquierda) tiene pestañas: la **Cola**, que es temporal como
@@ -480,10 +503,17 @@ Tu gestor de ventanas no tiene transparencia (no hay compositor). Es solo estét
 </details>
 
 <details>
-<summary><b>Un video 4K va a los saltos</b></summary>
+<summary><b>Elegí GPU pero dice "GPU no disponible" (o un video 4K va a los saltos)</b></summary>
 
-Por ahora el video se decodifica por el procesador. Compilá con `-DCAPYRO_NATIVE=ON` para
-exprimirlo; la decodificación por GPU está en los planes.
+En **⚙ → Decodificación**, abajo de los botones, dice qué se está usando y por qué.
+
+| Dice | Qué hacer |
+|---|---|
+| *No hay GPU compatible* | Falta el driver de VA-API o tu FFmpeg no lo trae. Corré `vainfo`: si da error, instalá el driver (Intel: `intel-media-driver`, AMD: Mesa con VA-API). En NVIDIA hace falta el driver propietario (o `nvidia-vaapi-driver`). |
+| *Tu GPU o tu FFmpeg no decodifican …* | Ese códec no va por GPU (por ejemplo, el MPEG-4 viejo de muchos AVI, o AV1 en placas viejas). Se ve igual, por CPU. |
+| *La GPU no soporta este perfil* | Por ejemplo, H.264 de 10 bits. Sigue por CPU solo. |
+
+Con un video 4K y sin GPU, compilá con `-DCAPYRO_NATIVE=ON` para exprimir el procesador.
 </details>
 
 <details>
@@ -614,7 +644,6 @@ audio en tiempo real. El núcleo también pasa por ThreadSanitizer y AddressSani
 - [ ] Ecualizador gráfico de más bandas y presets propios
 - [ ] Más opciones en el menú de ajustes
 - [ ] Hooks en Lua (`on_open`, `on_end`, acciones personalizadas)
-- [ ] Decodificación por GPU (VA-API) para 4K
 - [ ] Otras plataformas, más adelante
 
 **Lo que ya está:** [el historial completo de versiones](CHANGELOG.md).

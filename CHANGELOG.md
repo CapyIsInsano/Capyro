@@ -3,10 +3,22 @@
 
 # Historial de versiones
 
-*-- "Just press play." --*
+*Just press play.*
 </div>
 
 ---
+
+## v0.2.9-alpha · Decodificación por GPU
+
+- **Decodificación de video por GPU** en el núcleo en C:
+  - VA-API (Intel y AMD), NVDEC (NVIDIA por CUDA) o VDPAU, lo primero que ande;
+  - lo pesado (H.264, H.265, VP9, AV1, sobre todo en 4K) lo hace la placa de video y la CPU queda libre;
+  - si la GPU no puede con un video, o falla a mitad de camino, sigue sola por CPU sin cortar.
+- Nueva sección **Decodificación** en Ajustes: Automático, GPU o CPU.
+  - El cambio se aplica al instante, aunque haya un video sonando.
+  - Abajo de los botones dice qué se está usando y, si no es la GPU, por qué.
+  - Con "GPU" elegido, si no se puede usar, te avisa con el sonido de error.
+- Opción nueva en capyro.lua: `decoding = "auto"` (o `"gpu"`, `"cpu"`).
 
 ## v0.2.8-alpha · Playlists y atajos
 
