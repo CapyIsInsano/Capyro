@@ -21,8 +21,37 @@ use super::{animate_button, decode_png, ease_in_out, ease_out, CapyroApp};
 use crate::ffi::State;
 use crate::theme::*;
 
-/// Música del tutorial (ya con el volumen al 25 %).
-const MUSIC: &[u8] = include_bytes!("../../../assets/sounds/tutorial.opus");
+/// Música del tutorial (ya con el volumen al 25 %). Va como un MP3 de
+/// verdad con tags y carátula: suena en el reproductor, así el área de video
+/// muestra la carátula, el visualizador, el formato y los milisegundos
+/// mientras se explican.
+const TRACK: &[u8] = include_bytes!("../../../assets/sounds/tutorial-bienvenida-a-la-manada.mp3");
+const TRACK_FILE: &str = "Capy y los Capibaras - Bienvenida a la manada.mp3";
+
+/// Lo que había en el reproductor antes del tutorial (se devuelve al final).
+pub(super) struct SavedQueue {
+    pub playlist: Vec<String>,
+    pub current: Option<usize>,
+    pub position: f64,
+    pub playing: bool,
+    pub repeat: crate::ffi::Repeat,
+    pub volume: f32,
+}
+
+/// Escribe la canción en ~/.cache/capyro/tutorial/ (si no estaba) y da la ruta.
+fn track_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    let path = base.join("capyro").join("tutorial").join(TRACK_FILE);
+    let ok = std::fs::metadata(&path).map(|m| m.len() == TRACK.len() as u64).unwrap_or(false);
+    if !ok {
+        std::fs::create_dir_all(path.parent()?).ok()?;
+        std::fs::write(&path, TRACK).ok()?;
+    }
+    Some(path)
+}
 const AVATAR_PNG: &[u8] = include_bytes!("../../../assets/arturo.png");
 const AUTHOR: &str = "Arturo";
 const GITHUB_USER: &str = "CapyIsInsano";
@@ -159,10 +188,12 @@ pub(super) struct Tutorial {
     spot_t0: f64,
     /// Se está cerrando (fundido de salida).
     closing: Option<f64>,
-    /// Estaba sonando algo cuando empezó: se retoma al final.
-    resume: bool,
+    /// La cola de antes (se devuelve al final).
+    saved: SavedQueue,
     /// Veces que se contestó "No".
     rounds: u32,
+    /// Duración del fundido de la música al cerrar.
+    fade: f64,
 }
 
 fn marker_path() -> Option<PathBuf> {
@@ -246,18 +277,33 @@ impl CapyroApp {
         self.show_playlist = false;
         self.show_keys = false;
         self.show_offer = false;
-        let resume = self.core.state() == State::Playing;
-        if resume {
-            self.core.toggle(); // pausa mientras tanto
+        // se guarda la cola de ahora y suena la canción del tutorial
+        let saved = SavedQueue {
+            playlist: self.core.playlist(),
+            current: self.core.playlist_current(),
+            position: self.core.position(),
+            playing: self.core.state() == State::Playing,
+            repeat: self.core.repeat(),
+            volume: self.core.volume(),
+        };
+        if saved.playing {
+            self.core.toggle();
+        }
+        self.core.playlist_clear();
+        match track_path() {
+            Some(path) if self.core.playlist_add(&path).is_ok() => {
+                self.core.set_repeat(crate::ffi::Repeat::One); // en loop mientras dure
+                if self.core.playlist_select(0).is_ok() && self.core.state() != State::Playing {
+                    self.core.toggle();
+                }
+            }
+            _ => eprintln!("capyro: no pude preparar la música del tutorial"),
         }
         if self.avatar.is_none() {
             self.avatar = decode_png(AVATAR_PNG).map(|(w, h, rgba)| {
                 let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
                 ctx.load_texture("capyro-avatar", img, TextureOptions::LINEAR)
             });
-        }
-        if let Err(e) = self.core.music_play(MUSIC, true, 1800) {
-            eprintln!("capyro: no pude reproducir la música del tutorial: {}", e.0);
         }
         let center = Rect::from_center_size(ctx.content_rect().center(), Vec2::ZERO);
         self.tutorial = Some(Tutorial {
@@ -269,17 +315,52 @@ impl CapyroApp {
             spot_to: center,
             spot_t0: now,
             closing: None,
-            resume,
+            saved,
             rounds: 0,
+            fade: 0.8,
         });
     }
 
-    fn finish_tutorial(&mut self, now: f64, music_fade: i32) {
+    /// La cola de antes del tutorial (para guardar la sesión mientras dura).
+    pub(super) fn tutorial_saved(&self) -> Option<&SavedQueue> {
+        self.tutorial.as_ref().map(|t| &t.saved)
+    }
+
+    /// Empieza a cerrarse: la música baja con un fundido de `fade` segundos.
+    fn finish_tutorial(&mut self, now: f64, fade: f64) {
         if let Some(t) = &mut self.tutorial {
             if t.closing.is_none() {
                 t.closing = Some(now);
-                self.core.music_stop(music_fade);
+                t.fade = fade;
                 mark_seen();
+            }
+        }
+    }
+
+    /// Fin del tutorial: la cola, el repetir y el volumen vuelven a como estaban.
+    fn restore_after_tutorial(&mut self, saved: SavedQueue) {
+        self.core.playlist_clear();
+        let mut cur = None;
+        let mut n = 0;
+        for (i, p) in saved.playlist.iter().enumerate() {
+            let path = std::path::Path::new(p);
+            if path.exists() && self.core.playlist_add(path).is_ok() {
+                if saved.current == Some(i) {
+                    cur = Some(n);
+                }
+                n += 1;
+            }
+        }
+        self.core.set_repeat(saved.repeat);
+        self.core.set_volume(saved.volume);
+        if let Some(c) = cur {
+            if self.core.playlist_select(c).is_ok() {
+                if saved.position > 0.5 {
+                    self.core.seek(saved.position);
+                }
+                if saved.playing {
+                    self.core.toggle();
+                }
             }
         }
     }
@@ -336,18 +417,18 @@ impl CapyroApp {
         let now = ctx.input(|i| i.time);
         let accent = self.cfg.accent;
 
-        // ¿terminó de cerrarse?
+        // ¿terminó de cerrarse? (la música baja de a poco y después vuelve todo)
         if let Some(c) = t.closing {
-            if now - c > 0.6 {
-                let resume = t.resume;
-                self.tutorial = None;
-                if resume && self.core.state() != State::Playing {
-                    self.core.toggle();
-                }
+            let k = ((now - c) / t.fade.max(0.1)).clamp(0.0, 1.0) as f32;
+            self.core.set_volume(t.saved.volume * (1.0 - k));
+            if k >= 1.0 && now - c > 0.6 {
+                let t = self.tutorial.take().expect("tutorial");
+                self.restore_after_tutorial(t.saved);
                 return;
             }
         }
-        let out = t.closing.map_or(1.0, |c| 1.0 - ease_out(((now - c) / 0.6) as f32));
+        let Some(t) = &self.tutorial else { return };
+        let out = t.closing.map_or(1.0, |c| 1.0 - ease_out(((now - c) / t.fade.max(0.6)) as f32));
         let phase = t.phase;
         let phase_t0 = t.t0;
 
@@ -363,7 +444,7 @@ impl CapyroApp {
         }
         // bienvenida: a los 3.6 s se va sola
         if phase == Phase::Welcome && now - phase_t0 > 3.6 {
-            self.finish_tutorial(now, 1500);
+            self.finish_tutorial(now, 1.5);
         }
 
         // todo el ratón y el teclado son del tutorial
@@ -439,7 +520,7 @@ impl CapyroApp {
                 t.go(Phase::Tour(0), now);
             }
         } else if esc {
-            self.finish_tutorial(now, 800);
+            self.finish_tutorial(now, 0.8);
         } else if advance && !matches!(phase, Phase::Ask | Phase::Welcome) {
             self.tutorial_next(now);
         }

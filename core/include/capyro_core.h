@@ -192,14 +192,6 @@ const CapyroBuildInfo *capyro_core_build_info(void);
 int  capyro_core_sfx_load(CapyroCore *core, int slot, const uint8_t *data, size_t size);
 void capyro_core_sfx_play(CapyroCore *core, int slot);
 
-/* ---------- música de fondo ----------
- * Una pista larga (la del tutorial) que se decodifica de a poco en su hilo,
- * así no ocupa decenas de MB como un efecto. Se mezcla con todo lo demás y
- * respeta el volumen general. `fade_ms`: entrada / salida suave. */
-int  capyro_core_music_play(CapyroCore *core, const uint8_t *data, size_t size, bool loop, int fade_ms);
-void capyro_core_music_stop(CapyroCore *core, int fade_ms);
-bool capyro_core_music_playing(CapyroCore *core);
-
 /* ---------- volumen ---------- */
 void  capyro_core_set_volume(CapyroCore *core, float volume); /* 0.0 .. 1.0 */
 float capyro_core_get_volume(CapyroCore *core);

@@ -643,66 +643,12 @@ static void test_hwdec(const char *dir) {
     capyro_core_shutdown(core);
 }
 
-/* Música de fondo: se decodifica de a poco, suena en loop y se va con fundido. */
-static void test_music(const char *dir) {
-    char wav[1024];
-    snprintf(wav, sizeof(wav), "%s/tono.wav", dir);
-    FILE *f = fopen(wav, "rb");
-    if (!f) {
-        return;
-    }
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t *data = malloc((size_t)size);
-    size_t got = data ? fread(data, 1, (size_t)size, f) : 0;
-    fclose(f);
-    CapyroCore *core = capyro_core_init();
-    CHECK(core != NULL && got == (size_t)size);
-    if (!core || got != (size_t)size) {
-        free(data);
-        capyro_core_shutdown(core);
-        return;
-    }
-    if (!core->audio_ok) {
-        printf("música: sin dispositivo de audio, salteo\n");
-        free(data);
-        capyro_core_shutdown(core);
-        return;
-    }
-    CHECK(capyro_core_music_play(core, data, (size_t)size, true, 50) == CAPYRO_OK);
-    free(data); /* el núcleo se queda con una copia */
-    pump(core, 400);
-    CHECK(capyro_core_music_playing(core));
-    cp_mutex_lock(&core->lock);
-    float level = core->music.level;
-    cp_mutex_unlock(&core->lock);
-    printf("música: volumen tras el fundido de entrada = %.2f\n", level);
-    CHECK(level > 0.99f);
-    /* el tono dura 3 s: con loop sigue sonando después */
-    pump(core, 3300);
-    CHECK(capyro_core_music_playing(core));
-    capyro_core_music_stop(core, 100);
-    CHECK(!capyro_core_music_playing(core));
-    pump(core, 400);
-    cp_mutex_lock(&core->lock);
-    bool active = core->music.active;
-    cp_mutex_unlock(&core->lock);
-    CHECK(!active); /* se fue y el hilo se juntó */
-    /* volver a tocarla y cerrar con la música sonando (shutdown la para) */
-    CHECK(capyro_core_music_play(core, (const uint8_t *)"no es audio", 11, false, 10) == CAPYRO_OK);
-    pump(core, 200);
-    CHECK(!capyro_core_music_playing(core)); /* archivo inválido: termina solo */
-    capyro_core_shutdown(core);
-}
-
 int main(int argc, char **argv) {
     test_basics();
     test_dsp();
     if (argc > 1) {
         test_media(argv[1]);
         test_hwdec(argv[1]);
-        test_music(argv[1]);
     } else {
         printf("sin carpeta de media: salteo las pruebas de decodificación\n");
     }

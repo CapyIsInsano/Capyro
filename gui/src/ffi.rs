@@ -110,8 +110,6 @@ extern "C" {
     fn capyro_core_get_scope(core: *mut CapyroCore, out: *mut f32, n: usize) -> usize;
     fn capyro_core_sfx_load(core: *mut CapyroCore, slot: c_int, data: *const u8, size: usize) -> c_int;
     fn capyro_core_sfx_play(core: *mut CapyroCore, slot: c_int);
-    fn capyro_core_music_play(core: *mut CapyroCore, data: *const u8, size: usize, looped: bool, fade_ms: c_int) -> c_int;
-    fn capyro_core_music_stop(core: *mut CapyroCore, fade_ms: c_int);
     fn capyro_core_set_speed(core: *mut CapyroCore, speed: f64);
     fn capyro_core_get_speed(core: *mut CapyroCore) -> f64;
     fn capyro_core_set_repeat(core: *mut CapyroCore, mode: c_int);
@@ -352,13 +350,6 @@ impl Core {
     }
     pub fn sfx_play(&self, slot: usize) {
         unsafe { capyro_core_sfx_play(self.ptr, slot as c_int) }
-    }
-    /// Música de fondo (el núcleo copia los datos y la decodifica de a poco).
-    pub fn music_play(&self, data: &[u8], looped: bool, fade_ms: i32) -> Result<(), CoreError> {
-        check(unsafe { capyro_core_music_play(self.ptr, data.as_ptr(), data.len(), looped, fade_ms) })
-    }
-    pub fn music_stop(&self, fade_ms: i32) {
-        unsafe { capyro_core_music_stop(self.ptr, fade_ms) }
     }
     pub fn speed(&self) -> f64 {
         unsafe { capyro_core_get_speed(self.ptr) }

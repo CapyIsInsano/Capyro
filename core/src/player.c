@@ -150,8 +150,7 @@ static void audio_callback(ma_device *dev, void *output, const void *input, ma_u
         memset(out + (size_t)done * 2, 0, (size_t)(frames - done) * 2 * sizeof(float));
     }
 
-    /* Música de fondo (tutorial) y efecto de sonido, encima de todo. */
-    music_mix_locked(core, out, frames, gain);
+    /* Efecto de sonido encima de lo que esté sonando (o del silencio). */
     int slot = core->sfx_playing;
     if (slot >= 0 && core->sfx[slot]) {
         size_t left = core->sfx_len[slot] - core->sfx_pos;
@@ -208,7 +207,6 @@ int player_global_init(CapyroCore *core) {
 }
 
 void player_global_shutdown(CapyroCore *core) {
-    music_shutdown(core);
     player_close(core);
     hwdec_free_devices(core);
     if (core->device) {

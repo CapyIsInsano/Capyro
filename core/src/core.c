@@ -296,7 +296,6 @@ void capyro_core_update(CapyroCore *core) {
     if (!core) {
         return;
     }
-    music_reap(core);
     cp_mutex_lock(&core->lock);
     bool ended = core->state == CAPYRO_STATE_PLAYING && player_ended_locked(core);
     if (ended) {

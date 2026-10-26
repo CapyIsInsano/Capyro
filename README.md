@@ -592,7 +592,6 @@ capyro/
 │       ├── sfx.c             #    sonidos de la app (decodifica desde memoria)
 │       ├── buildinfo.c       #    commit y prefijo del build (para actualizar)
 │       ├── hwdec.c           #    decodificación por GPU (VA-API, NVDEC, VDPAU)
-│       ├── music.c           #    música de fondo (se decodifica de a poco)
 │       ├── platform.c/.h     #    hilos y mutex (pthreads)
 │       ├── internal.h        #    estructuras internas
 │       ├── miniaudio_impl.c  #    implementación de miniaudio

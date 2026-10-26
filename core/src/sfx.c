@@ -22,7 +22,7 @@
 
 #define AVIO_BUF 4096
 
-/* Lectores de memoria para AVIO (también los usa music.c). */
+/* Lectores de memoria para AVIO. */
 int mem_read(void *opaque, uint8_t *buf, int n) {
     MemReader *m = opaque;
     size_t left = m->size - m->pos;

@@ -813,6 +813,23 @@ impl CapyroApp {
     }
 
     fn session_snapshot(&self) -> Session {
+        // durante el tutorial se guarda la cola de antes, no la canción del tutorial
+        if let Some(s) = self.tutorial_saved() {
+            return Session {
+                volume: s.volume,
+                muted: self.core.muted(),
+                speed: self.core.speed(),
+                shuffle: self.core.shuffle(),
+                repeat: s.repeat,
+                show_remaining: self.show_remaining,
+                playlist: s.playlist.clone(),
+                current: s.current,
+                position: s.position,
+                fx: self.core.fx(),
+                pitch: self.core.pitch(),
+                seen_changes: self.changes_seen.clone(),
+            };
+        }
         Session {
             volume: self.core.volume(),
             muted: self.core.muted(),

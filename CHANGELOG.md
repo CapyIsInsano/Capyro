@@ -18,7 +18,8 @@
   - Presentación con el logo, textos que se escriben solos (Espacio para seguir) y el perfil de GitHub del autor.
   - Recorrido por toda la interfaz, iluminando cada parte con su explicación.
   - "¿Estás listo?": No → otra vuelta; Sí → "¡Bienvenido a la manada!".
-  - Tiene música de fondo, que el núcleo en C decodifica de a poco con entrada y salida suaves. Esc lo salta.
+  - Tiene música de fondo, "Bienvenida a la manada" de Capy y los Capibaras, que suena en el propio reproductor. Así el área de video muestra la carátula, el visualizador, el formato y los milisegundos mientras se explican. Al terminar, la cola de antes vuelve a como estaba.
+  - Esc lo salta.
 - Nueva sección **Decodificación** en Ajustes: Automático, GPU o CPU.
   - El cambio se aplica al instante, aunque haya un video sonando.
   - Abajo de los botones dice qué se está usando y, si no es la GPU, por qué.
