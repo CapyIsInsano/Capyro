@@ -3,7 +3,7 @@
 
 # Historial de versiones
 
-*Just press play.*
+*-- "Just press play." --*
 </div>
 
 ---
