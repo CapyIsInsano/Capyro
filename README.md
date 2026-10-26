@@ -406,6 +406,7 @@ return {
         startup_sound    = true,       -- sonido de inicio
         click_sound      = true,       -- clic en botones y sonido al cerrar menús
         show_format      = true,       -- "MP4 · H.264" arriba a la izquierda del video
+        show_millis      = true,       -- y debajo, los milisegundos (000..999)
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
     },

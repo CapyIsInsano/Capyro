@@ -26,6 +26,7 @@
   - Si un botón tiene su propio sonido (logo, error, captura, instalar), suena ese y no el clic.
 - Sonido **retraction** al cerrar o retraer algo (menús, la lista, el aviso de actualización, salir de pantalla completa), el compañero del clic de abrir. Usa el mismo `click_sound`.
 - `CAPYRO_DEBUG_SFX=1 capyro` anota en la terminal cada sonido que suena.
+- Debajo del formato, una burbuja con los **milisegundos** del segundo actual (000 a 999, vuelve a 0 en cada segundo). Se oculta con su propio interruptor en Ajustes (`show_millis`); sin el formato, sube deslizándose a su lugar.
 - Arriba a la izquierda del video se ve el **formato** del archivo (por ejemplo `MP4 · H.264 · GPU`, o `MP3`). Se oculta en Ajustes → Mostrar el formato del archivo, o con `show_format = false`.
 
 ## v0.2.8-alpha · Playlists y atajos

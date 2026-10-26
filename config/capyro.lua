@@ -74,6 +74,7 @@ local options = {
     startup_sound    = true,   -- sonido de inicio cuando termina de cargar
     click_sound      = true,   -- sonidos de la interfaz: clic en botones y al cerrar menús
     show_format      = true,   -- formato del archivo arriba a la izquierda del video (MP4 · H.264)
+    show_millis      = true,   -- debajo, los milisegundos del segundo actual (000..999)
 
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
     -- "gpu" (VA-API / NVDEC / VDPAU; si no hay, avisa y usa la CPU) o "cpu".
