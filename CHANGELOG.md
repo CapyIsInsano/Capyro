@@ -21,6 +21,7 @@
   - cada playlist se reproduce entera o desde la canción que toques;
   - se renombran con doble clic y se borran con el tacho.
 - Botón **Novedades** al lado del de información, con los cambios de esta versión (las anteriores, en el repo). Tiene un puntito mientras no lo abras.
+- La ventana se llama **Capyro** (con mayúscula) en la barra de tareas y el dock.
 - El repo oficial ya viene puesto: si compilaste desde un .zip, igual se actualiza desde github.com/CapyIsInsano/Capyro.
 
 ## v0.2.7-alpha · Se actualiza solo

@@ -47,7 +47,7 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Capyro")
-        .with_app_id("capyro")
+        .with_app_id("Capyro") // lo que muestran la barra de tareas y el dock
         .with_inner_size([768.0, 642.0])
         .with_min_inner_size([520.0, 430.0])
         .with_decorations(false)

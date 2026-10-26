@@ -8,4 +8,4 @@ Icon=capyro
 Terminal=false
 Categories=AudioVideo;Audio;Video;Player;
 MimeType=video/mp4;video/quicktime;audio/mpeg;audio/wav;audio/x-wav;audio/ogg;audio/vorbis;application/ogg;
-StartupWMClass=capyro
+StartupWMClass=Capyro
