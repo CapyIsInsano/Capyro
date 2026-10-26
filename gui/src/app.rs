@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use eframe::egui::{
     self, pos2, vec2, Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response,
-    ResizeDirection, ScrollArea, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui,
+    ResizeDirection, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui,
     UiBuilder, Vec2, ViewportCommand,
 };
 
@@ -21,7 +21,13 @@ use crate::config::{Action, Config};
 use crate::ffi::{self, BuildInfo, Core, MediaKind, Repeat, State};
 use crate::updater::{self, CommitInfo, FailKind, Outcome, Updater};
 
+mod changes_menu;
 mod fx_menu;
+mod keys_editor;
+mod lists;
+use lists::PlPopup;
+use crate::changes::Release;
+use crate::playlists::Playlists;
 use crate::session::Session;
 use crate::viz::Visualizer;
 use crate::icons;
@@ -141,12 +147,6 @@ fn animate_button(ui: &Ui, id: Id, rect: Rect, enabled: bool) -> Anim {
     Anim { resp, hover, press }
 }
 
-enum PlaylistOp {
-    Select(usize),
-    Remove(usize),
-    Clear,
-}
-
 pub struct CapyroApp {
     core: Core,
     cfg: Config,
@@ -206,6 +206,24 @@ pub struct CapyroApp {
     update_banner: Option<UpdateBanner>,
     /// Se está reiniciando para aplicar una actualización.
     restarting: bool,
+    /// Playlists guardadas y qué pestaña de la Lista se ve (None = la Cola).
+    playlists: Playlists,
+    list_tab: Option<usize>,
+    /// Menucito "Agregar a…" abierto.
+    pl_popup: Option<PlPopup>,
+    /// Renombrando: (playlist, texto, pedir foco).
+    pl_rename: Option<(usize, String, bool)>,
+    /// Tacho tocado una vez: (playlist, cuándo). El segundo toque borra.
+    pl_delete_armed: Option<(usize, f64)>,
+    /// Editor de atajos (⚙ → Editar configuración).
+    show_keys: bool,
+    keys_capture: Option<Action>,
+    keys_adding: bool,
+    /// Menú de novedades, su botón, lo que dice y la última versión que se vio.
+    show_changes: bool,
+    changes_rect: Rect,
+    release: Option<Release>,
+    changes_seen: String,
     /// Este proceso es el capyro instalado (no uno corriendo desde build/).
     installed: Option<updater::Install>,
 }
@@ -262,31 +280,6 @@ fn fmt_time(seconds: f64) -> String {
     } else {
         format!("{:02}:{:02}", s / 60, s % 60)
     }
-}
-
-/// Ícono de recargar girado `angle` radianes (rotamos los puntos del ícono).
-fn draw_rotated_reload(painter: &egui::Painter, c: Pos2, s: f32, col: Color32, angle: f32) {
-    let (sin, cos) = angle.sin_cos();
-    let rot = |p: Pos2| {
-        pos2(
-            c.x + (p.x - c.x) * cos - (p.y - c.y) * sin,
-            c.y + (p.x - c.x) * sin + (p.y - c.y) * cos,
-        )
-    };
-    let r = 0.32 * s;
-    let (from, to) = (std::f32::consts::PI, -0.75 * std::f32::consts::PI);
-    let n = 28;
-    let arc: Vec<Pos2> = (0..=n)
-        .map(|i| {
-            let t = from + (to - from) * i as f32 / n as f32;
-            rot(pos2(c.x + r * t.cos(), c.y + r * t.sin()))
-        })
-        .collect();
-    let tip = pos2(c.x + r * to.cos(), c.y + r * to.sin());
-    let h = 0.2 * s;
-    let st = Stroke::new(1.6, col);
-    painter.add(egui::Shape::line(arc, st));
-    painter.add(egui::Shape::line(vec![rot(tip + vec2(0.0, -h)), rot(tip), rot(tip + vec2(h, 0.0))], st));
 }
 
 impl CapyroApp {
@@ -364,6 +357,18 @@ impl CapyroApp {
             hide_header_logo: false,
             updater: Updater::new(),
             installed: updater::install_location(&build_info),
+            playlists: Playlists::default(),
+            list_tab: None,
+            pl_popup: None,
+            pl_rename: None,
+            pl_delete_armed: None,
+            show_keys: false,
+            keys_capture: None,
+            keys_adding: false,
+            show_changes: false,
+            changes_rect: Rect::NOTHING,
+            release: crate::changes::current(),
+            changes_seen: String::new(),
             build_info,
             update_banner: None,
             restarting: false,
@@ -382,6 +387,7 @@ impl CapyroApp {
                 eprintln!("capyro: no se pudo cargar el sonido {slot}: {}", e.0);
             }
         }
+        self.playlists = Playlists::load();
 
         // Sesión anterior: ajustes siempre; la lista solo si no se abrieron
         // archivos desde la línea de comandos.
@@ -389,6 +395,7 @@ impl CapyroApp {
             return;
         }
         let Some(sess) = Session::load() else { return };
+        self.changes_seen = sess.seen_changes.clone();
         let core = &self.core;
         core.set_volume(sess.volume);
         core.set_muted(sess.muted);
@@ -597,9 +604,9 @@ impl CapyroApp {
             Action::SpeedReset => self.set_speed(ctx, 1.0),
             Action::Screenshot => self.take_screenshot(ctx),
             Action::ToggleEffects => {
-                self.show_fx = !self.show_fx;
-                self.show_settings = false;
-                self.show_info = false;
+                let open = !self.show_fx;
+                self.close_menus();
+                self.show_fx = open;
             }
             Action::EffectsBypass => {
                 let mut fx = self.core.fx();
@@ -609,6 +616,14 @@ impl CapyroApp {
             }
             Action::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
         }
+    }
+
+    /// Los menús emergentes son de a uno.
+    fn close_menus(&mut self) {
+        self.show_settings = false;
+        self.show_info = false;
+        self.show_fx = false;
+        self.show_changes = false;
     }
 
     fn set_speed(&mut self, ctx: &egui::Context, speed: f64) {
@@ -708,6 +723,7 @@ impl CapyroApp {
             position: self.core.position(),
             fx: self.core.fx(),
             pitch: self.core.pitch(),
+            seen_changes: self.changes_seen.clone(),
         }
     }
 
@@ -847,6 +863,15 @@ impl CapyroApp {
         };
         if !dropped.is_empty() {
             self.add_paths(ctx, dropped, true);
+        }
+
+        // Editor de atajos esperando una tecla: se la lleva toda.
+        if self.first_pass && self.capture_key(ctx) {
+            return;
+        }
+        // Escribiendo (renombrar playlist) o editando atajos: no disparar nada.
+        if self.show_keys || self.pl_rename.is_some() || ctx.egui_wants_keyboard_input() {
+            return;
         }
 
         // Atajos definidos en capyro.lua (ya ordenados: más modificadores primero).
@@ -1119,156 +1144,6 @@ impl CapyroApp {
         }
     }
 
-    fn playlist_panel(&mut self, ui: &mut Ui, video: Rect) {
-        // Entra deslizándose desde la derecha y se desvanece al salir.
-        let t = ui.ctx().animate_bool_with_time(Id::unique("capyro-playlist-anim"), self.show_playlist, 0.18);
-        if t <= 0.001 {
-            return;
-        }
-        let ease = 1.0 - (1.0 - t).powi(3);
-        let slide = (1.0 - ease) * 40.0;
-        let panel = Rect::from_min_max(
-            pos2((video.right() - 290.0).max(video.left() + 8.0) + slide, video.top() + 8.0),
-            pos2(video.right() - 8.0 + slide, video.bottom() - 8.0),
-        );
-        let interactive = self.show_playlist && t > 0.5;
-        let mut painter = ui.painter().clone();
-        painter.multiply_opacity(ease);
-        if interactive {
-            // Bloquea los clics para que no lleguen al área de video de abajo.
-            ui.interact(panel, Id::unique("capyro-playlist-bg"), Sense::click());
-        }
-        painter.rect_filled(panel.translate(vec2(0.0, 3.0)), 10.0, Color32::from_black_alpha(60));
-        painter.rect_filled(panel, 10.0, BG_PANEL);
-        painter.rect_stroke(panel, 10.0, Stroke::new(1.0, Color32::from_white_alpha(12)), StrokeKind::Inside);
-
-        let list = self.core.playlist();
-        let current = self.core.playlist_current();
-        let accent = self.cfg.accent;
-        let mut op = None;
-
-        painter.text(
-            pos2(panel.left() + 12.0, panel.top() + 18.0),
-            Align2::LEFT_CENTER,
-            format!("Lista · {}", list.len()),
-            bold(13.0),
-            TEXT,
-        );
-        if !list.is_empty() {
-            let clear_pos = pos2(panel.right() - 12.0, panel.top() + 18.0);
-            let clear_rect = Rect::from_center_size(clear_pos - vec2(22.0, 0.0), vec2(52.0, 22.0));
-            let clear = animate_button(ui, Id::unique("capyro-playlist-clear"), clear_rect, interactive);
-            if clear.hover > 0.001 {
-                painter.rect_filled(clear_rect, 6.0, ERROR.gamma_multiply(0.15 * clear.hover));
-            }
-            painter.text(clear_pos, Align2::RIGHT_CENTER, "Limpiar", regular(12.0), clear.tint(TEXT_FAINT, ERROR));
-            if clear.resp.clicked() {
-                op = Some(PlaylistOp::Clear);
-            }
-        }
-
-        let list_rect = Rect::from_min_max(pos2(panel.left() + 4.0, panel.top() + 36.0), panel.max - vec2(4.0, 6.0));
-        if list.is_empty() {
-            painter.text(
-                list_rect.center(),
-                Align2::CENTER_CENTER,
-                "La lista está vacía",
-                regular(12.0),
-                TEXT_FAINT,
-            );
-        } else {
-            let mut child = ui.new_child(UiBuilder::new().max_rect(list_rect));
-            child.multiply_opacity(ease);
-            if !interactive {
-                child.disable();
-            }
-            ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
-                for (i, path) in list.iter().enumerate() {
-                    let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-                    // OJO: el hover se mide sobre el rectángulo de la fila y no con
-                    // resp.hovered(), porque al pasar sobre la ✕ el hover pasa a la ✕;
-                    // antes eso escondía la ✕ y el clic caía en la fila.
-                    let row_hovered = interactive && ui.rect_contains_pointer(row);
-                    let hover = ui.ctx().animate_bool_with_time(
-                        Id::unique(("capyro-row-hover", i)),
-                        row_hovered,
-                        0.12,
-                    );
-                    let is_current = current == Some(i);
-                    let p = ui.painter();
-                    if is_current {
-                        p.rect_filled(row, 6.0, accent.gamma_multiply(0.14 + 0.06 * hover));
-                        p.rect_filled(
-                            Rect::from_min_size(row.min + vec2(0.0, 7.0), vec2(3.0, 16.0)),
-                            1.5,
-                            accent,
-                        );
-                    } else if hover > 0.001 {
-                        p.rect_filled(row, 6.0, Color32::from_white_alpha((12.0 * hover) as u8));
-                    }
-                    p.text(
-                        pos2(row.left() + 12.0, row.center().y),
-                        Align2::LEFT_CENTER,
-                        format!("{:>2}", i + 1),
-                        regular(11.0),
-                        TEXT_FAINT,
-                    );
-                    p.text(
-                        pos2(row.left() + 34.0 + 3.0 * hover, row.center().y),
-                        Align2::LEFT_CENTER,
-                        ellipsize(&file_name(path), 28),
-                        regular(12.5),
-                        if is_current { accent } else { TEXT },
-                    );
-
-                    let mut removed = false;
-                    if hover > 0.001 {
-                        let xc = pos2(row.right() - 14.0, row.center().y);
-                        let x = animate_button(
-                            ui,
-                            Id::unique(("capyro-playlist-rm", i)),
-                            Rect::from_center_size(xc, Vec2::splat(22.0)),
-                            row_hovered,
-                        );
-                        if x.hover > 0.001 {
-                            ui.painter().circle_filled(xc, 10.0, ERROR.gamma_multiply(0.2 * x.hover));
-                        }
-                        let col = x.tint(TEXT_FAINT, ERROR).gamma_multiply(hover);
-                        icons::close(ui.painter(), xc, 9.0 * x.scale(), col);
-                        if x.resp.clicked() {
-                            op = Some(PlaylistOp::Remove(i));
-                            removed = true;
-                        }
-                        x.resp.on_hover_text("Quitar de la lista");
-                    }
-                    if row_hovered {
-                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                    }
-                    if !removed && resp.clicked() {
-                        op = Some(PlaylistOp::Select(i));
-                    }
-                }
-            });
-        }
-
-        match op {
-            Some(PlaylistOp::Select(i)) => match self.core.playlist_select(i) {
-                Ok(()) => {
-                    if self.core.state() != State::Playing {
-                        self.core.toggle();
-                    }
-                }
-                Err(e) => {
-                    let ctx = ui.ctx().clone();
-                    self.toast(&ctx, e.0, true);
-                }
-            },
-            Some(PlaylistOp::Remove(i)) => self.core.playlist_remove(i),
-            Some(PlaylistOp::Clear) => self.core.playlist_clear(),
-            None => {}
-        }
-    }
-
     /// Título del metadato (o nombre de archivo) y artista.
     fn track_labels(&self) -> (String, String) {
         let title = self.core.title();
@@ -1529,9 +1404,9 @@ impl CapyroApp {
         }
         self.info_rect = Rect::from_center_size(info_c, Vec2::splat(30.0));
         if info.resp.clicked() {
-            self.show_info = !self.show_info;
-            self.show_settings = false;
-            self.show_fx = false;
+            let open = !self.show_info;
+            self.close_menus();
+            self.show_info = open;
         }
         if !self.show_info {
             info.resp.on_hover_text(if self.updater.is_running() {
@@ -1541,6 +1416,32 @@ impl CapyroApp {
             } else {
                 "Acerca de Capyro"
             });
+        }
+
+        /* --- botón de novedades (al lado de ⓘ) --- */
+        let ch_c = pos2(left + 43.0, cy);
+        let ch = Self::icon_button(ui, "changes", ch_c, 30.0);
+        let ch_on = ctx.animate_bool_with_time(Id::unique("capyro-changes-on"), self.show_changes, 0.15);
+        let ch_col = ch.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, ch_on);
+        icons::news(&painter, ch_c, 17.0 * ch.scale(), ch_col);
+        self.changes_rect = Rect::from_center_size(ch_c, Vec2::splat(30.0));
+        // puntito mientras no se hayan visto las novedades de esta versión
+        let unseen = self.changes_seen != ffi::version();
+        let dot = ctx.animate_bool_with_time(Id::unique("capyro-changes-dot"), unseen, 0.3);
+        if dot > 0.001 {
+            painter.circle_filled(ch_c + vec2(0.0, 13.0), 2.0 * dot, accent);
+        }
+        if ch.resp.clicked() {
+            let open = !self.show_changes;
+            self.close_menus();
+            self.show_changes = open;
+            if open && unseen {
+                self.changes_seen = ffi::version();
+                self.save_session();
+            }
+        }
+        if !self.show_changes {
+            ch.resp.on_hover_text(if unseen { "Novedades de esta versión · ¡hay cosas nuevas!" } else { "Novedades de esta versión" });
         }
 
         /* --- fila inferior --- */
@@ -1625,9 +1526,9 @@ impl CapyroApp {
         }
         self.fx_rect = Rect::from_center_size(fx_c, Vec2::splat(26.0));
         if fxb.resp.clicked() {
-            self.show_fx = !self.show_fx;
-            self.show_settings = false;
-            self.show_info = false;
+            let open = !self.show_fx;
+            self.close_menus();
+            self.show_fx = open;
         }
         if !self.show_fx {
             fxb.resp.on_hover_text("Efectos de audio (Ctrl+E)");
@@ -1651,9 +1552,9 @@ impl CapyroApp {
         icons::gear(&painter, gear_c, 16.0 * gear.scale(), gear_col);
         self.gear_rect = Rect::from_center_size(gear_c, Vec2::splat(26.0));
         if gear.resp.clicked() {
-            self.show_settings = !self.show_settings;
-            self.show_info = false;
-            self.show_fx = false;
+            let open = !self.show_settings;
+            self.close_menus();
+            self.show_settings = open;
         }
         if !self.show_settings {
             gear.resp.on_hover_text("Ajustes");
@@ -1902,28 +1803,31 @@ impl CapyroApp {
         y += 24.0;
         painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
 
-        /* recargar configuración */
+        /* editar configuración (atajos) */
         y += 26.0;
         let row = Rect::from_min_max(pos2(x0 - 6.0, y - 18.0), pos2(x1 + 6.0, y + 18.0));
-        let reload = animate_button(ui, Id::unique("capyro-settings-reload"), row, interactive);
-        if reload.hover > 0.001 || reload.press > 0.001 {
-            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * reload.hover + 10.0 * reload.press) as u8));
+        let edit = animate_button(ui, Id::unique("capyro-settings-edit"), row, interactive);
+        if edit.hover > 0.001 || edit.press > 0.001 {
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * edit.hover + 10.0 * edit.press) as u8));
         }
-        // el ícono gira mientras se mantiene el mouse encima
-        let spin = ctx.animate_bool_with_time(Id::unique("capyro-reload-spin"), reload.resp.hovered(), 0.35);
         let ic = pos2(x0 + 8.0, y - 1.0);
-        let col = reload.tint(ICON, Color32::WHITE);
-        draw_rotated_reload(&painter, ic, 15.0, col, spin * std::f32::consts::TAU * 0.5);
-        painter.text(pos2(x0 + 24.0, y - 7.0), Align2::LEFT_CENTER, "Recargar configuración", regular(12.5), TEXT);
+        icons::keyboard(&painter, ic, 16.0 * edit.scale(), edit.tint(ICON, Color32::WHITE));
+        painter.text(pos2(x0 + 24.0, y - 7.0), Align2::LEFT_CENTER, "Editar configuración", regular(12.5), TEXT);
         painter.text(
             pos2(x0 + 24.0, y + 8.0),
             Align2::LEFT_CENTER,
-            ellipsize(&self.cfg.source, 34),
+            format!("Atajos de teclado · {} teclas", self.cfg.bindings.len()),
             regular(10.5),
             TEXT_FAINT,
         );
-        if reload.resp.clicked() {
-            self.reload_config(&ctx);
+        // flechita: abre otra pantalla
+        let chev = pos2(x1 - 2.0 + 2.0 * edit.hover, y);
+        let st = Stroke::new(1.5, edit.tint(TEXT_FAINT, TEXT));
+        painter.line_segment([chev + vec2(-4.0, -5.0), chev], st);
+        painter.line_segment([chev + vec2(-4.0, 5.0), chev], st);
+        if edit.resp.clicked() {
+            self.show_settings = false;
+            self.show_keys = true;
         }
 
         /* captura del fotograma */
@@ -2451,6 +2355,8 @@ impl eframe::App for CapyroApp {
         self.settings_menu(ui);
         self.info_menu(ui);
         self.fx_menu(ui);
+        self.changes_menu(ui);
+        self.keys_editor(ui, video.expand2(vec2(0.0, 30.0)));
         // avisos arriba de todo (también de los menús abiertos)
         self.draw_toast(ui, video);
         self.draw_update_banner(ui, video);

@@ -339,3 +339,72 @@ pub fn spinner(pt: &Painter, c: Pos2, s: f32, col: Color32, t: f64) {
         .collect();
     pt.add(Shape::line(pts, Stroke::new(W + 0.2, col)));
 }
+
+/// Teclado (editar atajos).
+pub fn keyboard(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    let body = Rect::from_center_size(c, vec2(0.92 * s, 0.6 * s));
+    pt.rect_stroke(body, 2.5, st, StrokeKind::Middle);
+    for row in 0..2 {
+        for k in 0..4 {
+            let x = -0.27 + 0.18 * k as f32;
+            let y = -0.12 + 0.13 * row as f32;
+            pt.circle_filled(p(c, s, x, y), 0.035 * s + 0.35, col);
+        }
+    }
+    pt.line_segment([p(c, s, -0.2, 0.15), p(c, s, 0.2, 0.15)], st);
+}
+
+/// Hoja con renglones y una chispa (novedades de la versión).
+pub fn news(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    let page = Rect::from_min_max(p(c, s, -0.32, -0.38), p(c, s, 0.22, 0.4));
+    pt.rect_stroke(page, 2.0, st, StrokeKind::Middle);
+    for (i, w) in [0.3, 0.3, 0.2].iter().enumerate() {
+        let y = -0.14 + 0.16 * i as f32;
+        pt.line_segment([p(c, s, -0.2, y), p(c, s, -0.2 + w, y)], st);
+    }
+    // chispa de 4 puntas arriba a la derecha
+    let sc = p(c, s, 0.3, -0.3);
+    let r = 0.17 * s;
+    let q = 0.05 * s;
+    pt.add(Shape::convex_polygon(
+        vec![
+            pos2(sc.x, sc.y - r),
+            pos2(sc.x + q, sc.y - q),
+            pos2(sc.x + r, sc.y),
+            pos2(sc.x + q, sc.y + q),
+            pos2(sc.x, sc.y + r),
+            pos2(sc.x - q, sc.y + q),
+            pos2(sc.x - r, sc.y),
+            pos2(sc.x - q, sc.y - q),
+        ],
+        col,
+        Stroke::NONE,
+    ));
+}
+
+/// Tacho de basura (borrar playlist / atajo).
+pub fn trash(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    pt.line_segment([p(c, s, -0.36, -0.24), p(c, s, 0.36, -0.24)], st);
+    pt.add(Shape::line(
+        vec![p(c, s, -0.12, -0.24), p(c, s, -0.1, -0.36), p(c, s, 0.1, -0.36), p(c, s, 0.12, -0.24)],
+        st,
+    ));
+    pt.add(Shape::line(
+        vec![p(c, s, -0.27, -0.2), p(c, s, -0.21, 0.38), p(c, s, 0.21, 0.38), p(c, s, 0.27, -0.2)],
+        st,
+    ));
+    pt.line_segment([p(c, s, -0.07, -0.06), p(c, s, -0.07, 0.24)], st);
+    pt.line_segment([p(c, s, 0.07, -0.06), p(c, s, 0.07, 0.24)], st);
+}
+
+/// Triángulo de play chiquito (botón "Reproducir").
+pub fn play_small(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    pt.add(Shape::convex_polygon(
+        vec![p(c, s, -0.3, -0.36), p(c, s, 0.38, 0.0), p(c, s, -0.3, 0.36)],
+        col,
+        Stroke::NONE,
+    ));
+}

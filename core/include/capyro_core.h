@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.7-alpha"
+#define CAPYRO_VERSION "0.2.8-alpha"
 
 typedef struct CapyroCore CapyroCore;
 

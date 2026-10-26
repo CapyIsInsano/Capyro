@@ -5,8 +5,10 @@
 //! loop de eframe/egui hasta que se cierra la ventana.
 
 mod app;
+mod changes;
 mod config;
 mod ffi;
+mod playlists;
 mod formats;
 mod session;
 mod updater;

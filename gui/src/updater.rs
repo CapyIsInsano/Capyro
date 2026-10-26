@@ -80,6 +80,9 @@ pub enum Outcome {
     Failed { kind: FailKind, message: String },
 }
 
+/// Repo oficial, para cuando se compiló sin git.
+pub const DEFAULT_REPO: &str = "CapyIsInsano/Capyro";
+
 /// Qué actualizar y cómo volver a compilarlo (sale de los datos del build).
 #[derive(Debug, Clone)]
 pub struct Job {
@@ -107,9 +110,8 @@ impl Job {
             .map(str::trim)
             .filter(|r| !r.is_empty())
             .unwrap_or(info.remote.trim());
-        if raw.is_empty() {
-            return Err("No sé de qué repo bajar las actualizaciones: poné update_repo en capyro.lua".into());
-        }
+        // compilado sin git (desde un .zip): el repo oficial
+        let raw = if raw.is_empty() { DEFAULT_REPO } else { raw };
         if raw.contains("TU_USUARIO") {
             return Err("El repo todavía dice TU_USUARIO: poné el tuyo en update_repo (capyro.lua)".into());
         }

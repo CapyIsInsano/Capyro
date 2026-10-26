@@ -8,6 +8,21 @@
 
 ---
 
+## v0.2.8-alpha · Playlists y atajos
+
+- **Editar configuración** desde la app (en Ajustes, reemplaza a "Recargar configuración"):
+  - cada función con sus teclas, y se pueden quitar o agregar;
+  - "Agregar atajo" muestra las funciones que todavía no tienen tecla;
+  - si la tecla ya la usaba otra función, se la pasa y te avisa;
+  - se guarda solo en `~/.config/capyro/capyro.lua` (con copia `.bak`).
+- **Playlists** en la Lista (hasta 3):
+  - la Cola sigue siendo temporal, como siempre;
+  - con **+** en una canción de la Cola la agregás a una playlist, o guardás toda la Cola de una;
+  - cada playlist se reproduce entera o desde la canción que toques;
+  - se renombran con doble clic y se borran con el tacho.
+- Botón **Novedades** al lado del de información, con los cambios de esta versión (las anteriores, en el repo). Tiene un puntito mientras no lo abras.
+- El repo oficial ya viene puesto: si compilaste desde un .zip, igual se actualiza desde github.com/CapyIsInsano/Capyro.
+
 ## v0.2.7-alpha · Se actualiza solo
 
 - **Buscar actualizaciones** en el menú ⓘ:

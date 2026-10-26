@@ -4,7 +4,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.2.7--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.2.7-alpha">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.2.8--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.2.8-alpha">
 <img src="https://img.shields.io/badge/plataforma-Linux-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
@@ -27,10 +27,9 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.2.7:** Capyro **se actualiza solo**. En el menú **ⓘ** tocás
-> *Buscar actualizaciones* y él baja los commits nuevos del repo, se compila y se instala;
-> te muestra el parche y te pide reiniciar. Además, al abrir hay una **pantalla de carga**
-> animada con su propio sonido. [Ver el historial completo →](CHANGELOG.md)
+> **Novedades de la v0.2.8:** **playlists** (hasta 3) además de la cola de siempre, un
+> **editor de atajos** adentro de la app (⚙ → Editar configuración) y un botón de
+> **Novedades** al lado de ⓘ que te cuenta qué cambió. [Ver el historial completo →](CHANGELOG.md)
 
 <br>
 
@@ -49,7 +48,11 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-info.png" alt="Menú de información"><br><sub><b>ⓘ</b> versión, formatos y buscar actualizaciones</sub></td>
-<td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, recargar la config y capturas</sub></td>
+<td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, editar la configuración y capturas</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshot-playlists.png" alt="Playlists en la lista"><br><sub><b>Playlists</b>: hasta 3, además de la cola</sub></td>
+<td align="center"><img src="docs/screenshot-atajos.png" alt="Editor de atajos"><br><sub><b>Editar configuración</b>: los atajos, sin tocar archivos</sub></td>
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-carga.png" alt="Pantalla de carga"><br><sub><b>Pantalla de carga</b> animada, con sonido de inicio</sub></td>
@@ -61,13 +64,14 @@ Abrís un archivo, apretás play y listo: *just press play*.
 |---|---|
 | ▶️ **Reproducción** | Audio y video con FFmpeg, video sincronizado con el audio, búsqueda precisa, velocidad de 0.5× a 2× **sin cambiar el tono**, saltos al 0–90 % con las teclas `0`–`9`. |
 | 🎵 **Audio** | Carátula, título y artista, un visualizador de frecuencias propio y efectos de audio en tiempo real. |
-| 📃 **Lista** | Aleatorio sin repetidos, repetir la lista o un archivo, paso automático al siguiente y quitar archivos aunque estén sonando. |
+| 📃 **Lista** | Una **cola** temporal y hasta **3 playlists** guardadas. Aleatorio sin repetidos, repetir la lista o un archivo, paso automático al siguiente y quitar archivos aunque estén sonando. |
 | 💾 **Memoria** | Retoma la lista, el archivo, la posición, el volumen y los efectos de la última vez. |
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
 | 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, compila e instala la versión nueva y te muestra qué cambió. |
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
 | 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
-| ⚙️ **Personalizable** | Todos los atajos y opciones en un archivo **Lua**, que se recarga sin reiniciar. |
+| ⚙️ **Personalizable** | Los atajos se cambian **desde la app** (⚙ → Editar configuración) y todo queda en un archivo **Lua** que también podés editar a mano. |
+| 📰 **Novedades** | Un botón al lado de ⓘ con lo nuevo de la versión que tenés. |
 
 <img src="docs/readme/divider-2.svg" width="100%" alt="">
 
@@ -298,7 +302,7 @@ siguientes reutilizan lo compilado y tardan **segundos**. Mientras tanto podés 
 |---|---|
 | Capyro **instalado** | Corriendo desde `build/` solo te avisa si hay algo nuevo. |
 | `git`, `cmake` y `cargo` | Los mismos que usaste para compilarlo. |
-| Saber de qué repo bajar | Lo toma del `git remote` con el que lo compilaste. Si lo bajaste como `.zip`, poné `update_repo = "usuario/capyro"` en la configuración. |
+| Saber de qué repo bajar | Lo toma del `git remote` con el que lo compilaste. Si lo bajaste como `.zip`, usa el oficial: [CapyIsInsano/Capyro](https://github.com/CapyIsInsano/Capyro). Para usar un fork, poné `update_repo = "usuario/Capyro"`. |
 | Internet | Sin conexión te avisa con el sonido de error. |
 
 <img src="docs/readme/divider-6.svg" width="100%" alt="">
@@ -317,6 +321,19 @@ capyro --help
 - **Área de video**: clic para play/pausa, doble clic para pantalla completa.
 - **Ventana**: se arrastra desde arriba, se maximiza con doble clic y se redimensiona desde los bordes.
 
+### Cola y playlists
+
+La **Lista** (abajo a la izquierda) tiene pestañas: la **Cola**, que es temporal como
+siempre, y tus **playlists** (hasta 3).
+
+- En la Cola, pasá el mouse por una canción y tocá **+** para agregarla a una playlist.
+  Con **Guardar en…** guardás la Cola entera.
+- Con **+** al lado de las pestañas creás una playlist nueva (y le ponés nombre ahí mismo).
+- En una playlist: **Reproducir** la carga en la Cola y arranca. Si tocás una canción,
+  arranca desde esa. **Doble clic** en el nombre la renombra y el **tacho** la borra
+  (pide confirmar).
+- Se guardan en `~/.local/share/capyro/playlists.lua`.
+
 ### Atajos
 
 | | | | |
@@ -331,7 +348,7 @@ capyro --help
 | Pantalla completa | <kbd>F</kbd> <kbd>F11</kbd> | Capturar fotograma | <kbd>Shift</kbd>+<kbd>S</kbd> |
 | Cerrar menú / pantalla completa | <kbd>Esc</kbd> | Salir | <kbd>Ctrl</kbd>+<kbd>Q</kbd> |
 
-Todos se pueden cambiar en la configuración.
+Todos se cambian desde **⚙ → Editar configuración** (ver [Configuración](#configuración)).
 
 <img src="docs/readme/divider-7.svg" width="100%" alt="">
 
@@ -362,13 +379,20 @@ return {
         backend          = "auto",     -- "auto", "x11" o "wayland"
         splash           = true,       -- pantalla de carga al abrir
         startup_sound    = true,       -- sonido de inicio
-        update_repo      = "",         -- "" = el repo del que lo compilaste
+        update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
     },
 }
 ```
 
-Después tocá **⚙ → Recargar configuración** y listo, sin reiniciar. Todas las opciones y
-las acciones de teclado están comentadas en [`config/capyro.lua`](config/capyro.lua).
+Para los **atajos** no hace falta tocar el archivo: **⚙ → Editar configuración** muestra cada
+función con sus teclas.
+- Tocás una tecla para quitarla y **+** para agregar otra: apretás la combinación y listo.
+- **Agregar atajo** ofrece las funciones que todavía no tienen tecla.
+- Si la tecla la usaba otra función, se la pasa y te avisa.
+- Se guarda solo en `~/.config/capyro/capyro.lua`, con una copia del anterior en `capyro.lua.bak`.
+
+Si editás el archivo a mano, en el mismo editor está **Recargar archivo**. Todas las
+opciones y acciones están comentadas en [`config/capyro.lua`](config/capyro.lua).
 
 <details>
 <summary><b>¿Dónde guarda Capyro sus cosas?</b></summary>
@@ -377,6 +401,7 @@ las acciones de teclado están comentadas en [`config/capyro.lua`](config/capyro
 |---|---|
 | Configuración | `~/.config/capyro/capyro.lua` (o la ruta en `CAPYRO_CONFIG`) |
 | Sesión (lista, posición, volumen, efectos) | `~/.local/state/capyro/session.lua` |
+| Playlists | `~/.local/share/capyro/playlists.lua` |
 | Capturas | `~/Imágenes/Capyro` (tu carpeta de Imágenes de `xdg-user-dirs`) |
 | Actualizaciones (código, compilación y `update.log`) | `~/.cache/capyro/` (se puede borrar) |
 
@@ -431,7 +456,6 @@ comandos de tu distro en [Instalación](#instalación).
 |---|---|
 | *Sin conexión* | Revisá internet. Capyro necesita llegar a GitHub. |
 | *No encontré el repo* | El repo es privado o la URL está mal. Revisá `update_repo` en la configuración. |
-| *No sé de qué repo bajar* | Lo compilaste desde un `.zip`: poné `update_repo = "usuario/capyro"`. |
 | *Necesita git / cmake / cargo* | Instalá lo que falte. Si usás rustup y abrís Capyro desde el menú, igual busca en `~/.cargo/bin`. |
 | *Falló la compilación* | El detalle completo está en `~/.cache/capyro/update.log`. |
 | *No hay agente de polkit* | Tu escritorio no tiene quién pida la contraseña (en Niri/Hyprland: `polkit-gnome`, `lxqt-policykit` o `hyprpolkitagent`). O instalá Capyro en `~/.local`. |
@@ -535,6 +559,11 @@ capyro/
 │       ├── lib.rs            #    capyro_gui_run() + ventana
 │       ├── app.rs            #    layout y lógica de la UI
 │       ├── app/fx_menu.rs    #    menú de efectos de audio
+│       ├── app/lists.rs      #    panel Lista: cola y playlists
+│       ├── app/keys_editor.rs #   editor de atajos
+│       ├── app/changes_menu.rs #  menú de novedades
+│       ├── playlists.rs      #    guardar / leer las playlists
+│       ├── changes.rs        #    novedades (lee el CHANGELOG embebido)
 │       ├── ffi.rs            #    bindings seguros al núcleo
 │       ├── viz.rs            #    visualizador (FFT propia)
 │       ├── session.rs        #    guardar / retomar la sesión

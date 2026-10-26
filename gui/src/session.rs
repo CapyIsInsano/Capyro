@@ -24,6 +24,8 @@ pub struct Session {
     pub position: f64,
     pub fx: AudioFx,
     pub pitch: f64,
+    /// Versión cuyas novedades ya se abrieron (para el puntito del botón).
+    pub seen_changes: String,
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -78,6 +80,7 @@ impl Session {
             "    fx = {{ enabled = {}, bass = {:.1}, mid = {:.1}, treble = {:.1}, width = {:.2}, night = {}, pitch = {:.0} }},\n",
             f.enabled, f.bass_db, f.mid_db, f.treble_db, f.width, f.night, self.pitch
         );
+        s += &format!("    seen_changes = {},\n", lua_quote(&self.seen_changes));
         s += "    playlist = {\n";
         for p in &self.playlist {
             s += &format!("        {},\n", lua_quote(p));
@@ -124,6 +127,7 @@ impl Session {
             playlist,
             current,
             position: t.get::<Option<f64>>("position")?.unwrap_or(0.0).max(0.0),
+            seen_changes: t.get::<Option<String>>("seen_changes")?.unwrap_or_default(),
         })
     }
 
@@ -171,9 +175,10 @@ mod tests {
             position: 83.5,
             fx: AudioFx { enabled: false, bass_db: 6.5, mid_db: -3.0, treble_db: 2.0, width: 0.4, night: true },
             pitch: -3.0,
+            seen_changes: "v0.2.8-alpha".to_owned(),
         };
         let back = Session::from_lua(&s.to_lua()).unwrap();
-        assert_eq!(back, Session { volume: 0.42, ..s });
+        assert_eq!(back, Session { volume: 0.42, ..s.clone() });
     }
 
     #[test]

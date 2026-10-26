@@ -44,6 +44,85 @@ pub enum Backend {
 }
 
 impl Action {
+    /// Todas, en el orden en que aparecen en el editor y en capyro.lua.
+    pub const ALL: [Action; 21] = [
+        Action::PlayPause,
+        Action::Stop,
+        Action::SeekForward,
+        Action::SeekBackward,
+        Action::VolumeUp,
+        Action::VolumeDown,
+        Action::Mute,
+        Action::NextFile,
+        Action::PrevFile,
+        Action::TogglePlaylist,
+        Action::Fullscreen,
+        Action::OpenFiles,
+        Action::ToggleShuffle,
+        Action::CycleRepeat,
+        Action::SpeedDown,
+        Action::SpeedUp,
+        Action::SpeedReset,
+        Action::Screenshot,
+        Action::ToggleEffects,
+        Action::EffectsBypass,
+        Action::Quit,
+    ];
+
+    /// Nombre en capyro.lua.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::PlayPause => "play_pause",
+            Self::Stop => "stop",
+            Self::SeekForward => "seek_forward",
+            Self::SeekBackward => "seek_backward",
+            Self::VolumeUp => "volume_up",
+            Self::VolumeDown => "volume_down",
+            Self::Mute => "mute",
+            Self::NextFile => "next_file",
+            Self::PrevFile => "prev_file",
+            Self::TogglePlaylist => "toggle_playlist",
+            Self::Fullscreen => "fullscreen",
+            Self::OpenFiles => "open_files",
+            Self::ToggleShuffle => "toggle_shuffle",
+            Self::CycleRepeat => "cycle_repeat",
+            Self::SpeedUp => "speed_up",
+            Self::SpeedDown => "speed_down",
+            Self::SpeedReset => "speed_reset",
+            Self::Screenshot => "screenshot",
+            Self::ToggleEffects => "toggle_effects",
+            Self::EffectsBypass => "effects_bypass",
+            Self::Quit => "quit",
+        }
+    }
+
+    /// Lo que se ve en el editor de atajos.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::PlayPause => "Play / pausa",
+            Self::Stop => "Detener",
+            Self::SeekForward => "Adelantar",
+            Self::SeekBackward => "Retroceder",
+            Self::VolumeUp => "Subir volumen",
+            Self::VolumeDown => "Bajar volumen",
+            Self::Mute => "Silenciar",
+            Self::NextFile => "Siguiente",
+            Self::PrevFile => "Anterior",
+            Self::TogglePlaylist => "Mostrar la lista",
+            Self::Fullscreen => "Pantalla completa",
+            Self::OpenFiles => "Agregar archivos",
+            Self::ToggleShuffle => "Aleatorio",
+            Self::CycleRepeat => "Repetir",
+            Self::SpeedUp => "Más velocidad",
+            Self::SpeedDown => "Menos velocidad",
+            Self::SpeedReset => "Velocidad normal",
+            Self::Screenshot => "Capturar fotograma",
+            Self::ToggleEffects => "Efectos de audio",
+            Self::EffectsBypass => "Prender / apagar efectos",
+            Self::Quit => "Salir",
+        }
+    }
+
     fn from_name(s: &str) -> Option<Self> {
         Some(match s {
             "play_pause" => Self::PlayPause,
@@ -128,6 +207,277 @@ impl Config {
             }
         }
         parse(DEFAULT_CONFIG, "embebida").expect("la config embebida tiene que ser válida")
+    }
+}
+
+/* ------------------------------------------------------------------------ */
+/* guardar (editor de atajos)                                               */
+/* ------------------------------------------------------------------------ */
+
+/// Donde se guarda lo que se edita desde Capyro: `CAPYRO_CONFIG` si está,
+/// si no `~/.config/capyro/capyro.lua` (el primero que se busca al abrir).
+/// Nunca el de ejemplo del repo ni el de /usr/share.
+pub fn user_config_path() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("CAPYRO_CONFIG") {
+        return Some(PathBuf::from(p));
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("capyro").join("capyro.lua"))
+}
+
+/// "Ctrl+Shift+Right": como se escribe en capyro.lua.
+pub fn key_spec(m: Modifiers, key: Key) -> String {
+    let mut s = String::new();
+    if m.command || m.ctrl {
+        s += "Ctrl+";
+    }
+    if m.shift {
+        s += "Shift+";
+    }
+    if m.alt {
+        s += "Alt+";
+    }
+    s += match key {
+        Key::OpenBracket => "[",
+        Key::CloseBracket => "]",
+        other => other.name(),
+    };
+    s
+}
+
+/// "Ctrl+→", "Espacio": como se muestra en pantalla.
+pub fn key_label(m: Modifiers, key: Key) -> String {
+    let k = match key {
+        Key::Space => "Espacio",
+        Key::ArrowRight => "→",
+        Key::ArrowLeft => "←",
+        Key::ArrowUp => "↑",
+        Key::ArrowDown => "↓",
+        Key::Backspace => "⌫",
+        Key::Escape => "Esc",
+        Key::Enter => "Enter",
+        Key::Tab => "Tab",
+        Key::PageUp => "RePág",
+        Key::PageDown => "AvPág",
+        Key::Home => "Inicio",
+        Key::End => "Fin",
+        Key::Delete => "Supr",
+        Key::Insert => "Insert",
+        other => other.symbol_or_name(),
+    };
+    let mut s = String::new();
+    if m.command || m.ctrl {
+        s += "Ctrl+";
+    }
+    if m.shift {
+        s += "Shift+";
+    }
+    if m.alt {
+        s += "Alt+";
+    }
+    s + k
+}
+
+/// Ctrl y Command son la misma tecla en Linux: se guarda como COMMAND.
+pub fn normalize_modifiers(m: Modifiers) -> Modifiers {
+    let mut out = Modifiers::NONE;
+    if m.ctrl || m.command {
+        out = out | Modifiers::COMMAND;
+    }
+    if m.shift {
+        out = out | Modifiers::SHIFT;
+    }
+    if m.alt {
+        out = out | Modifiers::ALT;
+    }
+    out
+}
+
+/// Los atajos de la config por defecto (para "Restablecer").
+pub fn default_bindings() -> Vec<Binding> {
+    parse(DEFAULT_CONFIG, "embebida").map(|c| c.bindings).unwrap_or_default()
+}
+
+fn lua_quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn fmt_num(v: f64) -> String {
+    if (v - v.round()).abs() < 1e-9 {
+        format!("{}", v.round() as i64)
+    } else {
+        let t = format!("{v:.2}");
+        t.trim_end_matches('0').trim_end_matches('.').to_owned()
+    }
+}
+
+impl Config {
+    /// El archivo entero, armado sobre el de ejemplo (con todos sus
+    /// comentarios) pero con los atajos y las opciones de esta config.
+    pub fn to_lua(&self) -> String {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let option_value = |name: &str| -> Option<String> {
+            Some(match name {
+                "seek_step" => fmt_num(self.seek_step),
+                "volume_step" => fmt_num((self.volume_step as f64 * 100.0).round()),
+                "wheel_step" => fmt_num((self.wheel_step as f64 * 100.0).round()),
+                "start_volume" => fmt_num((self.start_volume as f64 * 100.0).round()),
+                "auto_next" => self.auto_next.to_string(),
+                "speed" => {
+                    let t = fmt_num(self.start_speed);
+                    if t.contains('.') { t } else { format!("{t}.0") }
+                }
+                "shuffle" => self.start_shuffle.to_string(),
+                "[\"repeat\"]" => lua_quote(match self.start_repeat {
+                    crate::ffi::Repeat::Off => "off",
+                    crate::ffi::Repeat::All => "all",
+                    crate::ffi::Repeat::One => "one",
+                }),
+                "accent" => lua_quote(&format!("#{:02X}{:02X}{:02X}", self.accent.r(), self.accent.g(), self.accent.b())),
+                "remember_session" => self.remember_session.to_string(),
+                "visualizer" => self.visualizer.to_string(),
+                "screenshot_dir" => {
+                    let p = self.screenshot_dir.as_ref().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                    let p = match p.strip_prefix(&home) {
+                        Some(rest) if !home.is_empty() && rest.starts_with('/') => format!("~{rest}"),
+                        _ => p,
+                    };
+                    lua_quote(&p)
+                }
+                "splash" => self.splash.to_string(),
+                "startup_sound" => self.startup_sound.to_string(),
+                "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
+                "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
+                "backend" => lua_quote(match self.backend {
+                    Backend::Auto => "auto",
+                    Backend::X11 => "x11",
+                    Backend::Wayland => "wayland",
+                }),
+                _ => return None,
+            })
+        };
+
+        let mut out = String::from("-- Guardado desde Capyro (⚙ → Editar configuración).\n");
+        let mut section = "";
+        for line in DEFAULT_CONFIG.lines() {
+            let t = line.trim_start();
+            if t.starts_with("local keys") {
+                section = "keys";
+                out += "local keys = {\n";
+                for action in Action::ALL {
+                    let specs: Vec<String> = self
+                        .bindings
+                        .iter()
+                        .filter(|b| b.action == action)
+                        .map(|b| lua_quote(&key_spec(b.modifiers, b.key)))
+                        .collect();
+                    if specs.is_empty() {
+                        continue;
+                    }
+                    let value = if specs.len() == 1 { specs[0].clone() } else { format!("{{ {} }}", specs.join(", ")) };
+                    out += &format!("    {:<15} = {},\n", action.name(), value);
+                }
+                continue;
+            }
+            if section == "keys" {
+                if line.starts_with('}') {
+                    section = "";
+                    out += "}\n";
+                }
+                continue;
+            }
+            if t.starts_with("local options") {
+                section = "options";
+            } else if section == "options" && line.starts_with('}') {
+                section = "";
+            }
+            if section == "options" && !t.starts_with("--") {
+                if let Some(eq) = line.find('=') {
+                    let name = line[..eq].trim();
+                    if let Some(v) = option_value(name) {
+                        // la coma que cierra el valor (fuera de comillas)
+                        let rest = &line[eq + 1..];
+                        let mut in_str = false;
+                        let mut end = None;
+                        for (i, c) in rest.char_indices() {
+                            match c {
+                                '"' => in_str = !in_str,
+                                ',' if !in_str => {
+                                    end = Some(i);
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let Some(end) = end {
+                            let lead = &rest[..rest.len() - rest.trim_start().len()];
+                            let tail = &rest[end + 1..];
+                            // la columna de los comentarios queda donde estaba
+                            let old_len = rest[..end].trim().chars().count();
+                            let pad = old_len.saturating_sub(v.chars().count());
+                            out += &format!("{}={}{},{}{}\n", &line[..eq], lead, v, " ".repeat(pad), tail);
+                            continue;
+                        }
+                    }
+                }
+            }
+            out += line;
+            out += "\n";
+        }
+        out
+    }
+
+    /// Guarda en [`user_config_path`] (con copia `.bak` del anterior).
+    pub fn save(&mut self) -> std::io::Result<PathBuf> {
+        let path = user_config_path().ok_or_else(|| std::io::Error::other("no hay HOME"))?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        if path.exists() {
+            let _ = std::fs::copy(&path, path.with_extension("lua.bak"));
+        }
+        let text = self.to_lua();
+        // que lo que se guarda se pueda volver a leer
+        parse(&text, "nueva").map_err(|e| std::io::Error::other(e.to_string()))?;
+        let tmp = path.with_extension("lua.tmp");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, &path)?;
+        self.source = path.display().to_string();
+        Ok(path)
+    }
+
+    /// Asigna una tecla a una acción. Si otra acción la usaba, se la saca y
+    /// la devuelve (para avisar).
+    pub fn assign(&mut self, action: Action, modifiers: Modifiers, key: Key) -> Option<Action> {
+        let modifiers = normalize_modifiers(modifiers);
+        let mut stolen = None;
+        self.bindings.retain(|b| {
+            let same = b.key == key && normalize_modifiers(b.modifiers) == modifiers;
+            if same && b.action != action {
+                stolen = Some(b.action);
+            }
+            !same
+        });
+        self.bindings.push(Binding { modifiers, key, action });
+        self.sort_bindings();
+        stolen
+    }
+
+    pub fn sort_bindings(&mut self) {
+        self.bindings.sort_by_key(|b| std::cmp::Reverse(modifier_count(b.modifiers)));
     }
 }
 
@@ -352,6 +702,47 @@ mod tests {
         );
         assert_eq!(parse_key_spec("Hyper+X"), None);
         assert_eq!(parse_key_spec("NoExiste"), None);
+    }
+
+    #[test]
+    fn guardar_y_volver_a_leer() {
+        let mut cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
+        cfg.bindings.retain(|b| b.action != Action::Stop);
+        assert_eq!(cfg.assign(Action::Mute, Modifiers::CTRL, Key::M), None);
+        // Ctrl+L era de la lista: pasa a silenciar
+        assert_eq!(cfg.assign(Action::Mute, Modifiers::COMMAND, Key::L), Some(Action::TogglePlaylist));
+        cfg.seek_step = 7.5;
+        cfg.accent = Color32::from_rgb(0x12, 0xAB, 0xEF);
+        cfg.update_repo = Some("CapyIsInsano/Capyro".into());
+        let text = cfg.to_lua();
+        let back = parse(&text, "prueba").unwrap();
+        assert!(!back.bindings.iter().any(|b| b.action == Action::Stop));
+        assert!(!back.bindings.iter().any(|b| b.action == Action::TogglePlaylist));
+        let mute: Vec<String> = back
+            .bindings
+            .iter()
+            .filter(|b| b.action == Action::Mute)
+            .map(|b| key_spec(b.modifiers, b.key))
+            .collect();
+        assert!(mute.contains(&"M".to_owned()) && mute.contains(&"Ctrl+M".to_owned()) && mute.contains(&"Ctrl+L".to_owned()));
+        assert_eq!(back.seek_step, 7.5);
+        assert_eq!(back.accent, Color32::from_rgb(0x12, 0xAB, 0xEF));
+        assert_eq!(back.update_repo.as_deref(), Some("CapyIsInsano/Capyro"));
+        assert_eq!(back.splash, cfg.splash);
+        // los comentarios del ejemplo siguen ahí
+        assert!(text.contains("-- segundos que avanza/retrocede"));
+    }
+
+    #[test]
+    fn nombres_de_teclas() {
+        for action in Action::ALL {
+            assert_eq!(Action::from_name(action.name()), Some(action));
+        }
+        for key in [Key::Space, Key::ArrowRight, Key::OpenBracket, Key::Backspace, Key::F11, Key::Comma, Key::Num5] {
+            let spec = key_spec(Modifiers::COMMAND | Modifiers::SHIFT, key);
+            assert_eq!(parse_key_spec(&spec), Some((Modifiers::COMMAND | Modifiers::SHIFT, key)), "{spec}");
+        }
+        assert_eq!(key_label(Modifiers::COMMAND, Key::ArrowRight), "Ctrl+→");
     }
 
     #[test]
