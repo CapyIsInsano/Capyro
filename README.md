@@ -404,6 +404,8 @@ return {
         backend          = "auto",     -- "auto", "x11" o "wayland"
         splash           = true,       -- pantalla de carga al abrir
         startup_sound    = true,       -- sonido de inicio
+        click_sound      = true,       -- sonidito al tocar un botón
+        decoding         = "auto",     -- "auto", "gpu" o "cpu"
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
     },
 }
@@ -444,6 +446,9 @@ error, te avisa en la terminal y usa la de adentro.
 Abrí **ⓘ**: abajo dice qué sistema de audio está usando Capyro. Si dice *sin dispositivo*,
 no encontró PipeWire, PulseAudio, ALSA ni JACK. Revisá que tu servidor de sonido esté
 corriendo y que Capyro no esté silenciado (<kbd>M</kbd>).
+
+Para ver si los sonidos de la app se disparan, abrilo con `CAPYRO_DEBUG_SFX=1 capyro`: cada
+sonido (clic, foto, ready, error...) se anota en la terminal.
 </details>
 
 <details>

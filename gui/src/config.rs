@@ -185,6 +185,8 @@ pub struct Config {
     /// Repo y rama de donde se bajan las actualizaciones (vacío = de donde se compiló).
     pub update_repo: Option<String>,
     pub update_branch: Option<String>,
+    /// Sonidito al tocar un botón.
+    pub click_sound: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
     /// De dónde salió (para el log): ruta o "embebida".
@@ -361,6 +363,7 @@ impl Config {
                 }
                 "splash" => self.splash.to_string(),
                 "startup_sound" => self.startup_sound.to_string(),
+                "click_sound" => self.click_sound.to_string(),
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
@@ -529,6 +532,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         update_repo: None,
         update_branch: None,
         decoding: crate::ffi::Hwdec::Auto,
+        click_sound: true,
         source: name.to_owned(),
     };
 
@@ -607,6 +611,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<bool>>("splash")? {
             cfg.splash = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("click_sound")? {
+            cfg.click_sound = v;
         }
         if let Some(v) = opts.get::<Option<bool>>("startup_sound")? {
             cfg.startup_sound = v;
@@ -699,7 +706,7 @@ mod tests {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
         assert!(cfg.bindings.len() >= 21);
         assert!(cfg.remember_session && cfg.visualizer);
-        assert!(cfg.splash && cfg.startup_sound);
+        assert!(cfg.splash && cfg.startup_sound && cfg.click_sound);
         assert_eq!(cfg.update_repo, None);
         assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);

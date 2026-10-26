@@ -72,6 +72,7 @@ local options = {
     screenshot_dir   = "",     -- "" = Imágenes/Capyro; o una ruta, ej. "~/Capturas"
     splash           = true,   -- pantalla de "Cargando" al abrir (con animación)
     startup_sound    = true,   -- sonido de inicio cuando termina de cargar
+    click_sound      = true,   -- sonidito al tocar cualquier botón
 
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
     -- "gpu" (VA-API / NVDEC / VDPAU; si no hay, avisa y usa la CPU) o "cpu".

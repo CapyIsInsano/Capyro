@@ -37,31 +37,36 @@ const LOGO_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_128.png");
 const ICON_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_256.png");
 
 /// Slots de efectos: 0..=2 capibara (logo), 3 error, 4 inicio, 5 actualización,
-/// 6 "lista para descargar".
-const SOUNDS: [&[u8]; 7] = [
+/// 6 clic de botón, 7 captura, 8 "lista para descargar".
+const SOUNDS: [&[u8]; 9] = [
     include_bytes!("../../assets/sounds/capybara1.mp3"),
     include_bytes!("../../assets/sounds/capybara2.mp3"),
     include_bytes!("../../assets/sounds/capybara3.mp3"),
     include_bytes!("../../assets/sounds/error.mp3"),
     include_bytes!("../../assets/sounds/inicio.mp3"),
     include_bytes!("../../assets/sounds/actualizacion.mp3"),
+    include_bytes!("../../assets/sounds/click.mp3"),
+    include_bytes!("../../assets/sounds/photo.mp3"),
     include_bytes!("../../assets/sounds/ready.mp3"),
 ];
 const SFX_CAPYBARAS: usize = 3;
 const SFX_ERROR: usize = 3;
 const SFX_START: usize = 4;
 const SFX_UPDATE: usize = 5;
-const SFX_READY: usize = 6;
-
+const SFX_CLICK: usize = 6;
+const SFX_PHOTO: usize = 7;
+const SFX_READY: usize = 8;
 /// Con `CAPYRO_DEBUG_SFX=1` cada sonido se anota en la terminal (para probar
 /// sin parlantes o ver cuál suena).
 fn debug_sfx(slot: usize) {
-    const NAMES: [&str; 7] = ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "ready"];
+    const NAMES: [&str; 9] = ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "click", "photo", "ready"];
     if std::env::var_os("CAPYRO_DEBUG_SFX").is_some() {
         eprintln!("capyro: sonido {}", NAMES.get(slot).copied().unwrap_or("?"));
     }
 }
 
+/// Marca en la memoria de egui: "se tocó un botón en este frame".
+const CLICK_FLAG: &str = "capyro-button-clicked";
 
 /// Arranque: la pantalla de "Cargando" dura al menos esto, y después la
 /// interfaz entra animada en INTRO_TIME.
@@ -153,6 +158,10 @@ fn animate_button(ui: &Ui, id: Id, rect: Rect, enabled: bool) -> Anim {
     let ctx = ui.ctx();
     let hovered = enabled && resp.hovered();
     let hover = ctx.animate_bool_with_time(id.with("hover"), hovered, 0.14);
+    if resp.clicked() {
+        // el clic suena al final del frame (si el botón no hizo sonar otra cosa)
+        ctx.data_mut(|d| d.insert_temp(Id::unique(CLICK_FLAG), true));
+    }
     let press = ctx.animate_bool_with_time(id.with("press"), enabled && resp.is_pointer_button_down_on(), 0.07);
     if hovered {
         ctx.set_cursor_icon(CursorIcon::PointingHand);
@@ -221,6 +230,8 @@ pub struct CapyroApp {
     show_offer: bool,
     /// Último decodificador por el que ya se avisó que la GPU no anduvo.
     hwdec_warned: u64,
+    /// Frame en el que sonó el último efecto (para no tapar con el clic).
+    sfx_frame: std::cell::Cell<u64>,
     /// Se está reiniciando para aplicar una actualización.
     restarting: bool,
     /// Playlists guardadas y qué pestaña de la Lista se ve (None = la Cola).
@@ -391,6 +402,7 @@ impl CapyroApp {
             update_banner: None,
             show_offer: false,
             hwdec_warned: 0,
+            sfx_frame: std::cell::Cell::new(u64::MAX - 1),
             restarting: false,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -475,10 +487,21 @@ impl CapyroApp {
         self.sfx(SFX_ERROR);
     }
 
-    /// Todos los sonidos pasan por acá.
+    /// Todos los sonidos pasan por acá: así el clic del botón no pisa al
+    /// sonido propio de lo que se tocó (error, capibara, captura...).
     fn sfx(&self, slot: usize) {
         debug_sfx(slot);
         self.core.sfx_play(slot);
+        self.sfx_frame.set(self.last_frame);
+    }
+
+    /// Final del frame: si se tocó un botón y nada sonó, suena el clic.
+    fn play_click_if_needed(&self, ctx: &egui::Context) {
+        let clicked = ctx.data_mut(|d| d.remove_temp::<bool>(Id::unique(CLICK_FLAG))).unwrap_or(false);
+        if clicked && self.cfg.click_sound && self.sfx_frame.get() != self.last_frame {
+            debug_sfx(SFX_CLICK);
+            self.core.sfx_play(SFX_CLICK);
+        }
     }
 
     fn toast(&mut self, ctx: &egui::Context, text: impl Into<String>, error: bool) {
@@ -692,6 +715,7 @@ impl CapyroApp {
             self.toast(ctx, "Todavía no hay imagen para capturar", true);
             return;
         };
+        self.sfx(SFX_PHOTO); // "clic" de cámara
         let dir = self.cfg.screenshot_dir.clone().unwrap_or_else(default_screenshot_dir);
         let stem = Path::new(&self.core.current_file())
             .file_stem()
@@ -2608,6 +2632,7 @@ impl eframe::App for CapyroApp {
             self.transport(&mut child, video_bottom + 18.0 * (1.0 - e3), inner);
             self.draw_toast(&mut child, video);
             self.splash(ui, full, now, Some(intro), logo_dest);
+            self.play_click_if_needed(&ctx);
             ctx.request_repaint();
             return;
         }
@@ -2628,6 +2653,8 @@ impl eframe::App for CapyroApp {
         if !square {
             Self::resize_handles(ui, full);
         }
+
+        self.play_click_if_needed(&ctx);
 
         if self.core.state() == State::Playing {
             if self.core.media_kind() == MediaKind::Video {
