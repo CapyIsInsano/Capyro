@@ -185,6 +185,8 @@ pub struct Config {
     /// Repo y rama de donde se bajan las actualizaciones (vacío = de donde se compiló).
     pub update_repo: Option<String>,
     pub update_branch: Option<String>,
+    /// Decodificación de video: automático, GPU o CPU.
+    pub decoding: crate::ffi::Hwdec,
     /// De dónde salió (para el log): ruta o "embebida".
     pub source: String,
 }
@@ -361,6 +363,7 @@ impl Config {
                 "startup_sound" => self.startup_sound.to_string(),
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
+                "decoding" => lua_quote(self.decoding.name()),
                 "backend" => lua_quote(match self.backend {
                     Backend::Auto => "auto",
                     Backend::X11 => "x11",
@@ -525,6 +528,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         startup_sound: true,
         update_repo: None,
         update_branch: None,
+        decoding: crate::ffi::Hwdec::Auto,
         source: name.to_owned(),
     };
 
@@ -612,6 +616,17 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<String>>("update_branch")? {
             cfg.update_branch = Some(v.trim().to_owned()).filter(|v| !v.is_empty());
+        }
+        if let Some(v) = opts.get::<Option<String>>("decoding")? {
+            cfg.decoding = match v.trim().to_ascii_lowercase().as_str() {
+                "gpu" | "hw" | "hardware" => crate::ffi::Hwdec::Gpu,
+                "cpu" | "sw" | "software" => crate::ffi::Hwdec::Cpu,
+                "auto" | "automatico" | "automático" | "" => crate::ffi::Hwdec::Auto,
+                other => {
+                    eprintln!("capyro: {name}: decoding desconocido '{other}' (auto, gpu o cpu)");
+                    crate::ffi::Hwdec::Auto
+                }
+            };
         }
         if let Some(v) = opts.get::<Option<bool>>("auto_next")? {
             cfg.auto_next = v;
@@ -714,6 +729,7 @@ mod tests {
         cfg.seek_step = 7.5;
         cfg.accent = Color32::from_rgb(0x12, 0xAB, 0xEF);
         cfg.update_repo = Some("CapyIsInsano/Capyro".into());
+        cfg.decoding = crate::ffi::Hwdec::Cpu;
         let text = cfg.to_lua();
         let back = parse(&text, "prueba").unwrap();
         assert!(!back.bindings.iter().any(|b| b.action == Action::Stop));
@@ -728,6 +744,7 @@ mod tests {
         assert_eq!(back.seek_step, 7.5);
         assert_eq!(back.accent, Color32::from_rgb(0x12, 0xAB, 0xEF));
         assert_eq!(back.update_repo.as_deref(), Some("CapyIsInsano/Capyro"));
+        assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
         assert_eq!(back.splash, cfg.splash);
         // los comentarios del ejemplo siguen ahí
         assert!(text.contains("-- segundos que avanza/retrocede"));

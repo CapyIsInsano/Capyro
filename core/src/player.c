@@ -22,6 +22,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
@@ -207,6 +208,7 @@ int player_global_init(CapyroCore *core) {
 
 void player_global_shutdown(CapyroCore *core) {
     player_close(core);
+    hwdec_free_devices(core);
     if (core->device) {
         ma_device_uninit(core->device); /* para el dispositivo y espera al callback */
         free(core->device);
@@ -421,8 +423,11 @@ static bool demux_one(CapyroCore *core) {
 
 /* Devuelve: 1 = obtuvo frame, 0 = hizo algo, -1 = nada que hacer. */
 static int pull_frame(AVCodecContext *ctx, PktQueue *q, AVFrame *frame,
-                      bool demux_eof, bool *flushed, bool *done) {
+                      bool demux_eof, bool *flushed, bool *done, int *err) {
     int ret = avcodec_receive_frame(ctx, frame);
+    if (err) {
+        *err = ret;
+    }
     if (ret == 0) {
         return 1;
     }
@@ -558,7 +563,7 @@ static void drain_audio_graph(CapyroCore *core) {
 
 static bool audio_step(CapyroCore *core, double speed, double pitch) {
     Player *p = &core->player;
-    int r = pull_frame(p->actx, &p->aq, p->frame, p->demux_eof, &p->a_flushed, &p->a_done);
+    int r = pull_frame(p->actx, &p->aq, p->frame, p->demux_eof, &p->a_flushed, &p->a_done, NULL);
     if (r < 1) {
         /* Fin del audio: vaciar lo que atempo tenga guardado. */
         if (p->a_done && p->agraph && !p->af_flushed) {
@@ -598,10 +603,89 @@ static bool audio_step(CapyroCore *core, double speed, double pitch) {
     return true;
 }
 
+static AVCodecContext *open_decoder(AVStream *st, bool threads);
+
+/* Arma el decodificador de video según el modo (GPU / CPU / automático) y
+ * deja anotado qué se está usando en core->decinfo. */
+static AVCodecContext *open_video(CapyroCore *core, AVStream *st, int mode) {
+    Player *p = &core->player;
+    cp_mutex_lock(&core->lock);
+    uint64_t serial = core->decinfo.serial;
+    cp_mutex_unlock(&core->lock);
+
+    CapyroDecodeInfo info;
+    memset(&info, 0, sizeof(info));
+    info.active = true;
+    hwdec_codec_name(st->codecpar->codec_id, info.codec, sizeof(info.codec));
+    p->hw          = false;
+    p->hw_fmt      = AV_PIX_FMT_NONE;
+    p->hw_sw_noted = false;
+
+    AVCodecContext *ctx = NULL;
+    if (mode != CAPYRO_HWDEC_CPU) {
+        ctx = hwdec_open(core, st, &p->hw_fmt, info.api, sizeof(info.api), info.note, sizeof(info.note));
+        if (ctx) {
+            p->hw   = true;
+            info.hw = true;
+            if (!p->swframe) {
+                p->swframe = av_frame_alloc();
+            }
+        }
+    } else {
+        snprintf(info.note, sizeof(info.note), "Elegiste decodificar por CPU");
+    }
+    if (!ctx) {
+        ctx = open_decoder(st, true);
+        snprintf(info.api, sizeof(info.api), "CPU");
+    }
+    if (!ctx) {
+        info.active = false;
+    }
+    info.serial = serial + 1;
+    cp_mutex_lock(&core->lock);
+    core->decinfo = info;
+    cp_mutex_unlock(&core->lock);
+    return ctx;
+}
+
+/* Rearma el decodificador de video (cambió el modo o falló la GPU) y vuelve
+ * a buscar la posición actual para seguir donde estaba. */
+static void reopen_video(CapyroCore *core, bool force_cpu, const char *why) {
+    Player *p = &core->player;
+    AVStream *st = p->fmt->streams[p->vidx];
+    avcodec_free_context(&p->vctx);
+    if (force_cpu) {
+        p->vctx = open_video(core, st, CAPYRO_HWDEC_CPU);
+        cp_mutex_lock(&core->lock);
+        snprintf(core->decinfo.note, sizeof(core->decinfo.note), "%s", why);
+        cp_mutex_unlock(&core->lock);
+        fprintf(stderr, "capyro: GPU → CPU: %s\n", why);
+    } else {
+        cp_mutex_lock(&core->lock);
+        int mode = core->hwdec_mode;
+        cp_mutex_unlock(&core->lock);
+        p->vctx = open_video(core, st, mode);
+    }
+    p->v_done = p->v_flushed = false;
+    cp_mutex_lock(&core->lock);
+    if (!p->vctx) {
+        p->vidx = -1;
+    } else if (!core->seek_req) {
+        player_request_seek_locked(core, player_clock_locked(core));
+    }
+    cp_mutex_unlock(&core->lock);
+}
+
 static bool video_step(CapyroCore *core) {
     Player *p = &core->player;
-    int r = pull_frame(p->vctx, &p->vq, p->frame, p->demux_eof, &p->v_flushed, &p->v_done);
+    int err = 0;
+    int r = pull_frame(p->vctx, &p->vq, p->frame, p->demux_eof, &p->v_flushed, &p->v_done, &err);
     if (r < 1) {
+        /* la GPU dio error (no fin del archivo): seguir por CPU */
+        if (p->hw && p->v_done && err != AVERROR_EOF) {
+            reopen_video(core, true, "La GPU dio un error al decodificar; sigo por CPU");
+            return true;
+        }
         return r == 0;
     }
 
@@ -626,12 +710,38 @@ static bool video_step(CapyroCore *core) {
         return true;
     }
 
+    AVFrame *pic = f; /* lo que se convierte a RGBA */
+    if (p->hw && f->format == p->hw_fmt) {
+        /* cuadro en memoria de la GPU: se copia a memoria normal */
+        av_frame_unref(p->swframe);
+        if (av_hwframe_transfer_data(p->swframe, f, 0) < 0) {
+            av_frame_unref(f);
+            reopen_video(core, true, "No pude copiar los cuadros de la GPU; sigo por CPU");
+            return true;
+        }
+        av_frame_copy_props(p->swframe, f);
+        pic = p->swframe;
+    } else if (p->hw && !p->hw_sw_noted) {
+        /* FFmpeg probó la GPU, no pudo con este perfil y siguió por software */
+        p->hw_sw_noted = true;
+        cp_mutex_lock(&core->lock);
+        core->decinfo.hw = false;
+        snprintf(core->decinfo.api, sizeof(core->decinfo.api), "CPU");
+        snprintf(core->decinfo.note, sizeof(core->decinfo.note), "La GPU no soporta este perfil de %s",
+                 core->decinfo.codec);
+        core->decinfo.serial++;
+        cp_mutex_unlock(&core->lock);
+    }
+
     /* El slot libre no lo ve nadie más: se puede escribir sin lock. */
     VideoSlot *slot = &core->slots[idx];
-    bool ok = convert_frame(p, f, slot, MAX_VIDEO_W, MAX_VIDEO_H);
+    bool ok = convert_frame(p, pic, slot, MAX_VIDEO_W, MAX_VIDEO_H);
     slot->pts    = t < 0 ? 0.0 : t;
     slot->aspect = display_aspect(p->fmt, st, f);
     av_frame_unref(f);
+    if (pic != f) {
+        av_frame_unref(pic);
+    }
 
     if (ok) {
         cp_mutex_lock(&core->lock);
@@ -681,6 +791,8 @@ static void decode_thread(void *arg) {
         cp_mutex_lock(&core->lock);
         bool     quit    = core->quit;
         bool     seek    = core->seek_req && core->seek_serial != p->seek_serial_done;
+        bool     reinit  = core->hwdec_reinit;
+        core->hwdec_reinit = false;
         double   target  = core->seek_target;
         uint64_t serial  = core->seek_serial;
         size_t   ring    = core->ring_len;
@@ -702,6 +814,10 @@ static void decode_thread(void *arg) {
 
         if (quit) {
             break;
+        }
+        if (reinit && p->vidx >= 0) {
+            reopen_video(core, false, NULL);
+            continue;
         }
         if (seek) {
             do_seek(core, target, serial);
@@ -783,6 +899,8 @@ static void free_player(Player *p) {
     sws_freeContext(p->sws);
     p->sws = NULL;
     av_frame_free(&p->frame);
+    av_frame_free(&p->swframe);
+    p->hw = false;
     av_packet_free(&p->pkt);
     avformat_close_input(&p->fmt);
     p->aidx = p->vidx = -1;
@@ -812,6 +930,12 @@ void player_close(CapyroCore *core) {
     core->serial++;
     core->title[0]  = '\0';
     core->artist[0] = '\0';
+    core->hwdec_reinit = false;
+    {
+        uint64_t serial = core->decinfo.serial;
+        memset(&core->decinfo, 0, sizeof(core->decinfo));
+        core->decinfo.serial = serial; /* active = false: no hay video */
+    }
     if (core->ring) {
         ring_clear_locked(core);
     }
@@ -864,7 +988,10 @@ int player_open(CapyroCore *core, const char *path) {
         if (st->disposition & AV_DISPOSITION_ATTACHED_PIC) {
             decode_cover(core, st);
         } else {
-            p->vctx = open_decoder(st, true);
+            cp_mutex_lock(&core->lock);
+            int mode = core->hwdec_mode;
+            cp_mutex_unlock(&core->lock);
+            p->vctx = open_video(core, st, mode);
             if (p->vctx) {
                 p->vidx    = vidx;
                 real_video = true;

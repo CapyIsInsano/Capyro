@@ -52,7 +52,7 @@ impl CapyroApp {
         true
     }
 
-    fn save_config(&mut self, ctx: &egui::Context, msg: String) {
+    pub(super) fn save_config(&mut self, ctx: &egui::Context, msg: String) {
         match self.cfg.save() {
             Ok(_) => self.toast(ctx, msg, false),
             Err(e) => {

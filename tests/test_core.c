@@ -571,11 +571,84 @@ static void test_media(const char *dir) {
     capyro_core_shutdown(core);
 }
 
+/* Decodificación GPU/CPU: el modo se respeta, cambiarlo con el video abierto
+ * rearma el decodificador sin cortar, y sin GPU todo sigue por CPU. */
+static void test_hwdec(const char *dir) {
+    char clip[1024];
+    snprintf(clip, sizeof(clip), "%s/clip.mp4", dir);
+    if (!exists(clip)) {
+        return;
+    }
+    CapyroCore *core = capyro_core_init();
+    CHECK(core != NULL);
+    if (!core) {
+        return;
+    }
+    CapyroDecodeInfo di;
+    CHECK(capyro_core_get_hwdec(core) == CAPYRO_HWDEC_AUTO);
+    capyro_core_get_decode_info(core, &di);
+    CHECK(!di.active);
+
+    /* CPU forzada */
+    capyro_core_set_hwdec(core, CAPYRO_HWDEC_CPU);
+    CHECK(capyro_core_get_hwdec(core) == CAPYRO_HWDEC_CPU);
+    CHECK(capyro_core_open(core, clip) == CAPYRO_OK);
+    capyro_core_get_decode_info(core, &di);
+    CHECK(di.active && !di.hw && strcmp(di.api, "CPU") == 0 && di.codec[0] && di.note[0]);
+    printf("hwdec cpu: %s · %s · %s\n", di.api, di.codec, di.note);
+
+    /* pasar a automático con el video sonando: se rearma y sigue */
+    uint64_t s0 = di.serial;
+    capyro_core_play(core);
+    pump(core, 200);
+    capyro_core_set_hwdec(core, CAPYRO_HWDEC_AUTO);
+    for (int t = 0; t < 3000; t += 20) {
+        capyro_core_get_decode_info(core, &di);
+        if (di.serial != s0) {
+            break;
+        }
+        pump(core, 20);
+    }
+    CHECK(di.serial != s0 && di.active);
+    printf("hwdec auto: %s%s%s\n", di.api, di.note[0] ? " · " : "", di.note);
+    CHECK(di.hw || di.note[0]); /* sin GPU, la nota dice por qué */
+
+    CapyroVideoFrame vf;
+    uint64_t before = 0;
+    if (capyro_core_lock_video_frame(core, &vf)) {
+        before = vf.serial;
+        capyro_core_unlock_video_frame(core);
+    }
+    pump(core, 500);
+    double pos = capyro_core_get_position(core);
+    CHECK(pos > 0.4); /* siguió avanzando después de rearmar */
+    if (capyro_core_lock_video_frame(core, &vf)) {
+        CHECK(vf.serial >= before && vf.width > 0);
+        capyro_core_unlock_video_frame(core);
+    } else {
+        CHECK(!"después de rearmar el decodificador tiene que haber imagen");
+    }
+
+    capyro_core_set_hwdec(core, 7); /* inválido: se ignora */
+    CHECK(capyro_core_get_hwdec(core) == CAPYRO_HWDEC_AUTO);
+
+    /* un audio no usa decodificador de video */
+    char wav[1024];
+    snprintf(wav, sizeof(wav), "%s/tono.wav", dir);
+    if (exists(wav)) {
+        CHECK(capyro_core_open(core, wav) == CAPYRO_OK);
+        capyro_core_get_decode_info(core, &di);
+        CHECK(!di.active);
+    }
+    capyro_core_shutdown(core);
+}
+
 int main(int argc, char **argv) {
     test_basics();
     test_dsp();
     if (argc > 1) {
         test_media(argv[1]);
+        test_hwdec(argv[1]);
     } else {
         printf("sin carpeta de media: salteo las pruebas de decodificación\n");
     }

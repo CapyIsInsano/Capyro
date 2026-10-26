@@ -102,6 +102,9 @@ extern "C" {
     fn capyro_core_set_fx(core: *mut CapyroCore, fx: *const AudioFx);
     fn capyro_core_get_fx(core: *mut CapyroCore, out: *mut AudioFx);
     fn capyro_core_set_pitch(core: *mut CapyroCore, semitones: f64);
+    fn capyro_core_set_hwdec(core: *mut CapyroCore, mode: c_int);
+    fn capyro_core_get_hwdec(core: *mut CapyroCore) -> c_int;
+    fn capyro_core_get_decode_info(core: *mut CapyroCore, out: *mut RawDecodeInfo);
     fn capyro_core_get_pitch(core: *mut CapyroCore) -> f64;
     fn capyro_core_audio_rate(core: *mut CapyroCore) -> std::ffi::c_uint;
     fn capyro_core_get_scope(core: *mut CapyroCore, out: *mut f32, n: usize) -> usize;
@@ -173,6 +176,79 @@ impl Repeat {
             Repeat::One => Repeat::Off,
         }
     }
+}
+
+/// Cómo se decodifica el video. Debe coincidir con `CapyroHwdec`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hwdec {
+    Auto,
+    Gpu,
+    Cpu,
+}
+
+impl Hwdec {
+    pub const ALL: [Hwdec; 3] = [Hwdec::Auto, Hwdec::Gpu, Hwdec::Cpu];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Hwdec::Auto => "Automático",
+            Hwdec::Gpu => "GPU",
+            Hwdec::Cpu => "CPU",
+        }
+    }
+    /// Como va en capyro.lua.
+    pub fn name(self) -> &'static str {
+        match self {
+            Hwdec::Auto => "auto",
+            Hwdec::Gpu => "gpu",
+            Hwdec::Cpu => "cpu",
+        }
+    }
+    fn to_c(self) -> c_int {
+        match self {
+            Hwdec::Auto => 0,
+            Hwdec::Gpu => 1,
+            Hwdec::Cpu => 2,
+        }
+    }
+    fn from_c(v: c_int) -> Self {
+        match v {
+            1 => Hwdec::Gpu,
+            2 => Hwdec::Cpu,
+            _ => Hwdec::Auto,
+        }
+    }
+}
+
+/// Debe coincidir con `CapyroDecodeInfo` de capyro_core.h.
+#[repr(C)]
+struct RawDecodeInfo {
+    active: bool,
+    hw: bool,
+    api: [c_char; 16],
+    codec: [c_char; 24],
+    note: [c_char; 128],
+    serial: u64,
+}
+
+/// Qué está decodificando el video ahora.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DecodeInfo {
+    /// Hay un video abierto.
+    pub active: bool,
+    /// Lo decodifica la GPU.
+    pub hw: bool,
+    /// "VA-API", "NVDEC", "VDPAU" o "CPU".
+    pub api: String,
+    pub codec: String,
+    /// Por qué no se usa la GPU ("" si se usa).
+    pub note: String,
+    pub serial: u64,
+}
+
+fn carray_to_string(a: &[c_char]) -> String {
+    let bytes: Vec<u8> = a.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,6 +392,25 @@ impl Core {
     pub fn set_pitch(&self, semitones: f64) {
         unsafe { capyro_core_set_pitch(self.ptr, semitones) }
     }
+    pub fn set_hwdec(&self, mode: Hwdec) {
+        unsafe { capyro_core_set_hwdec(self.ptr, mode.to_c()) }
+    }
+    pub fn hwdec(&self) -> Hwdec {
+        Hwdec::from_c(unsafe { capyro_core_get_hwdec(self.ptr) })
+    }
+    pub fn decode_info(&self) -> DecodeInfo {
+        // SAFETY: struct POD; el núcleo lo llena entero.
+        let mut raw: RawDecodeInfo = unsafe { std::mem::zeroed() };
+        unsafe { capyro_core_get_decode_info(self.ptr, &mut raw) };
+        DecodeInfo {
+            active: raw.active,
+            hw: raw.hw,
+            api: carray_to_string(&raw.api),
+            codec: carray_to_string(&raw.codec),
+            note: carray_to_string(&raw.note),
+            serial: raw.serial,
+        }
+    }
     pub fn audio_rate(&self) -> u32 {
         unsafe { capyro_core_audio_rate(self.ptr) }
     }
@@ -455,5 +550,17 @@ impl Core {
     }
     pub fn playlist_clear(&self) {
         unsafe { capyro_core_playlist_clear(self.ptr) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_info_tiene_el_tamanio_de_c() {
+        // 2 bool + 16 + 24 + 128 chars = 170 → alineado a 8 para el u64
+        assert_eq!(std::mem::size_of::<RawDecodeInfo>(), 184);
+        assert_eq!(std::mem::align_of::<RawDecodeInfo>(), 8);
     }
 }

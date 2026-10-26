@@ -206,6 +206,8 @@ pub struct CapyroApp {
     update_banner: Option<UpdateBanner>,
     /// Aviso "Hay una actualización" con los commits y el botón Instalar.
     show_offer: bool,
+    /// Último decodificador por el que ya se avisó que la GPU no anduvo.
+    hwdec_warned: u64,
     /// Se está reiniciando para aplicar una actualización.
     restarting: bool,
     /// Playlists guardadas y qué pestaña de la Lista se ve (None = la Cola).
@@ -299,6 +301,7 @@ impl CapyroApp {
         core.set_speed(cfg.start_speed);
         core.set_shuffle(cfg.start_shuffle);
         core.set_repeat(cfg.start_repeat);
+        core.set_hwdec(cfg.decoding);
         let startup_notice = core
             .audio_backend()
             .is_empty()
@@ -374,6 +377,7 @@ impl CapyroApp {
             build_info,
             update_banner: None,
             show_offer: false,
+            hwdec_warned: 0,
             restarting: false,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -756,10 +760,39 @@ impl CapyroApp {
         self.toast(ctx, if m { "Silenciado" } else { "Sonido activado" }, false);
     }
 
+    /// Cambia cómo se decodifica el video: se aplica al instante (el núcleo
+    /// rearma el decodificador) y queda guardado en capyro.lua.
+    fn set_decoding(&mut self, ctx: &egui::Context, mode: ffi::Hwdec) {
+        self.cfg.decoding = mode;
+        self.core.set_hwdec(mode);
+        debug_assert_eq!(self.core.hwdec(), mode);
+        self.hwdec_warned = 0; // si la GPU no anda, avisar de nuevo
+        let msg = match mode {
+            ffi::Hwdec::Auto => "Decodificación automática (GPU si se puede)",
+            ffi::Hwdec::Gpu => "Decodificación por GPU",
+            ffi::Hwdec::Cpu => "Decodificación por CPU",
+        };
+        self.save_config(ctx, msg.to_owned());
+    }
+
+    /// Con "GPU" elegido: si el video terminó yendo por CPU, avisar una vez.
+    fn check_hwdec(&mut self, ctx: &egui::Context) {
+        if self.cfg.decoding != ffi::Hwdec::Gpu {
+            return;
+        }
+        let info = self.core.decode_info();
+        if info.active && !info.hw && info.serial != self.hwdec_warned {
+            self.hwdec_warned = info.serial;
+            self.play_error();
+            self.toast_for(ctx, format!("GPU no disponible: {}. Uso la CPU", info.note), true, 5.0);
+        }
+    }
+
     fn reload_config(&mut self, ctx: &egui::Context) {
         self.cfg = Config::load();
         theme::apply_visuals(ctx, self.cfg.accent);
         self.core.set_auto_next(self.cfg.auto_next);
+        self.core.set_hwdec(self.cfg.decoding);
         let src = self.cfg.source.clone();
         self.toast(ctx, format!("Config recargada ({src})"), false);
     }
@@ -1752,7 +1785,7 @@ impl CapyroApp {
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(272.0, 196.0);
+        let size = vec2(288.0, 272.0);
         let anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
@@ -1808,6 +1841,59 @@ impl CapyroApp {
 
         /* separador */
         y += 24.0;
+        painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
+
+        /* decodificación de video: automático / GPU / CPU */
+        y += 22.0;
+        let mode = self.cfg.decoding;
+        let info = self.core.decode_info();
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Decodificación", regular(12.5), TEXT_DIM);
+        // a la derecha, qué se está usando ahora (si hay un video abierto)
+        if info.active {
+            let (txt, col) = if info.hw { (format!("GPU · {}", info.api), accent) } else { ("CPU".to_owned(), TEXT_FAINT) };
+            let g = painter.layout_no_wrap(txt, bold(11.0), col);
+            let r = Rect::from_min_size(pos2(x1 - g.size().x - 12.0, y - g.size().y / 2.0 - 3.0), g.size() + vec2(12.0, 6.0));
+            painter.rect_filled(r, r.height() / 2.0, if info.hw { accent.gamma_multiply(0.16) } else { Color32::from_white_alpha(10) });
+            painter.galley(r.center() - g.size() / 2.0, g, col);
+        }
+        y += 24.0;
+        let chip_w = ((x1 - x0) - gap * 2.0) / 3.0;
+        for (i, m) in ffi::Hwdec::ALL.iter().copied().enumerate() {
+            let r = Rect::from_min_size(pos2(x0 + i as f32 * (chip_w + gap), y - 13.0), vec2(chip_w, 26.0));
+            let chip = animate_button(ui, Id::unique(("capyro-hwdec", i)), r, interactive);
+            let selected = mode == m;
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-hwdec-sel", i)), selected, 0.15);
+            let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
+            let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
+            painter.rect_filled(rr, 7.0, bg);
+            let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
+            painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected { bold(11.5) } else { regular(11.5) }, col);
+            if chip.resp.clicked() && !selected {
+                self.set_decoding(&ctx, m);
+            }
+            chip.resp.on_hover_text(match m {
+                ffi::Hwdec::Auto => "Usa la GPU si se puede; si no, la CPU",
+                ffi::Hwdec::Gpu => "Decodifica en la placa de video (VA-API, NVDEC o VDPAU). Si no se puede, te avisa y usa la CPU",
+                ffi::Hwdec::Cpu => "Siempre por software (como hasta la v0.2.8)",
+            });
+        }
+        y += 22.0;
+        let status = if !info.active {
+            "Se aplica a los videos (los audios no la usan)".to_owned()
+        } else if info.hw {
+            format!("{} decodificado por la GPU ({})", info.codec, info.api)
+        } else {
+            format!("{} por CPU · {}", info.codec, info.note)
+        };
+        let status_rect = Rect::from_min_max(pos2(x0, y - 8.0), pos2(x1, y + 8.0));
+        let st = ui.interact(status_rect, Id::unique("capyro-hwdec-status"), Sense::hover());
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, ellipsize(&status, 46), regular(10.5), TEXT_FAINT);
+        if status.chars().count() > 46 {
+            st.on_hover_text(status);
+        }
+
+        /* separador */
+        y += 18.0;
         painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
 
         /* editar configuración (atajos) */
@@ -2425,6 +2511,9 @@ impl eframe::App for CapyroApp {
         self.poll_file_dialog(&ctx);
         self.poll_screenshot(&ctx);
         self.poll_update(&ctx);
+        if ready {
+            self.check_hwdec(&ctx);
+        }
 
         // visualizador: se alimenta con lo último que sonó
         let dt = ((now - self.last_time) as f32).clamp(0.0, 0.1);

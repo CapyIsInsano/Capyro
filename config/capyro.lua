@@ -73,6 +73,11 @@ local options = {
     splash           = true,   -- pantalla de "Cargando" al abrir (con animación)
     startup_sound    = true,   -- sonido de inicio cuando termina de cargar
 
+    -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
+    -- "gpu" (VA-API / NVDEC / VDPAU; si no hay, avisa y usa la CPU) o "cpu".
+    -- También se cambia en ⚙ → Decodificación.
+    decoding         = "auto",
+
     -- Actualizaciones (menú ⓘ → "Buscar actualizaciones").
     -- Vacío = el repo de git desde el que se compiló Capyro. Si lo compilaste
     -- desde un .zip, poné el tuyo: "usuario/Capyro" o la URL completa.

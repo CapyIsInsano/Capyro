@@ -516,6 +516,44 @@ void capyro_core_set_pitch(CapyroCore *core, double semitones) {
     cp_mutex_unlock(&core->lock);
 }
 
+void capyro_core_set_hwdec(CapyroCore *core, int mode) {
+    if (!core || mode < CAPYRO_HWDEC_AUTO || mode > CAPYRO_HWDEC_CPU) {
+        return;
+    }
+    cp_mutex_lock(&core->lock);
+    if (core->hwdec_mode != mode) {
+        core->hwdec_mode = mode;
+        /* con un video abierto, el hilo de decodificación lo rearma */
+        if (core->kind == CAPYRO_MEDIA_VIDEO && core->player.thread_running) {
+            core->hwdec_reinit = true;
+        }
+    }
+    cp_mutex_unlock(&core->lock);
+}
+
+int capyro_core_get_hwdec(CapyroCore *core) {
+    if (!core) {
+        return CAPYRO_HWDEC_AUTO;
+    }
+    cp_mutex_lock(&core->lock);
+    int m = core->hwdec_mode;
+    cp_mutex_unlock(&core->lock);
+    return m;
+}
+
+void capyro_core_get_decode_info(CapyroCore *core, CapyroDecodeInfo *out) {
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    if (!core) {
+        return;
+    }
+    cp_mutex_lock(&core->lock);
+    *out = core->decinfo;
+    cp_mutex_unlock(&core->lock);
+}
+
 double capyro_core_get_pitch(CapyroCore *core) {
     if (!core) {
         return 0.0;

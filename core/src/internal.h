@@ -22,6 +22,9 @@ struct ma_device;
 #define CAPYRO_SFX_SLOTS 8      /* efectos de sonido cargados a la vez */
 #define CAPYRO_SCOPE_LEN 4096   /* muestras guardadas para el visualizador */
 #define VQ_SLOTS (VQ_MAX + 2)   /* + el que se está mostrando + uno de repuesto */
+#define HWDEV_COUNT 3           /* VA-API, CUDA (NVDEC), VDPAU */
+struct AVBufferRef;
+struct AVStream;
 
 typedef struct {
     uint8_t *data;
@@ -56,6 +59,12 @@ typedef struct {
     double                  pitch;    /* y el tono (semitonos) */
     struct SwsContext      *sws;
     struct AVFrame         *frame;
+    /* decodificación por GPU: el frame llega en memoria de la GPU (hw_fmt) y
+     * se copia a swframe antes de convertirlo a RGBA */
+    bool                    hw;
+    int                     hw_fmt;      /* enum AVPixelFormat, -1 = ninguno */
+    bool                    hw_sw_noted; /* la GPU rechazó el video y siguió la CPU */
+    struct AVFrame         *swframe;
     struct AVPacket        *pkt;
     PktQueue                aq, vq;
     bool                    demux_eof, a_flushed, v_flushed, a_done, v_done;
@@ -127,6 +136,16 @@ struct CapyroCore {
     char title[256];
     char artist[256];
 
+    /* decodificación de video (hwdec.c) */
+    int              hwdec_mode;    /* CapyroHwdec */
+    bool             hwdec_reinit;  /* la GUI cambió el modo: rearmar el decodificador */
+    CapyroDecodeInfo decinfo;
+    /* dispositivos de GPU ya abiertos (se reusan entre archivos). Los toca
+     * el hilo de la GUI al abrir y el de decodificación al rearmar, nunca a
+     * la vez (el de decodificación no existe mientras se abre un archivo). */
+    struct AVBufferRef *hwdev[HWDEV_COUNT];
+    bool                hwdev_tried[HWDEV_COUNT];
+
     Player player;
 
     /* lista de reproducción (solo el hilo de la GUI) */
@@ -150,6 +169,11 @@ bool   player_ended_locked(CapyroCore *core);
 void   player_request_seek_locked(CapyroCore *core, double target);
 void   player_ensure_device_started(CapyroCore *core); /* sin el lock tomado */
 double player_effective_pitch_locked(const CapyroCore *core);
+/* hwdec.c */
+struct AVCodecContext *hwdec_open(CapyroCore *core, const struct AVStream *st, int *hw_fmt,
+                                  char *api, size_t api_cap, char *why, size_t why_cap);
+void   hwdec_codec_name(int codec_id, char *out, size_t cap);
+void   hwdec_free_devices(CapyroCore *core);
 bool   audio_graph_create(const struct AVFrame *f, double speed, double pitch, unsigned out_rate,
                           struct AVFilterGraph **graph, struct AVFilterContext **src,
                           struct AVFilterContext **sink);

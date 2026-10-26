@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.2.8-alpha"
+#define CAPYRO_VERSION "0.2.9-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -139,6 +139,31 @@ void capyro_core_get_fx(CapyroCore *core, CapyroAudioFx *out);
  * aplicarse: se vuelve a decodificar desde la posición actual. */
 void   capyro_core_set_pitch(CapyroCore *core, double semitones);
 double capyro_core_get_pitch(CapyroCore *core);
+
+/* ---------- decodificación de video: GPU o CPU ----------
+ * AUTO: usa la GPU si se puede (VA-API, NVDEC/CUDA o VDPAU) y si no, la CPU.
+ * GPU:  igual que AUTO, pero si la GPU no puede, la nota lo explica (la GUI avisa).
+ * CPU:  siempre por software.
+ * Cambiarlo con un video abierto rearma el decodificador y sigue donde estaba.
+ * Si la GPU falla a mitad del video, se pasa sola a la CPU. */
+typedef enum {
+    CAPYRO_HWDEC_AUTO = 0,
+    CAPYRO_HWDEC_GPU  = 1,
+    CAPYRO_HWDEC_CPU  = 2
+} CapyroHwdec;
+
+typedef struct CapyroDecodeInfo {
+    bool     active;     /* hay un video abierto */
+    bool     hw;         /* lo está decodificando la GPU */
+    char     api[16];    /* "VA-API", "NVDEC", "VDPAU" o "CPU" */
+    char     codec[24];  /* "H.264", "H.265 (HEVC)", "AV1"... */
+    char     note[128];  /* por qué no se usa la GPU ("" si se usa) */
+    uint64_t serial;     /* cambia cada vez que se arma un decodificador */
+} CapyroDecodeInfo;
+
+void capyro_core_set_hwdec(CapyroCore *core, int mode); /* CapyroHwdec */
+int  capyro_core_get_hwdec(CapyroCore *core);
+void capyro_core_get_decode_info(CapyroCore *core, CapyroDecodeInfo *out);
 
 /* ---------- datos del build ----------
  * De qué commit de git sale este binario y dónde se instala. Los usa el
