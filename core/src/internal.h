@@ -34,6 +34,33 @@ typedef struct {
     float    aspect;
 } VideoSlot;
 
+/* Archivo en memoria leído por FFmpeg (sfx.c / music.c). */
+typedef struct {
+    const uint8_t *data;
+    size_t         size;
+    size_t         pos;
+} MemReader;
+int     mem_read(void *opaque, uint8_t *buf, int n);
+int64_t mem_seek(void *opaque, int64_t offset, int whence);
+
+/* Música de fondo (music.c): se decodifica de a poco en su propio hilo. */
+typedef struct {
+    uint8_t  *data;       /* copia del archivo */
+    size_t    size;
+    float    *ring;       /* PCM estéreo a out_rate, ya decodificado */
+    size_t    ring_cap;   /* en frames */
+    size_t    ring_read;
+    size_t    ring_len;
+    bool      loop;
+    bool      active;     /* hay un hilo sonando */
+    bool      quit;       /* pedirle al hilo que termine */
+    bool      ended;      /* el hilo terminó (sin loop o por error) */
+    float     level;      /* volumen actual (rampa) */
+    float     target;     /* volumen al que va */
+    float     step;       /* cuánto cambia level por frame */
+    cp_thread thread;
+} Music;
+
 typedef struct PktNode {
     struct AVPacket *pkt;
     struct PktNode  *next;
@@ -146,6 +173,9 @@ struct CapyroCore {
     struct AVBufferRef *hwdev[HWDEV_COUNT];
     bool                hwdev_tried[HWDEV_COUNT];
 
+    /* música de fondo (tutorial); campos protegidos por `lock` */
+    Music music;
+
     Player player;
 
     /* lista de reproducción (solo el hilo de la GUI) */
@@ -169,6 +199,11 @@ bool   player_ended_locked(CapyroCore *core);
 void   player_request_seek_locked(CapyroCore *core, double target);
 void   player_ensure_device_started(CapyroCore *core); /* sin el lock tomado */
 double player_effective_pitch_locked(const CapyroCore *core);
+/* music.c */
+void   music_mix_locked(CapyroCore *core, float *out, size_t frames, float gain);
+void   music_reap(CapyroCore *core);    /* hilo de la GUI: junta el hilo si terminó */
+void   music_shutdown(CapyroCore *core);
+
 /* hwdec.c */
 struct AVCodecContext *hwdec_open(CapyroCore *core, const struct AVStream *st, int *hw_fmt,
                                   char *api, size_t api_cap, char *why, size_t why_cap);

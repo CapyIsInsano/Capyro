@@ -25,6 +25,7 @@ mod changes_menu;
 mod fx_menu;
 mod keys_editor;
 mod lists;
+mod tutorial;
 use lists::PlPopup;
 use crate::changes::Release;
 use crate::playlists::Playlists;
@@ -237,6 +238,12 @@ pub struct CapyroApp {
     sfx_frame: std::cell::Cell<u64>,
     /// Qué menús/paneles estaban abiertos el frame anterior (para el sonido de cerrar).
     ui_open: std::cell::Cell<u32>,
+    /// Dónde quedó cada parte de la interfaz este frame (para el tutorial).
+    ui_rects: std::collections::HashMap<&'static str, Rect>,
+    /// Tutorial de bienvenida: en curso, foto del autor y si falta mostrarlo.
+    tutorial: Option<tutorial::Tutorial>,
+    avatar: Option<TextureHandle>,
+    tutorial_pending: bool,
     /// Se está reiniciando para aplicar una actualización.
     restarting: bool,
     /// Playlists guardadas y qué pestaña de la Lista se ve (None = la Cola).
@@ -409,6 +416,10 @@ impl CapyroApp {
             hwdec_warned: 0,
             sfx_frame: std::cell::Cell::new(u64::MAX - 1),
             ui_open: std::cell::Cell::new(0),
+            ui_rects: std::collections::HashMap::new(),
+            tutorial: None,
+            avatar: None,
+            tutorial_pending: false,
             restarting: false,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -426,6 +437,11 @@ impl CapyroApp {
             }
         }
         self.playlists = Playlists::load();
+        // primera vez: el tutorial arranca cuando termina de entrar la interfaz
+        self.tutorial_pending = tutorial::first_time();
+        if self.tutorial_pending {
+            self.boot.autoplay = false;
+        }
 
         // Sesión anterior: ajustes siempre; la lista solo si no se abrieron
         // archivos desde la línea de comandos.
@@ -984,8 +1000,8 @@ impl CapyroApp {
         if self.first_pass && self.capture_key(ctx) {
             return;
         }
-        // Escribiendo (renombrar playlist) o editando atajos: no disparar nada.
-        if self.show_keys || self.pl_rename.is_some() || ctx.egui_wants_keyboard_input() {
+        // Escribiendo (renombrar playlist), editando atajos o en el tutorial: no disparar nada.
+        if self.tutorial.is_some() || self.show_keys || self.pl_rename.is_some() || ctx.egui_wants_keyboard_input() {
             return;
         }
 
@@ -1081,6 +1097,7 @@ impl CapyroApp {
 
         // Logo: al tocarlo suena un capibara y rebota.
         let logo_rect = Rect::from_min_size(rect.min, vec2(46.0, 46.0));
+        self.ui_rects.insert("logo", logo_rect);
         let logo_btn = animate_button(ui, Id::unique("capyro-logo"), logo_rect, true);
         let now = ctx.input(|i| i.time);
         if logo_btn.resp.clicked() {
@@ -1382,6 +1399,7 @@ impl CapyroApp {
         /* --- barra de progreso --- */
         let ty = video_bottom + TRACK_Y;
         let hit = Rect::from_min_max(pos2(left, ty - 8.0), pos2(right, ty + 8.0));
+        self.ui_rects.insert("seek", Rect::from_min_max(pos2(left, ty - 10.0), pos2(right, video_bottom + TIMES_Y + 10.0)));
         let seek = ui.interact(hit, Id::unique("capyro-seek"), Sense::click_and_drag());
         let duration = self.core.duration();
         let can_seek = duration > 0.0;
@@ -1523,6 +1541,7 @@ impl CapyroApp {
         // repetir (derecha): off → lista → uno
         let repeat = self.core.repeat();
         let repeat_c = pos2(cx + 105.0, cy);
+        self.ui_rects.insert("controls", Rect::from_min_max(pos2(cx - 123.0, cy - 25.0), pos2(cx + 123.0, cy + 25.0)));
         let rp = Self::icon_button(ui, "repeat", repeat_c, 30.0);
         let rp_on = ctx.animate_bool_with_time(Id::unique("capyro-repeat-on"), repeat != Repeat::Off, 0.15);
         let rp_col = rp.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, rp_on);
@@ -1549,6 +1568,7 @@ impl CapyroApp {
         let compact = right - full_w < controls_right;
         let base = if compact { vec2(34.0, 34.0) } else { vec2(full_w, 34.0) };
         let base_rect = Rect::from_min_size(pos2(right - base.x, cy - base.y / 2.0), base);
+        self.ui_rects.insert("add", base_rect);
         let add = animate_button(ui, Id::unique("capyro-add-files"), base_rect, !pending);
         let s = 1.0 + 0.03 * add.hover - 0.06 * add.press;
         let add_rect = Rect::from_center_size(base_rect.center(), base * s);
@@ -1642,6 +1662,7 @@ impl CapyroApp {
         let by = video_bottom + BOTTOM_ROW_Y;
 
         let list_rect = Rect::from_min_max(pos2(left - 6.0, by - 14.0), pos2(left + 66.0, by + 14.0));
+        self.ui_rects.insert("list", list_rect);
         let list = animate_button(ui, Id::unique("capyro-list"), list_rect, true);
         let list_on = ctx.animate_bool_with_time(Id::unique("capyro-list-on"), self.show_playlist, 0.15);
         let list_col = list.tint(ICON_DIM, TEXT).lerp_to_gamma(accent, list_on);
@@ -1657,6 +1678,7 @@ impl CapyroApp {
 
         // volumen: clic = silenciar, rueda = ajustar
         let vol_c = pos2(right - 92.0, by);
+        self.ui_rects.insert("volume", Rect::from_center_size(vol_c, Vec2::splat(28.0)));
         let vol = Self::icon_button(ui, "volume", vol_c, 26.0);
         let (volume, muted) = (self.core.volume(), self.core.muted());
         icons::volume(&painter, vol_c, 16.0 * vol.scale(), vol.tint(ICON_DIM, Color32::WHITE), volume, muted);
@@ -1730,6 +1752,7 @@ impl CapyroApp {
         vol.resp.on_hover_text("Clic: silenciar · Rueda: volumen");
 
         let subs_c = pos2(right - 64.0, by);
+        self.ui_rects.insert("subs", Rect::from_center_size(subs_c, Vec2::splat(28.0)));
         let subs = Self::icon_button(ui, "subtitles", subs_c, 26.0);
         icons::subtitles(&painter, subs_c, 16.0 * subs.scale(), subs.tint(ICON_DIM, Color32::WHITE));
         if subs.resp.clicked() {
@@ -1756,6 +1779,7 @@ impl CapyroApp {
 
         let fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         let fs_c = pos2(right - 8.0, by);
+        self.ui_rects.insert("fullscreen", Rect::from_center_size(fs_c, Vec2::splat(28.0)));
         let fsb = Self::icon_button(ui, "fullscreen", fs_c, 26.0);
         icons::fullscreen(&painter, fs_c, 14.0 * fsb.scale(), fsb.tint(ICON_DIM, Color32::WHITE), fs);
         if fsb.resp.clicked() {
@@ -1939,7 +1963,7 @@ impl CapyroApp {
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(288.0, 340.0);
+        let size = vec2(288.0, 380.0);
         let anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
@@ -2122,6 +2146,24 @@ impl CapyroApp {
         if shot.resp.clicked() {
             self.show_settings = false;
             self.take_screenshot(&ctx);
+        }
+
+        /* repetir el tutorial */
+        y += 40.0;
+        let row = Rect::from_min_max(pos2(x0 - 6.0, y - 18.0), pos2(x1 + 6.0, y + 18.0));
+        let tut = animate_button(ui, Id::unique("capyro-settings-tutorial"), row, interactive);
+        if tut.hover > 0.001 || tut.press > 0.001 {
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * tut.hover + 10.0 * tut.press) as u8));
+        }
+        if let Some(logo) = &self.logo {
+            let side = 18.0 * tut.scale();
+            painter.image(logo.id(), Rect::from_center_size(pos2(x0 + 8.0, y - 1.0), Vec2::splat(side)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        painter.text(pos2(x0 + 24.0, y - 7.0), Align2::LEFT_CENTER, "Ver el tutorial de nuevo", regular(12.5), TEXT);
+        painter.text(pos2(x0 + 24.0, y + 8.0), Align2::LEFT_CENTER, "La bienvenida y la explicación de todo", regular(10.5), TEXT_FAINT);
+        if tut.resp.clicked() {
+            self.show_settings = false;
+            self.start_tutorial(&ctx);
         }
 
         // Esc también lo cierra
@@ -2766,6 +2808,11 @@ impl eframe::App for CapyroApp {
             return;
         }
         self.hide_header_logo = false;
+        if self.tutorial_pending {
+            self.tutorial_pending = false;
+            self.start_tutorial(&ctx);
+        }
+        self.ui_rects.insert("video", video);
 
         self.header(ui, header, maximized);
         self.video_area(ui, video);
@@ -2782,6 +2829,8 @@ impl eframe::App for CapyroApp {
         if !square {
             Self::resize_handles(ui, full);
         }
+        // el tutorial va encima de todo y se queda con el mouse y el teclado
+        self.tutorial_overlay(ui, full);
 
         self.play_click_if_needed(&ctx);
 

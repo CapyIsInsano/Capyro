@@ -14,6 +14,11 @@
   - VA-API (Intel y AMD), NVDEC (NVIDIA por CUDA) o VDPAU, lo primero que ande;
   - lo pesado (H.264, H.265, VP9, AV1, sobre todo en 4K) lo hace la placa de video y la CPU queda libre;
   - si la GPU no puede con un video, o falla a mitad de camino, sigue sola por CPU sin cortar.
+- **Tutorial de bienvenida**: sale la primera vez que abrís Capyro (y en Ajustes → Ver el tutorial de nuevo).
+  - Presentación con el logo, textos que se escriben solos (Espacio para seguir) y el perfil de GitHub del autor.
+  - Recorrido por toda la interfaz, iluminando cada parte con su explicación.
+  - "¿Estás listo?": No → otra vuelta; Sí → "¡Bienvenido a la manada!".
+  - Tiene música de fondo, que el núcleo en C decodifica de a poco con entrada y salida suaves. Esc lo salta.
 - Nueva sección **Decodificación** en Ajustes: Automático, GPU o CPU.
   - El cambio se aplica al instante, aunque haya un video sonando.
   - Abajo de los botones dice qué se está usando y, si no es la GPU, por qué.

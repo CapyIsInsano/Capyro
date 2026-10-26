@@ -73,6 +73,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
 | 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
 | ⚙️ **Personalizable** | Los atajos se cambian **desde la app** (⚙ → Editar configuración) y todo queda en un archivo **Lua** que también podés editar a mano. |
+| 🎓 **Tutorial** | La primera vez que lo abrís te presenta Capyro y te explica toda la interfaz, con música. Se repite desde Ajustes. |
 | 📰 **Novedades** | Un botón al lado de ⓘ con lo nuevo de la versión que tenés. |
 
 <img src="docs/readme/divider-2.svg" width="100%" alt="">
@@ -431,6 +432,7 @@ opciones y acciones están comentadas en [`config/capyro.lua`](config/capyro.lua
 | Configuración | `~/.config/capyro/capyro.lua` (o la ruta en `CAPYRO_CONFIG`) |
 | Sesión (lista, posición, volumen, efectos) | `~/.local/state/capyro/session.lua` |
 | Playlists | `~/.local/share/capyro/playlists.lua` |
+| Tutorial ya visto | `~/.local/state/capyro/tutorial-visto` (borralo para verlo de nuevo al abrir) |
 | Capturas | `~/Imágenes/Capyro` (tu carpeta de Imágenes de `xdg-user-dirs`) |
 | Actualizaciones (código, compilación y `update.log`) | `~/.cache/capyro/` (se puede borrar) |
 
@@ -589,6 +591,8 @@ capyro/
 │       ├── dsp.c/.h          #    efectos de audio (EQ, estéreo, modo noche)
 │       ├── sfx.c             #    sonidos de la app (decodifica desde memoria)
 │       ├── buildinfo.c       #    commit y prefijo del build (para actualizar)
+│       ├── hwdec.c           #    decodificación por GPU (VA-API, NVDEC, VDPAU)
+│       ├── music.c           #    música de fondo (se decodifica de a poco)
 │       ├── platform.c/.h     #    hilos y mutex (pthreads)
 │       ├── internal.h        #    estructuras internas
 │       ├── miniaudio_impl.c  #    implementación de miniaudio
@@ -601,6 +605,7 @@ capyro/
 │       ├── app/lists.rs      #    panel Lista: cola y playlists
 │       ├── app/keys_editor.rs #   editor de atajos
 │       ├── app/changes_menu.rs #  menú de novedades
+│       ├── app/tutorial.rs   #    tutorial de bienvenida
 │       ├── playlists.rs      #    guardar / leer las playlists
 │       ├── changes.rs        #    novedades (lee el CHANGELOG embebido)
 │       ├── ffi.rs            #    bindings seguros al núcleo

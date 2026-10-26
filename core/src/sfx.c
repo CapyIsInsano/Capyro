@@ -22,13 +22,8 @@
 
 #define AVIO_BUF 4096
 
-typedef struct {
-    const uint8_t *data;
-    size_t         size;
-    size_t         pos;
-} MemReader;
-
-static int mem_read(void *opaque, uint8_t *buf, int n) {
+/* Lectores de memoria para AVIO (también los usa music.c). */
+int mem_read(void *opaque, uint8_t *buf, int n) {
     MemReader *m = opaque;
     size_t left = m->size - m->pos;
     if (left == 0) {
@@ -40,7 +35,7 @@ static int mem_read(void *opaque, uint8_t *buf, int n) {
     return (int)k;
 }
 
-static int64_t mem_seek(void *opaque, int64_t offset, int whence) {
+int64_t mem_seek(void *opaque, int64_t offset, int whence) {
     MemReader *m = opaque;
     int64_t base;
     switch (whence & ~AVSEEK_FORCE) {
