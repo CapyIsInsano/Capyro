@@ -22,6 +22,7 @@
 - `capyro --version` muestra el commit y dónde está instalado.
 - Opciones nuevas: `splash`, `startup_sound`, `update_repo` y `update_branch`.
 - Los avisos ahora se ven por encima de los menús abiertos.
+- El ícono de la barra de tareas ahora es el logo: se instala en todos los tamaños (16 a 512 px y SVG) y se refresca el caché de íconos al instalar.
 
 ## v0.2.6-alpha · Efectos de audio
 

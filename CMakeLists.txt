@@ -123,6 +123,27 @@ endif()
 install(TARGETS capyro RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES config/capyro.lua DESTINATION ${CMAKE_INSTALL_DATADIR}/capyro)
 install(FILES packaging/capyro.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
-install(FILES assets/capyro_logo_256.png
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps
-        RENAME capyro.png)
+# Ícono en todos los tamaños: la barra de tareas (Waybar, Niri, KDE...) busca
+# "capyro" en el tema hicolor según el app_id de la ventana y el .desktop.
+# Si falta el tamaño que pide o el caché de íconos está viejo, muestra el
+# ícono de "imagen perdida".
+install(DIRECTORY packaging/icons/hicolor DESTINATION ${CMAKE_INSTALL_DATADIR}/icons)
+install(FILES assets/capyro_logo_256.png DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps RENAME capyro.png)
+# Refresca los cachés para que el ícono aparezca sin cerrar sesión.
+# (Con DESTDIR, al armar un paquete, no: de eso se encarga el gestor de paquetes.)
+install(CODE [[
+    if(NOT "$ENV{DESTDIR}" STREQUAL "")
+        return()
+    endif()
+    set(_share "${CMAKE_INSTALL_PREFIX}/share")
+    find_program(_gtk_cache NAMES gtk-update-icon-cache gtk4-update-icon-cache)
+    if(_gtk_cache AND EXISTS "${_share}/icons/hicolor")
+        execute_process(COMMAND "${_gtk_cache}" -q -f -t "${_share}/icons/hicolor"
+                        RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
+        message(STATUS "Capyro: caché de íconos actualizado")
+    endif()
+    find_program(_desktop_db update-desktop-database)
+    if(_desktop_db)
+        execute_process(COMMAND "${_desktop_db}" -q "${_share}/applications" OUTPUT_QUIET ERROR_QUIET)
+    endif()
+]])

@@ -230,7 +230,7 @@ La ventana carga OpenGL, Wayland y xkbcommon en tiempo de ejecución: si no abre
 ### 2. Compilar
 
 ```sh
-git clone https://github.com/CapyIsInsano/capyro.git
+git clone https://github.com/CapyIsInsano/Capyro.git
 cd Capyro
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
@@ -438,6 +438,16 @@ comandos de tu distro en [Instalación](#instalación).
 </details>
 
 <details>
+<summary><b>En la barra de tareas sale un ícono roto en vez del capibara</b></summary>
+
+La barra busca el ícono `capyro` en el tema de íconos, a partir del lanzador `capyro.desktop`.
+Desde la v0.2.7 se instala en todos los tamaños y `cmake --install` refresca el caché solo.
+Si lo instalaste con una versión anterior, volvé a instalar. Si igual no aparece, reiniciá
+la barra (o cerrá sesión): algunas leen los íconos una sola vez al arrancar. Corriendo desde
+`build/` sin instalar no hay lanzador, así que no hay ícono.
+</details>
+
+<details>
 <summary><b>Las esquinas de la ventana se ven negras</b></summary>
 
 Tu gestor de ventanas no tiene transparencia (no hay compositor). Es solo estético.
@@ -535,7 +545,7 @@ capyro/
 │       └── theme.rs          #    colores y fuentes
 ├── config/capyro.lua         # configuración por defecto
 ├── assets/                   # logo + sounds/ (capibaras, error, inicio, actualización)
-├── packaging/capyro.desktop  # lanzador para Linux
+├── packaging/                # lanzador .desktop + íconos en todos los tamaños
 ├── tests/                    # pruebas del núcleo
 └── docs/                     # capturas e ilustraciones de este README
 ```
