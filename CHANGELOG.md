@@ -15,7 +15,7 @@
   - lo pesado (H.264, H.265, VP9, AV1, sobre todo en 4K) lo hace la placa de video y la CPU queda libre;
   - si la GPU no puede con un video, o falla a mitad de camino, sigue sola por CPU sin cortar.
 - **Tutorial de bienvenida**: sale la primera vez que abrís Capyro (y en Ajustes → Ver el tutorial de nuevo).
-  - Presentación con el logo, textos que se escriben solos (Espacio para seguir) y el perfil de GitHub del autor.
+  - Presentación con el logo, textos que se escriben solos (Espacio para seguir) y el perfil de GitHub del autor. Más abajo, chiquito, dice "Potenciado por Claude · Anthropic".
   - Recorrido por toda la interfaz, iluminando cada parte con su explicación.
   - "¿Estás listo?": No → otra vuelta; Sí → "¡Bienvenido a la manada!".
   - Tiene música de fondo, "Bienvenida a la manada" de Capy y los Capibaras, que suena en el propio reproductor. Así el área de video muestra la carátula, el visualizador, el formato y los milisegundos mientras se explican. Al terminar, la cola de antes vuelve a como estaba.

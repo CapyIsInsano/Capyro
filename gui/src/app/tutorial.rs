@@ -56,6 +56,8 @@ const AVATAR_PNG: &[u8] = include_bytes!("../../../assets/arturo.png");
 const AUTHOR: &str = "Arturo";
 const GITHUB_USER: &str = "CapyIsInsano";
 const GITHUB_URL: &str = "https://github.com/CapyIsInsano";
+/// Con qué se hizo Capyro (el link chiquito debajo del autor).
+const CLAUDE_URL: &str = "https://www.anthropic.com/claude";
 
 const INTRO: [&str; 4] = [
     "¡Hola! Bienvenido a Capyro.",
@@ -465,12 +467,13 @@ impl CapyroApp {
             p
         };
         let mut link_clicked = false;
+        let mut claude_clicked = false;
         let mut answer: Option<bool> = None;
 
         match t.phase {
             Phase::Intro(i) => {
                 let a = ease_out(((now - t.start) / 0.6) as f32);
-                self.draw_intro(ui, &p, full, i, a, now, &mut link_clicked);
+                self.draw_intro(ui, &p, full, i, a, now, &mut link_clicked, &mut claude_clicked);
             }
             Phase::Reveal => {
                 let k = ease_in_out(((now - t.t0) / 0.8) as f32);
@@ -478,7 +481,7 @@ impl CapyroApp {
                 let mut pi = p.clone();
                 pi.multiply_opacity(1.0 - k);
                 let last = INTRO.len() - 1;
-                self.draw_intro(ui, &pi, full, last, 1.0, now, &mut link_clicked);
+                self.draw_intro(ui, &pi, full, last, 1.0, now, &mut link_clicked, &mut claude_clicked);
                 p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha((150.0 * k) as u8));
             }
             Phase::Tour(i) => {
@@ -500,8 +503,9 @@ impl CapyroApp {
             }
         }
 
-        if link_clicked {
-            if let Err(e) = super::changes_menu::open_url(GITHUB_URL) {
+        if link_clicked || claude_clicked {
+            let url = if link_clicked { GITHUB_URL } else { CLAUDE_URL };
+            if let Err(e) = super::changes_menu::open_url(url) {
                 self.toast(&ctx, format!("No pude abrir el navegador: {e}"), true);
             }
         } else if let Some(yes) = answer {
@@ -527,6 +531,7 @@ impl CapyroApp {
         ctx.request_repaint();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_intro(
         &self,
         ui: &Ui,
@@ -536,6 +541,7 @@ impl CapyroApp {
         appear: f32,
         now: f64,
         link_clicked: &mut bool,
+        claude_clicked: &mut bool,
     ) {
         let Some(t) = &self.tutorial else { return };
         let accent = self.cfg.accent;
@@ -543,9 +549,21 @@ impl CapyroApp {
         p.multiply_opacity(appear);
         p.rect_filled(full, WINDOW_RADIUS, BG_WINDOW);
         // brillo naranja arriba
-        for i in 0..28 {
-            let r = 270.0 - 9.0 * i as f32;
-            p.circle_filled(pos2(full.center().x, full.top() + full.height() * 0.2), r, accent.gamma_multiply(0.0045));
+        // degradé radial (malla con colores por vértice: sin escalones)
+        {
+            let c = pos2(full.center().x, full.top() + full.height() * 0.2);
+            let mut mesh = egui::Mesh::default();
+            let inner = Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 34);
+            mesh.colored_vertex(c, inner);
+            let n = 72;
+            for i in 0..=n {
+                let a = i as f32 / n as f32 * std::f32::consts::TAU;
+                mesh.colored_vertex(c + vec2(a.cos(), a.sin()) * 300.0, Color32::TRANSPARENT);
+            }
+            for i in 1..=n as u32 {
+                mesh.add_triangle(0, i, i + 1);
+            }
+            p.add(egui::Shape::mesh(mesh));
         }
 
         // logo, nombre y lema
@@ -594,7 +612,7 @@ impl CapyroApp {
         }
 
         // abajo: el perfil de GitHub del autor
-        let card = Rect::from_center_size(pos2(full.center().x, full.bottom() - 62.0), vec2(250.0, 58.0));
+        let card = Rect::from_center_size(pos2(full.center().x, full.bottom() - 84.0), vec2(250.0, 58.0));
         let a = animate_button(ui, Id::unique("capyro-tutorial-github"), card, appear > 0.9);
         p.text(pos2(card.center().x, card.top() - 12.0), Align2::CENTER_CENTER, "Hecho por", regular(11.0), TEXT_FAINT);
         p.rect_filled(card, 14.0, Color32::from_white_alpha((8.0 + 10.0 * a.hover) as u8));
@@ -622,6 +640,38 @@ impl CapyroApp {
         }
         if a.resp.clicked() {
             *link_clicked = true;
+        }
+
+        // más abajo y más chiquito: con qué se hizo
+        let cy = full.bottom() - 30.0;
+        let pre = p.layout_no_wrap("Potenciado por ".to_owned(), regular(11.0), TEXT_FAINT);
+        let name = p.layout_no_wrap("Claude".to_owned(), bold(11.0), TEXT_DIM);
+        let post = p.layout_no_wrap(" · Anthropic".to_owned(), regular(11.0), TEXT_FAINT);
+        let w = pre.size().x + name.size().x + post.size().x;
+        let r = Rect::from_center_size(pos2(full.center().x, cy), vec2(w + 26.0, 20.0));
+        let b = animate_button(ui, Id::unique("capyro-tutorial-claude"), r, appear > 0.9);
+        if b.hover > 0.001 {
+            p.rect_filled(r, 10.0, Color32::from_white_alpha((8.0 * b.hover) as u8));
+        }
+        let mut x = r.left() + 8.0;
+        let ty = cy - pre.size().y / 2.0;
+        let (pw, nw) = (pre.size().x, name.size().x);
+        p.galley(pos2(x, ty), pre, TEXT_FAINT);
+        x += pw;
+        p.galley(pos2(x, ty), name, TEXT_DIM);
+        x += nw;
+        p.galley(pos2(x, ty), post, TEXT_FAINT);
+        let col = TEXT_FAINT.lerp_to_gamma(accent, b.hover);
+        let ac = pos2(r.right() - 9.0 + 1.5 * b.hover, cy - 1.5 * b.hover);
+        let st = Stroke::new(1.1, col);
+        p.line_segment([ac + vec2(-2.5, 2.5), ac + vec2(2.5, -2.5)], st);
+        p.line_segment([ac + vec2(-0.5, -2.5), ac + vec2(2.5, -2.5)], st);
+        p.line_segment([ac + vec2(2.5, -2.5), ac + vec2(2.5, -0.5)], st);
+        if b.hover > 0.5 {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if b.resp.clicked() {
+            *claude_clicked = true;
         }
 
         p.text(
