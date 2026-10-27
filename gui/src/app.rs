@@ -221,6 +221,8 @@ pub struct CapyroApp {
     video_serial: u64,
     /// Copia del último cuadro (se reutiliza: sin reservar memoria por cuadro).
     frame_buf: Vec<u8>,
+    /// Cuadros de video que de verdad se mostraron (burbuja de fps).
+    fps_meter: crate::videoinfo::FpsMeter,
     /// Tamaño del área de video que se le pasó al núcleo la última vez.
     video_target: (u32, u32),
     video_aspect: f32,
@@ -395,6 +397,7 @@ impl CapyroApp {
             video_tex: None,
             video_serial: 0,
             frame_buf: Vec::new(),
+            fps_meter: Default::default(),
             video_target: (0, 0),
             video_aspect: 16.0 / 9.0,
             startup_notice,
@@ -1120,6 +1123,11 @@ impl CapyroApp {
             None => self.video_tex = None, // no hay frame (nada cargado o mp3 sin carátula)
             Some(None) => {}               // mismo frame que ya tenemos
             Some(Some((img, serial, aspect))) => {
+                if self.core.state() == State::Playing && self.core.media_kind() == MediaKind::Video {
+                    self.fps_meter.frame(ctx.input(|i| i.time));
+                } else {
+                    self.fps_meter.reset();
+                }
                 match &mut self.video_tex {
                     Some(tex) => tex.set(img, TextureOptions::LINEAR),
                     None => {
@@ -1346,6 +1354,9 @@ impl CapyroApp {
         if !hovering_files && self.core.media_kind() != MediaKind::None {
             self.format_badge(ui, rect);
         }
+        if !hovering_files && self.core.media_kind() == MediaKind::Video {
+            self.video_info_badges(ui, rect);
+        }
         if self.show_playlist {
             self.playlist_panel(ui, rect);
         }
@@ -1425,6 +1436,74 @@ impl CapyroApp {
         }
         if (0.001..0.999).contains(&tf) || (0.001..0.999).contains(&tm) {
             ui.ctx().request_repaint_after(FRAME_SMOOTH);
+        }
+    }
+
+    /// Abajo a la izquierda del video, una al lado de la otra: la resolución
+    /// "de nombre" (1080p, 1440p · 2K, 4K...) y los cuadros por segundo. La
+    /// etiqueta es solo el indicador: el video se ve tal cual es. Se ocultan
+    /// juntas en Ajustes (entran y salen deslizándose).
+    fn video_info_badges(&self, ui: &Ui, area: Rect) {
+        let ctx = ui.ctx();
+        let t = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-videoinfo-badge"), self.cfg.show_video_info, 0.3));
+        if t <= 0.001 {
+            return;
+        }
+        let Some((w, h, fps)) = self.core.video_props() else { return };
+        let accent = self.cfg.accent;
+        const H: f32 = 24.0;
+        let now = ctx.input(|i| i.time);
+        let y = area.bottom() - 10.0 - H + 4.0 * (1.0 - t);
+        let mut p = ui.painter().clone();
+        p.multiply_opacity(t);
+
+        // resolución
+        let (label, alias) = crate::videoinfo::resolution_label(w, h);
+        let lg = p.layout_no_wrap(label.to_owned(), bold(11.5), Color32::WHITE);
+        let ag = (!alias.is_empty()).then(|| p.layout_no_wrap(alias.to_owned(), regular(11.0), TEXT_DIM));
+        let rw = 12.0 + lg.size().x + ag.as_ref().map_or(0.0, |g| 10.0 + g.size().x) + 12.0;
+        let r = Rect::from_min_size(pos2(area.left() + 10.0, y), vec2(rw, H));
+        p.rect_filled(r, 12.0, Color32::from_black_alpha(150));
+        p.rect_stroke(r, 12.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
+        let lr = Rect::from_min_size(pos2(r.left() + 4.0, r.top() + 4.0), vec2(lg.size().x + 16.0, 16.0));
+        p.rect_filled(lr, 8.0, accent);
+        p.galley(lr.center() - lg.size() / 2.0, lg, Color32::WHITE);
+        if let Some(g) = ag {
+            p.galley(pos2(lr.right() + 6.0, r.center().y - g.size().y / 2.0), g, TEXT_DIM);
+        }
+        ui.interact(r, Id::unique("capyro-videoinfo-res"), Sense::hover())
+            .on_hover_text(format!("El archivo es de {w}×{h}"));
+
+        // fps: los del video; si la PC no llega, los que se ven, en otro color
+        let playing = self.core.state() == State::Playing;
+        let shown = if playing { self.fps_meter.rate(now) } else { None };
+        let slow = matches!(shown, Some(s) if fps > 0.0 && s < fps * 0.85);
+        let value = if slow { shown.unwrap_or(fps) } else { fps };
+        let col = if slow { Color32::from_rgb(0xFF, 0xC9, 0x3C) } else { Color32::WHITE };
+        let ng = p.layout_no_wrap(crate::videoinfo::fps_text(if slow { value.round() } else { value }), FontId::monospace(12.0), col);
+        let ug = p.layout_no_wrap("fps".to_owned(), regular(11.0), TEXT_DIM);
+        let fw = 16.0 + ng.size().x + 5.0 + ug.size().x + 12.0;
+        let f = Rect::from_min_size(pos2(r.right() + 6.0, y), vec2(fw, H));
+        p.rect_filled(f, 12.0, Color32::from_black_alpha(150));
+        p.rect_stroke(f, 12.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
+        // puntito: late mientras corre el video, quieto en pausa
+        let beat = if playing { 0.6 + 0.4 * ((now * 2.0 * std::f64::consts::PI).sin() as f32).abs() } else { 0.45 };
+        p.circle_filled(pos2(f.left() + 9.0, f.center().y), 2.5, if slow { col } else { accent.gamma_multiply(beat) });
+        p.galley(pos2(f.left() + 16.0, f.center().y - ng.size().y / 2.0), ng.clone(), col);
+        p.galley(pos2(f.left() + 16.0 + ng.size().x + 5.0, f.center().y - ug.size().y / 2.0), ug, TEXT_DIM);
+        let tip = match shown {
+            Some(s) if slow => format!(
+                "El video es de {} fps pero se están viendo {:.0}: la PC no da abasto (probá ⚙ → Decodificación → GPU)",
+                crate::videoinfo::fps_text(fps),
+                s
+            ),
+            Some(s) => format!("{} fps del video · se están viendo {:.0}", crate::videoinfo::fps_text(fps), s),
+            None => format!("Cuadros por segundo del video: {}", crate::videoinfo::fps_text(fps)),
+        };
+        ui.interact(f, Id::unique("capyro-videoinfo-fps"), Sense::hover()).on_hover_text(tip);
+
+        if (0.001..0.999).contains(&t) {
+            ctx.request_repaint_after(FRAME_SMOOTH);
         }
     }
 
@@ -2041,7 +2120,7 @@ impl CapyroApp {
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(288.0, 380.0);
+        let size = vec2(288.0, 410.0);
         let anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
@@ -2165,6 +2244,13 @@ impl CapyroApp {
         if fx_menu::switch(ui, &painter, "show-millis", pos2(x1 - 17.0, y), self.cfg.show_millis, accent, interactive) {
             self.cfg.show_millis = !self.cfg.show_millis;
             let msg = if self.cfg.show_millis { "Milisegundos visibles" } else { "Milisegundos ocultos" };
+            self.save_config(&ctx, msg.to_owned());
+        }
+        y += 30.0;
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Mostrar resolución y fps", regular(12.5), TEXT_DIM);
+        if fx_menu::switch(ui, &painter, "show-video-info", pos2(x1 - 17.0, y), self.cfg.show_video_info, accent, interactive) {
+            self.cfg.show_video_info = !self.cfg.show_video_info;
+            let msg = if self.cfg.show_video_info { "Resolución y fps visibles" } else { "Resolución y fps ocultos" };
             self.save_config(&ctx, msg.to_owned());
         }
         y += 16.0;

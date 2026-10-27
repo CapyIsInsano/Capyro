@@ -487,6 +487,7 @@ return {
         click_sound      = true,       -- clic en botones y sonido al cerrar menús
         show_format      = true,       -- "MP4 · H.264" arriba a la izquierda del video
         show_millis      = true,       -- y debajo, los milisegundos (000..999)
+        show_video_info  = true,       -- abajo a la izquierda: resolución (1080p, 4K...) y fps
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         system           = "Lin",      -- "Lin" o "Win": lo pone la instalación ("auto" = detectarlo)
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)

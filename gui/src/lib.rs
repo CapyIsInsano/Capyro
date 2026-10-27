@@ -15,6 +15,7 @@ mod render;
 mod formats;
 mod session;
 mod updater;
+mod videoinfo;
 mod viz;
 mod icons;
 mod theme;

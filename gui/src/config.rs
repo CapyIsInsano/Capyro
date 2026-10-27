@@ -236,6 +236,8 @@ pub struct Config {
     pub show_format: bool,
     /// Milisegundos del segundo actual, debajo del formato.
     pub show_millis: bool,
+    /// Abajo a la izquierda del video: resolución (1080p, 4K...) y fps.
+    pub show_video_info: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
     /// Con qué se dibuja la ventana en Windows (OpenGL / Direct3D / auto).
@@ -417,6 +419,7 @@ impl Config {
                 "click_sound" => self.click_sound.to_string(),
                 "show_format" => self.show_format.to_string(),
                 "show_millis" => self.show_millis.to_string(),
+                "show_video_info" => self.show_video_info.to_string(),
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
@@ -590,6 +593,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         click_sound: true,
         show_format: true,
         show_millis: true,
+        show_video_info: true,
         system_setting: None,
         source: name.to_owned(),
     };
@@ -665,6 +669,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<bool>>("splash")? {
             cfg.splash = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("show_video_info")? {
+            cfg.show_video_info = v;
         }
         if let Some(v) = opts.get::<Option<bool>>("show_millis")? {
             cfg.show_millis = v;
@@ -822,6 +829,7 @@ mod tests {
         cfg.decoding = crate::ffi::Hwdec::Cpu;
         cfg.show_format = false;
         cfg.show_millis = false;
+        cfg.show_video_info = false;
         let text = cfg.to_lua();
         let back = parse(&text, "prueba").unwrap();
         assert!(!back.bindings.iter().any(|b| b.action == Action::Stop));
@@ -837,7 +845,7 @@ mod tests {
         assert_eq!(back.accent, Color32::from_rgb(0x12, 0xAB, 0xEF));
         assert_eq!(back.update_repo.as_deref(), Some("CapyIsInsano/Capyro"));
         assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
-        assert!(!back.show_format && !back.show_millis);
+        assert!(!back.show_format && !back.show_millis && !back.show_video_info);
         assert_eq!(back.splash, cfg.splash);
         // "auto" se guarda ya resuelto: Lin o Win según dónde corre
         assert_eq!(cfg.system_setting, None);

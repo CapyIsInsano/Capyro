@@ -239,6 +239,16 @@ void capyro_core_unlock_video_frame(CapyroCore *core);
  * convertir y subir cada cuadro. 0×0 = sin dato. */
 void capyro_core_set_video_target(CapyroCore *core, int width, int height);
 
+/* El video original abierto: su resolución (la del archivo, no la que se ve
+ * en la ventana) y sus cuadros por segundo (0 si el archivo no lo dice).
+ * false = no hay video (nada abierto, o un audio). */
+typedef struct {
+    int32_t width;
+    int32_t height;
+    double  fps;
+} CapyroVideoProps;
+bool capyro_core_get_video_props(CapyroCore *core, CapyroVideoProps *out);
+
 /* Segundos hasta que toque mostrar el próximo cuadro de video (para no
  * redibujar más seguido que el video), o -1 si no hay ninguno en cola. */
 double capyro_core_video_next_due(CapyroCore *core);

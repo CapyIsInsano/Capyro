@@ -78,12 +78,18 @@ local options = {
     click_sound      = true,   -- sonidos de la interfaz: clic en botones y al cerrar menús
     show_format      = true,   -- formato del archivo arriba a la izquierda del video (MP4 · H.264)
     show_millis      = true,   -- debajo, los milisegundos del segundo actual (000..999)
+    show_video_info  = true,   -- abajo a la izquierda del video: resolución (1080p, 4K...) y fps
 
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
     -- "gpu" (Linux: VA-API / NVDEC / VDPAU; Windows: D3D11VA / NVDEC / DXVA2;
     -- si no hay, avisa y usa la CPU) o "cpu".
     -- También se cambia en ⚙ → Decodificación.
     decoding         = "auto",
+
+    -- Solo Windows: con qué se dibuja la ventana. "auto" (prueba Direct3D y
+    -- OpenGL y se queda con el que ande), "direct3d" u "opengl". Si Capyro no
+    -- abre o se ve negro, probá forzar el otro (y reabrí Capyro).
+    renderer         = "auto",
 
     -- Sistema para el que está compilado e instalado Capyro: "Lin" (Linux)
     -- o "Win" (Windows). Lo escribe la instalación según el sistema que

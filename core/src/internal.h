@@ -141,6 +141,9 @@ struct CapyroCore {
     /* tamaño en pantalla del área de video (píxeles reales): los cuadros se
      * convierten a ese tamaño y no más (0 = sin dato, hasta 1920×1080) */
     int       video_target_w, video_target_h;
+    /* el video original: resolución y cuadros por segundo (0 = no hay) */
+    int       video_w, video_h;
+    double    video_fps;
 
     /* control del hilo */
     bool     quit;

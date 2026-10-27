@@ -83,7 +83,8 @@ const STEPS: [Step; 16] = [
         target: Some("badges"),
         title: "Formato y milisegundos",
         text: "Arriba a la izquierda vas a ver el formato del archivo (por ejemplo MP4 · H.264) y, debajo, los \
-               milisegundos del segundo actual. Las dos burbujas se ocultan en Ajustes.",
+               milisegundos del segundo actual. En los videos, abajo a la izquierda, la resolución (1080p, 4K...) \
+               y los fps. Todas se ocultan en Ajustes.",
     },
     Step {
         target: Some("add"),

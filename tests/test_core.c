@@ -281,6 +281,10 @@ static void test_media(const char *dir) {
     CHECK(strcmp(capyro_core_get_title(core), "Tono de prueba") == 0);
     CHECK(strcmp(capyro_core_get_artist(core), "Capyro") == 0);
     CHECK(!capyro_core_lock_video_frame(core, &vf)); /* sin carátula */
+    {
+        CapyroVideoProps ap;
+        CHECK(!capyro_core_get_video_props(core, &ap)); /* un audio no es video */
+    }
 
     capyro_core_play(core);
     pump(core, 600);
@@ -345,6 +349,11 @@ static void test_media(const char *dir) {
     } else {
         CHECK(!"el primer frame debería estar listo sin dar play");
     }
+    CapyroVideoProps vp;
+    CHECK(capyro_core_get_video_props(core, &vp));
+    printf("video: %dx%d a %.2f fps\n", vp.width, vp.height, vp.fps);
+    CHECK(vp.width == 320 && vp.height == 240 && vp.fps > 1.0);
+
     /* la captura sale en tamaño original aunque se muestre más chico */
     CapyroImage shot;
     CHECK(capyro_core_capture_frame(core, &shot));

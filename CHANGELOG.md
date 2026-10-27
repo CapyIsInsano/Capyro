@@ -27,6 +27,10 @@
   - Linux: el lanzador ahora lista todos los nombres de esos formatos y tiene la ruta completa del programa; al instalar se actualizan los cachés (también el de KDE).
   - Windows: CapyroInstaller los registra (sin adueñarse de ninguno) y Capyro aparece en Aplicaciones predeterminadas. Al desinstalar se saca todo.
 - `CAPYRO_DEBUG_FPS=1 capyro` muestra cuántos cuadros por segundo dibuja y cuánto cuesta cada uno.
+- Extra: abajo a la izquierda del video, dos burbujas nuevas:
+  - la **resolución** con su nombre, de 144p a 16K (480p SD, 720p HD, 1080p Full HD, 1440p 2K, 4K, 5K, 8K, 16K). Es solo el indicador: un video de 2786×1567 dice "1440p · 2K" y se ve tal cual es. Los videos verticales y los de cine (más anchos) caen en su escalón. Con el mouse encima, la resolución exacta;
+  - los **fps** del video (30, 29.97, 60...). Si la PC no llega a mostrarlos todos, se pone amarillo y dice cuántos se están viendo.
+  - Las dos se ocultan juntas en ⚙ → Mostrar resolución y fps (`show_video_info`).
 
 ## v0.3.0-alpha · El salto a Windows
 

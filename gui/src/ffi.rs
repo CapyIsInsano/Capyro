@@ -112,6 +112,14 @@ struct RawVideoFrame {
 }
 
 /// Vista prestada del frame actual; solo vive dentro de `Core::with_video_frame`.
+/// Debe coincidir con `CapyroVideoProps` de capyro_core.h.
+#[repr(C)]
+struct RawVideoProps {
+    width: i32,
+    height: i32,
+    fps: f64,
+}
+
 /// Debe coincidir con `CapyroImage` de capyro_core.h.
 #[repr(C)]
 struct RawImage {
@@ -160,6 +168,7 @@ extern "C" {
     fn capyro_core_lock_video_frame(core: *mut CapyroCore, out: *mut RawVideoFrame) -> bool;
     fn capyro_core_unlock_video_frame(core: *mut CapyroCore);
     fn capyro_core_set_video_target(core: *mut CapyroCore, width: c_int, height: c_int);
+    fn capyro_core_get_video_props(core: *mut CapyroCore, out: *mut RawVideoProps) -> bool;
     fn capyro_core_video_next_due(core: *mut CapyroCore) -> f64;
     fn capyro_core_capture_frame(core: *mut CapyroCore, out: *mut RawImage) -> bool;
     fn capyro_core_free_image(img: *mut RawImage);
@@ -574,6 +583,13 @@ impl Core {
         unsafe { capyro_core_set_video_target(self.ptr, width.min(i32::MAX as u32) as c_int, height.min(i32::MAX as u32) as c_int) }
     }
 
+    /// Resolución original y fps del video abierto (None = no es un video).
+    pub fn video_props(&self) -> Option<(u32, u32, f64)> {
+        let mut p = RawVideoProps { width: 0, height: 0, fps: 0.0 };
+        unsafe { capyro_core_get_video_props(self.ptr, &mut p) }
+            .then(|| (p.width.max(0) as u32, p.height.max(0) as u32, p.fps))
+    }
+
     /// Segundos hasta el próximo cuadro de video (None = no hay en cola).
     pub fn video_next_due(&self) -> Option<f64> {
         let d = unsafe { capyro_core_video_next_due(self.ptr) };
@@ -655,6 +671,11 @@ mod tests {
         // 2 bool + 16 + 24 + 128 chars = 170 → alineado a 8 para el u64
         assert_eq!(std::mem::size_of::<RawDecodeInfo>(), 184);
         assert_eq!(std::mem::align_of::<RawDecodeInfo>(), 8);
+    }
+
+    #[test]
+    fn video_props_tiene_el_tamanio_de_c() {
+        assert_eq!(std::mem::size_of::<RawVideoProps>(), 16);
     }
 
     #[test]

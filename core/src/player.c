@@ -963,6 +963,8 @@ void player_close(CapyroCore *core) {
     core->clock_base  = 0.0;
     core->audio_consumed = 0;
     core->duration    = 0.0;
+    core->video_w     = core->video_h = 0;
+    core->video_fps   = 0.0;
     core->shown       = -1;
     core->force_frame = false;
     core->serial++;
@@ -1049,7 +1051,23 @@ int player_open(CapyroCore *core, const char *path) {
     p->start_time   = p->fmt->start_time != AV_NOPTS_VALUE ? (double)p->fmt->start_time / AV_TIME_BASE : 0.0;
     p->a_drop_until = p->v_drop_until = -1.0;
 
+    int vw = 0, vh = 0;
+    double vfps = 0.0;
+    if (real_video) {
+        AVStream *st = p->fmt->streams[p->vidx];
+        vw = st->codecpar->width;
+        vh = st->codecpar->height;
+        AVRational fr = st->avg_frame_rate.num > 0 && st->avg_frame_rate.den > 0 ? st->avg_frame_rate
+                                                                                  : st->r_frame_rate;
+        if (fr.num > 0 && fr.den > 0) {
+            vfps = av_q2d(fr);
+        }
+    }
+
     cp_mutex_lock(&core->lock);
+    core->video_w     = vw;
+    core->video_h     = vh;
+    core->video_fps   = vfps;
     core->kind        = real_video ? CAPYRO_MEDIA_VIDEO : CAPYRO_MEDIA_AUDIO;
     core->duration    = p->fmt->duration != AV_NOPTS_VALUE ? (double)p->fmt->duration / AV_TIME_BASE : 0.0;
     core->clock_audio = p->aidx >= 0;
@@ -1135,6 +1153,18 @@ void capyro_core_unlock_video_frame(CapyroCore *core) {
     if (core) {
         cp_mutex_unlock(&core->lock);
     }
+}
+
+bool capyro_core_get_video_props(CapyroCore *core, CapyroVideoProps *out) {
+    if (!core || !out) {
+        return false;
+    }
+    cp_mutex_lock(&core->lock);
+    out->width  = core->video_w;
+    out->height = core->video_h;
+    out->fps    = core->video_fps;
+    cp_mutex_unlock(&core->lock);
+    return out->width > 0 && out->height > 0;
 }
 
 void capyro_core_set_video_target(CapyroCore *core, int width, int height) {
