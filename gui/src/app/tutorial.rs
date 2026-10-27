@@ -23,7 +23,7 @@ use crate::ffi::{OsInfo, State};
 use crate::icons;
 use crate::theme::*;
 
-/// Música del tutorial (ya con el volumen al 25 %). Va como un MP3 de
+/// Música del tutorial (ya con el volumen al 45 %). Va como un MP3 de
 /// verdad con tags y carátula: suena en el reproductor, así el área de video
 /// muestra la carátula, el visualizador, el formato y los milisegundos
 /// mientras se explican.
