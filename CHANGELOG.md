@@ -27,6 +27,7 @@
 - **Tutorial:**
   - antes de "¡Bienvenido a la manada!" aparece el **sistema detectado**: Linux (con tu distro y el kernel) o Windows 10/11 (con su versión);
   - al lado de "Potenciado por Claude" hay un destello que gira cuando le pasás el mouse, como pensando, y da una vuelta rápida con el clic.
+  - más animado: chispitas que suben por el fondo, halos que salen del logo, cursor de máquina de escribir, la tecla Espacio dibujada que se hunde, puntitos de progreso que se estiran, carteles que entran con un saltito y una barrita con el avance del recorrido, esquinas tipo visor sobre lo iluminado, el capibara de "¿Estás listo?" mirando a los costados y, en la bienvenida, rayos de luz que giran y papelitos que dan vueltas.
 - En Windows todo se guarda donde corresponde: la config donde la puso el instalador, las listas en `Documentos\Capyro`, la sesión y la caché en `%LOCALAPPDATA%\Capyro` y las capturas en tu carpeta de Imágenes.
 - El menú ⓘ dice para qué sistema está compilado tu Capyro, y `capyro --version` también.
 - CI: cada push a `main` compila Capyro para Windows y lo publica en la release `windows` (de ahí bajan el actualizador y el instalador).

@@ -517,9 +517,12 @@ impl CapyroApp {
                 let k = ease_in_out(((now - t.spot_t0) / 0.42) as f32);
                 let spot = lerp_rect(t.spot_from, t.spot_to, k);
                 draw_spotlight(&p, full, spot, accent, now, STEPS[i].target.is_some());
+                if STEPS[i].target.is_some() {
+                    draw_corners(&p, spot, accent, now, k);
+                }
                 let shown = if t.revealed_all { usize::MAX } else { revealed(STEPS[i].text, (now - t.t0) as f32) };
                 let complete = t.complete(now);
-                let enter = ease_out(((now - t.t0) / 0.3) as f32);
+                let enter = ((now - t.t0) / 0.35) as f32;
                 draw_bubble(&p, full, spot, &STEPS[i], i, shown, complete, enter, accent, now, t.rounds);
             }
             Phase::Ask => {
@@ -600,12 +603,22 @@ impl CapyroApp {
             p.add(egui::Shape::mesh(mesh));
         }
 
-        // logo, nombre y lema
+        // chispitas que suben
         let since = (now - t.start) as f32;
+        draw_embers(&p, full, accent, since, 34);
+
+        // logo, nombre y lema: entra saltando y después respira
         let bob = (since * 1.6).sin() * 3.0;
         let logo_c = pos2(full.center().x, full.top() + full.height() * 0.2 + bob);
+        // halos que salen del logo cada tanto
+        for k in 0..2 {
+            let ph = ((since / 2.6) + k as f32 * 0.5).fract();
+            p.circle_stroke(logo_c, 50.0 + 70.0 * ph, Stroke::new(1.5, accent.gamma_multiply(0.35 * (1.0 - ph))));
+        }
         if let Some(logo) = &self.logo {
-            let side = 92.0 * (0.92 + 0.08 * appear);
+            let pop = ease_back((since / 0.7).min(1.0));
+            let breathe = 1.0 + 0.025 * (since * 2.2).sin();
+            let side = 92.0 * pop * breathe;
             p.image(logo.id(), Rect::from_center_size(logo_c, Vec2::splat(side)), uv(), Color32::WHITE);
         }
         p.text(logo_c + vec2(0.0, 66.0 - bob), Align2::CENTER_CENTER, "Capyro", bold(26.0), TEXT);
@@ -622,27 +635,49 @@ impl CapyroApp {
         } else {
             revealed(text, (now - t.t0).max(0.0) as f32)
         };
-        let shown: String = text.chars().take(n).collect();
+        let mut shown: String = text.chars().take(n).collect();
+        // cursor de máquina de escribir mientras escribe (y un ratito después)
+        let typing = n < text.chars().count();
+        if typing || ((now * 2.0) as i64 % 2 == 0 && !t.complete(now)) {
+            shown.push('▌');
+        }
         let g = p.layout_job(centered_job(&shown, font, TEXT, width));
         let top = full.top() + full.height() * 0.47;
-        let fade = ease_out(((now - t.t0).max(0.0) / 0.3) as f32);
+        let fade = ease_out(((now - t.t0).max(0.0) / 0.35) as f32);
         let mut pt = p.clone();
         pt.multiply_opacity(fade);
-        pt.galley(pos2(full.center().x, top), g, TEXT);
+        pt.galley(pos2(full.center().x, top + 12.0 * (1.0 - fade)), g, TEXT);
 
         // puntitos de progreso y "Espacio para continuar"
         let below = top + full_g.size().y + 26.0;
         let dots = INTRO.len();
-        for d in 0..dots {
-            let x = full.center().x + (d as f32 - (dots - 1) as f32 / 2.0) * 14.0;
+        let widths: Vec<f32> = (0..dots)
+            .map(|d| ui.ctx().animate_value_with_time(Id::unique(("capyro-tut-dot", d)), if d == para { 22.0 } else { 6.0 }, 0.25))
+            .collect();
+        let total: f32 = widths.iter().sum::<f32>() + 6.0 * (dots as f32 - 1.0);
+        let mut x = full.center().x - total / 2.0;
+        for (d, w) in widths.iter().enumerate() {
             let col = if d <= para { accent } else { Color32::from_white_alpha(40) };
-            p.circle_filled(pos2(x, below), if d == para { 3.5 } else { 2.5 }, col);
+            p.rect_filled(Rect::from_min_size(pos2(x, below - 3.0), vec2(*w, 6.0)), 3.0, col);
+            x += w + 6.0;
         }
         if t.complete(now) && matches!(t.phase, Phase::Intro(_)) {
-            let pulse = 0.55 + 0.45 * ((now * 3.0).sin() as f32).abs();
+            // la tecla "Espacio" dibujada, que se hunde de a ratos
+            let k = ease_out(((now - t.t0) as f32 - total_time(text)).max(0.0) / 0.3);
+            let press = ((now * 1.4).fract() < 0.12) as i32 as f32;
             let mut ph = p.clone();
-            ph.multiply_opacity(pulse);
-            ph.text(pos2(full.center().x, below + 26.0), Align2::CENTER_CENTER, "Espacio para continuar  ▸", regular(12.5), TEXT_DIM);
+            ph.multiply_opacity(k);
+            let cy = below + 30.0;
+            let kg = ph.layout_no_wrap("Espacio".to_owned(), bold(11.5), TEXT);
+            let rg = ph.layout_no_wrap("para continuar".to_owned(), regular(12.5), TEXT_DIM);
+            let kw = kg.size().x + 22.0;
+            let w = kw + 10.0 + rg.size().x;
+            let key = Rect::from_min_size(pos2(full.center().x - w / 2.0, cy - 12.0 + 2.0 * press), vec2(kw, 24.0));
+            ph.rect_filled(key.translate(vec2(0.0, 3.0 - 2.0 * press)), 6.0, Color32::from_black_alpha(90));
+            ph.rect_filled(key, 6.0, Color32::from_white_alpha(22).lerp_to_gamma(accent, 0.25 * press));
+            ph.rect_stroke(key, 6.0, Stroke::new(1.0, Color32::from_white_alpha(50)), StrokeKind::Inside);
+            ph.galley(key.center() - kg.size() / 2.0, kg, TEXT);
+            ph.galley(pos2(key.right() + 10.0, cy - rg.size().y / 2.0), rg, TEXT_DIM);
         }
 
         // abajo: el perfil de GitHub del autor
@@ -754,26 +789,42 @@ impl CapyroApp {
     /// "¿Estás listo?" — devuelve Some(true/false) cuando se elige.
     fn draw_ask(&self, ui: &Ui, p: &egui::Painter, full: Rect, since: f64, accent: Color32) -> Option<bool> {
         let k = ease_out((since / 0.35) as f32);
-        let size = vec2(360.0, 200.0) * (0.92 + 0.08 * k);
+        let pop = ease_back((since / 0.45) as f32);
+        let size = vec2(360.0, 200.0) * (0.85 + 0.15 * pop);
         let card = Rect::from_center_size(full.center(), size);
         let mut p = p.clone();
         p.multiply_opacity(k);
+        // brillo naranja que late detrás de la tarjeta
+        let glow = 0.5 + 0.5 * ((since * 2.0).sin() as f32);
+        p.rect_filled(card.expand(6.0 + 4.0 * glow), 24.0, accent.gamma_multiply(0.06 + 0.05 * glow));
         p.rect_filled(card.translate(vec2(0.0, 6.0)), 18.0, Color32::from_black_alpha(90));
         p.rect_filled(card, 18.0, BG_PANEL);
         p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
         if let Some(logo) = &self.logo {
-            p.image(logo.id(), Rect::from_center_size(pos2(card.center().x, card.top() + 40.0), Vec2::splat(46.0)), uv(), Color32::WHITE);
+            // el capibara mira a los costados, como esperando la respuesta
+            let tilt = ((since * 1.8).sin() as f32) * 4.0;
+            let lc = pos2(card.center().x + tilt, card.top() + 40.0 - ((since * 3.6).sin() as f32).abs() * 3.0);
+            p.image(logo.id(), Rect::from_center_size(lc, Vec2::splat(46.0)), uv(), Color32::WHITE);
         }
-        p.text(pos2(card.center().x, card.top() + 90.0), Align2::CENTER_CENTER, "¿Estás listo?", bold(22.0), TEXT);
+        let tk = ease_out(((since - 0.12) / 0.3) as f32);
+        let mut pt = p.clone();
+        pt.multiply_opacity(tk);
+        pt.text(pos2(card.center().x, card.top() + 90.0 + 8.0 * (1.0 - tk)), Align2::CENTER_CENTER, "¿Estás listo?", bold(22.0), TEXT);
         if k < 0.9 {
-            return None;
+            ui.ctx().request_repaint();
         }
         let by = card.bottom() - 42.0;
         let mut out = None;
-        for (yes, label, x) in [(true, "Sí", card.center().x - 66.0), (false, "No", card.center().x + 66.0)] {
+        for (n, (yes, label, x)) in [(true, "Sí", card.center().x - 66.0), (false, "No", card.center().x + 66.0)].into_iter().enumerate() {
+            // los botones aparecen uno detrás del otro, con saltito
+            let bk = ((since - 0.25 - 0.1 * n as f64) / 0.35) as f32;
+            if bk <= 0.0 {
+                continue;
+            }
+            let bpop = ease_back(bk);
             let r = Rect::from_center_size(pos2(x, by), vec2(116.0, 40.0));
-            let a = animate_button(ui, Id::unique(("capyro-tutorial-ask", yes)), r, true);
-            let rr = Rect::from_center_size(r.center(), r.size() * (1.0 + 0.04 * a.hover - 0.08 * a.press));
+            let a = animate_button(ui, Id::unique(("capyro-tutorial-ask", yes)), r, bk >= 1.0);
+            let rr = Rect::from_center_size(r.center(), r.size() * (bpop + 0.04 * a.hover - 0.08 * a.press));
             if yes {
                 if a.hover > 0.001 {
                     p.rect_filled(rr.expand(4.0 * a.hover), 24.0, accent.gamma_multiply(0.2 * a.hover));
@@ -818,14 +869,62 @@ impl CapyroApp {
                 _ => Color32::from_rgb(0xFF, 0xC2, 0x8A),
             };
             let s = 3.0 + 3.0 * rnd();
-            p.rect_filled(Rect::from_center_size(pos2(x0 + sway, y), vec2(s, s * 1.6)), 1.0, col);
+            // papelito que gira (y se "da vuelta": el ancho cambia)
+            let ang = since * (3.0 + 4.0 * rnd()) + i as f32;
+            let flip = (since * (4.0 + 3.0 * rnd()) + i as f32).cos().abs().max(0.15);
+            let (sa, ca) = ang.sin_cos();
+            let c = pos2(x0 + sway, y);
+            let (hw, hh) = (s * 0.5 * flip, s * 0.8);
+            let pts = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+                .map(|(dx, dy)| pos2(c.x + dx * ca - dy * sa, c.y + dx * sa + dy * ca))
+                .to_vec();
+            p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+        }
+        // rayos de luz que giran detrás del logo
+        {
+            let lc = c - vec2(0.0, 70.0);
+            let k = ease_out(since / 0.6);
+            let n = 12;
+            for i in 0..n {
+                let a0 = since * 0.4 + i as f32 / n as f32 * std::f32::consts::TAU;
+                let a1 = a0 + 0.13;
+                let len = 170.0 * k;
+                let mut mesh = egui::Mesh::default();
+                mesh.colored_vertex(lc, accent.gamma_multiply(0.22 * k));
+                mesh.colored_vertex(lc + vec2(a0.cos(), a0.sin()) * len, Color32::TRANSPARENT);
+                mesh.colored_vertex(lc + vec2(a1.cos(), a1.sin()) * len, Color32::TRANSPARENT);
+                mesh.add_triangle(0, 1, 2);
+                p.add(egui::Shape::mesh(mesh));
+            }
+            // onda que sale al aparecer
+            let ring = (since / 0.9).clamp(0.0, 1.0);
+            if ring < 1.0 {
+                p.circle_stroke(lc, 40.0 + 120.0 * ring, Stroke::new(3.0, accent.gamma_multiply(1.0 - ring)));
+            }
         }
         // logo que salta y el título
-        let pop = ease_out(since / 0.45);
+        let pop = ease_back(since / 0.5);
         let bounce = (-since * 3.0).exp() * (since * 10.0).sin().abs() * 26.0;
         if let Some(logo) = &self.logo {
             let side = 110.0 * pop;
             p.image(logo.id(), Rect::from_center_size(c - vec2(0.0, 70.0 + bounce), Vec2::splat(side)), uv(), Color32::WHITE);
+        }
+        // franja oscura difuminada para que el texto se lea sobre lo que haya atrás
+        {
+            let k = ease_out((since - 0.1) / 0.4);
+            let band = Rect::from_center_size(c + vec2(0.0, 44.0), vec2(full.width(), 130.0));
+            let mut mesh = egui::Mesh::default();
+            let dark = Color32::from_black_alpha((225.0 * k) as u8);
+            let (t, m, b) = (band.top(), band.center().y, band.bottom());
+            for (y, col) in [(t, Color32::TRANSPARENT), (m, dark), (b, Color32::TRANSPARENT)] {
+                mesh.colored_vertex(pos2(band.left(), y), col);
+                mesh.colored_vertex(pos2(band.right(), y), col);
+            }
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(1, 3, 2);
+            mesh.add_triangle(2, 3, 4);
+            mesh.add_triangle(3, 5, 4);
+            p.add(egui::Shape::mesh(mesh));
         }
         let mut pt = p.clone();
         pt.multiply_opacity(ease_out((since - 0.2) / 0.4));
@@ -927,6 +1026,58 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     p.rect_filled(bar, 1.0, accent.gamma_multiply(0.6));
 }
 
+/// Sale un poco de más y vuelve (para las cosas que "saltan" al aparecer).
+fn ease_back(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    let c = 1.70158;
+    1.0 + (c + 1.0) * (t - 1.0).powi(3) + c * (t - 1.0).powi(2)
+}
+
+/// Generador chiquito y determinista (las partículas no cambian de un frame a otro).
+fn hash01(i: u32, salt: u32) -> f32 {
+    let mut x = i.wrapping_mul(0x9E37_79B9) ^ salt.wrapping_mul(0x85EB_CA6B);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x % 10_000) as f32 / 10_000.0
+}
+
+/// Chispitas que suben despacio por el fondo.
+fn draw_embers(p: &egui::Painter, full: Rect, accent: Color32, t: f32, n: u32) {
+    for i in 0..n {
+        let speed = 14.0 + 26.0 * hash01(i, 1);
+        let x0 = full.left() + hash01(i, 2) * full.width();
+        let phase = hash01(i, 3) * full.height();
+        let travel = (phase + t * speed) % (full.height() + 40.0);
+        let y = full.bottom() + 20.0 - travel;
+        let x = x0 + (t * (0.6 + hash01(i, 4)) + i as f32).sin() * 10.0;
+        // aparecen abajo y se apagan arriba
+        let life = travel / (full.height() + 40.0);
+        let alpha = (life * 4.0).min(1.0) * (1.0 - life).powf(1.5);
+        let r = 1.0 + 1.8 * hash01(i, 5);
+        let col = if i % 3 == 0 { Color32::WHITE } else { accent };
+        p.circle_filled(pos2(x, y), r, col.gamma_multiply(0.55 * alpha));
+    }
+}
+
+/// Esquinas tipo visor alrededor de lo iluminado, que respiran.
+fn draw_corners(p: &egui::Painter, r: Rect, accent: Color32, now: f64, k: f32) {
+    let pulse = 0.5 + 0.5 * ((now * 2.6).sin() as f32);
+    let out = 4.0 + 3.0 * pulse;
+    let r = r.expand(out);
+    let len = (r.width().min(r.height()) * 0.25).clamp(8.0, 18.0) * k;
+    let st = Stroke::new(2.5, accent);
+    for (c, dx, dy) in [
+        (r.left_top(), 1.0, 1.0),
+        (r.right_top(), -1.0, 1.0),
+        (r.left_bottom(), 1.0, -1.0),
+        (r.right_bottom(), -1.0, -1.0),
+    ] {
+        p.line_segment([c, c + vec2(len * dx, 0.0)], st);
+        p.line_segment([c, c + vec2(0.0, len * dy)], st);
+    }
+}
+
 fn uv() -> Rect {
     Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
 }
@@ -1003,10 +1154,14 @@ fn draw_bubble(
     y = y.clamp(full.top() + 8.0, full.bottom() - 8.0 - h);
     let x = if focused { spot.center().x - w / 2.0 } else { full.center().x - w / 2.0 };
     let x = x.clamp(full.left() + 12.0, full.right() - 12.0 - w);
-    let r = Rect::from_min_size(pos2(x, y + 8.0 * (1.0 - enter)), vec2(w, h));
+    // entra con un saltito (un poco más grande y vuelve)
+    let pop = ease_back(enter);
+    let fade = ease_out(enter);
+    let base = Rect::from_min_size(pos2(x, y + 10.0 * (1.0 - fade)), vec2(w, h));
+    let r = Rect::from_center_size(base.center(), base.size() * (0.9 + 0.1 * pop));
 
     let mut p = p.clone();
-    p.multiply_opacity(enter);
+    p.multiply_opacity(fade);
     p.rect_filled(r.translate(vec2(0.0, 5.0)), 14.0, Color32::from_black_alpha(90));
     p.rect_filled(r, 14.0, BG_PANEL);
     p.rect_stroke(r, 14.0, Stroke::new(1.0, accent.gamma_multiply(0.45)), StrokeKind::Inside);
@@ -1022,10 +1177,19 @@ fn draw_bubble(
     p.text(pos2(chip.right() + 8.0, ty), Align2::LEFT_CENTER, title, bold(14.0), TEXT);
 
     // el texto, escribiéndose
-    let text: String = step.text.chars().take(shown).collect();
+    let mut text: String = step.text.chars().take(shown).collect();
+    if shown < step.text.chars().count() {
+        text.push('▌');
+    }
     let g = p.layout(text, regular(13.0), TEXT, inner);
     let text_top = ty + 9.0 + 10.0;
     p.galley(pos2(x0, text_top), g, TEXT);
+
+    // progreso del recorrido: una barrita fina abajo del cartel
+    let prog = (index as f32 + if complete { 1.0 } else { 0.5 }) / STEPS.len() as f32;
+    let track = Rect::from_min_max(pos2(r.left() + 14.0, r.bottom() - 4.0), pos2(r.right() - 14.0, r.bottom() - 2.0));
+    p.rect_filled(track, 1.0, Color32::from_white_alpha(16));
+    p.rect_filled(Rect::from_min_size(track.min, vec2(track.width() * prog, track.height())), 1.0, accent);
 
     // pie
     let fy = r.bottom() - 16.0;
