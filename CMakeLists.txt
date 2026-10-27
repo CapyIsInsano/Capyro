@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.3.0
+    VERSION 0.3.1
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -252,7 +252,11 @@ else()
     # Linux: binario, config de ejemplo, .desktop e íconos. Nada de Windows.
     install(TARGETS capyro RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(FILES ${CAPYRO_INSTALLED_CONFIG} DESTINATION ${CMAKE_INSTALL_DATADIR}/capyro)
-    install(FILES packaging/capyro.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    # El lanzador con la ruta completa del ejecutable: así "Abrir con…" anda
+    # aunque la carpeta no esté en el PATH de la sesión gráfica.
+    set(CAPYRO_EXEC "${CMAKE_INSTALL_FULL_BINDIR}/capyro")
+    configure_file(packaging/capyro.desktop.in ${CMAKE_CURRENT_BINARY_DIR}/generated/capyro.desktop @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/capyro.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     # Ícono en todos los tamaños: la barra de tareas (Waybar, Niri, KDE...) busca
     # "capyro" en el tema hicolor según el app_id de la ventana y el .desktop.
     # Si falta el tamaño que pide o el caché de íconos está viejo, muestra el
@@ -272,9 +276,19 @@ else()
                             RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_QUIET)
             message(STATUS "Capyro: caché de íconos actualizado")
         endif()
+        # "Abrir con…": el caché de tipos de archivo → aplicaciones
         find_program(_desktop_db update-desktop-database)
         if(_desktop_db)
             execute_process(COMMAND "${_desktop_db}" -q "${_share}/applications" OUTPUT_QUIET ERROR_QUIET)
+            message(STATUS "Capyro: registrado para abrir mp4, mov, avi, mp3, wav, ogg y aac")
+        else()
+            message(STATUS "Capyro: falta update-desktop-database (desktop-file-utils): "
+                "puede que Capyro no aparezca en \"Abrir con…\" hasta reiniciar la sesión")
+        endif()
+        # KDE (Dolphin) usa su propio caché
+        find_program(_kbuildsycoca NAMES kbuildsycoca6 kbuildsycoca5)
+        if(_kbuildsycoca AND NOT "$ENV{USER}" STREQUAL "root")
+            execute_process(COMMAND "${_kbuildsycoca}" --noincremental OUTPUT_QUIET ERROR_QUIET)
         endif()
     ]])
 endif()

@@ -8,13 +8,33 @@
 
 ---
 
+## v0.3.1-alpha · Más liviano
+
+- **Capyro usa mucho menos procesador**, sin perder animaciones (medido en una PC que dibuja por software, como pasa con placas de video viejas):
+  - con música: de 156 % a 38 % de CPU;
+  - con un video 1080p: de 159 % a 78 %;
+  - en el tutorial: de 165 % a 65 %.
+- Dibuja solo lo necesario:
+  - antes se redibujaba sin parar mientras sonaba algo (60 veces por segundo, o más si la pantalla no tiene vsync);
+  - ahora el video se dibuja al ritmo del video (24 o 30 cuadros);
+  - lo que se mueve todo el tiempo (visualizador, milisegundos, chispitas del tutorial) va a 30 cuadros;
+  - las animaciones (menús, botones, transiciones, el texto que se escribe) siguen a 60.
+- Video más liviano:
+  - cada cuadro se convierte al tamaño en que se ve en la ventana, no a 1080p: mucho menos para convertir y para subir a la placa de video;
+  - con el núcleo bloqueado solo se copian los bytes (el audio no espera mientras se arma la imagen);
+  - las capturas (<kbd>Shift</kbd>+<kbd>S</kbd>) siguen saliendo en el tamaño original del video.
+- **"Abrir con…"**: Capyro aparece (y como recomendada) para mp4, mov, avi, mp3, wav, ogg y aac.
+  - Linux: el lanzador ahora lista todos los nombres de esos formatos y tiene la ruta completa del programa; al instalar se actualizan los cachés (también el de KDE).
+  - Windows: CapyroInstaller los registra (sin adueñarse de ninguno) y Capyro aparece en Aplicaciones predeterminadas. Al desinstalar se saca todo.
+- `CAPYRO_DEBUG_FPS=1 capyro` muestra cuántos cuadros por segundo dibuja y cuánto cuesta cada uno.
+
 ## v0.3.0-alpha · El salto a Windows
 
 - **Capyro corre en Windows 10 y 11**, además de Linux.
   - El núcleo en C usa hilos, reloj y archivos de Win32 (nombres con tildes y ñ incluidos), y el audio sale por WASAPI.
   - La GPU en Windows: D3D11VA, NVDEC o DXVA2, con la misma vuelta a la CPU si no se puede.
   - Fuente Segoe UI, ícono y versión adentro del `.exe`, y sin ventana de consola (salvo que le pases opciones).
-  - Dibuja con OpenGL y, si la placa de video no lo soporta, con Direct3D 12 (wgpu). Si no puede abrir la ventana, lo dice en un cartel y lo anota en `%LOCALAPPDATA%\Capyro\capyro.log` (antes se quedaba sin abrir y sin avisar). `CAPYRO_RENDERER=wgpu` u `opengl` fuerza uno.
+  - Un solo Capyro para cualquier PC: dibuja con **Direct3D 12** u **OpenGL**, el que ande. Prueba primero el que funcionó la vez anterior; si uno da error se pasa al otro, y si la ventana no llega a dibujarse en 10 s, se vuelve a abrir solo con el otro. Se fuerza con `renderer = "direct3d"` u `"opengl"` en capyro.lua (o `CAPYRO_RENDERER`). Si no puede abrir la ventana lo dice en un cartel y lo anota en `%LOCALAPPDATA%\Capyro\capyro.log`.
 - **Cada sistema compila e instala solo lo suyo:**
   - CMake detecta el sistema (`CAPYRO_SYSTEM` = `Lin` o `Win`); en Linux no entra nada de Windows y al revés (dependencias de Rust, `.desktop` e íconos, DLL, recursos `.rc`...);
   - la config instalada lleva el sistema: `system = "Lin"` o `"Win"` (opción nueva en `capyro.lua`; `"auto"` lo detecta solo);

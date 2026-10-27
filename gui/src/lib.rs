@@ -11,6 +11,7 @@ mod errlog;
 mod ffi;
 mod paths;
 mod playlists;
+mod render;
 mod formats;
 mod session;
 mod updater;
@@ -48,21 +49,14 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
     let cfg = config::Config::load();
     eprintln!("capyro {} · config: {} · backend: {:?}", ffi::version(), cfg.source, cfg.backend);
 
-    // Windows: primero OpenGL y, si la placa/driver no lo soporta, wgpu
-    // (Direct3D 12). CAPYRO_RENDERER=wgpu u opengl fuerza uno. Linux: OpenGL.
-    #[cfg(windows)]
-    let renderers: Vec<eframe::Renderer> = match std::env::var("CAPYRO_RENDERER").ok().as_deref() {
-        Some("wgpu") => vec![eframe::Renderer::Wgpu],
-        Some("opengl") | Some("glow") => vec![eframe::Renderer::Glow],
-        _ => vec![eframe::Renderer::Glow, eframe::Renderer::Wgpu],
-    };
-    #[cfg(not(windows))]
-    let renderers = vec![eframe::Renderer::Glow];
+    // OpenGL o Direct3D (ver render.rs): el que ande
+    let renderers = render::order(cfg.renderer);
 
     // el núcleo y la config pasan a la app del intento que funcione
     let parts = std::rc::Rc::new(std::cell::RefCell::new(Some((core, cfg.clone()))));
     let mut errors = Vec::new();
-    for renderer in renderers {
+    for (i, &renderer) in renderers.iter().enumerate() {
+        render::watch(renderer, renderers.get(i + 1).copied());
         let slot = parts.clone();
         let result = eframe::run_native(
             "Capyro",

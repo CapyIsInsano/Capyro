@@ -238,6 +238,8 @@ pub struct Config {
     pub show_millis: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
+    /// Con qué se dibuja la ventana en Windows (OpenGL / Direct3D / auto).
+    pub renderer: crate::render::Pref,
     /// `options.system` tal cual (None = "auto"). Usar [`Config::system`].
     pub system_setting: Option<System>,
     /// De dónde salió (para el log): ruta o "embebida".
@@ -418,6 +420,7 @@ impl Config {
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
+                "renderer" => lua_quote(self.renderer.name()),
                 "system" => lua_quote(self.system().code()),
                 "backend" => lua_quote(match self.backend {
                     Backend::Auto => "auto",
@@ -583,6 +586,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         update_repo: None,
         update_branch: None,
         decoding: crate::ffi::Hwdec::Auto,
+        renderer: crate::render::Pref::Auto,
         click_sound: true,
         show_format: true,
         show_millis: true,
@@ -706,6 +710,12 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                     cfg.system_setting = sys;
                 }
                 None => eprintln!("capyro: {name}: system desconocido '{v}' (Lin, Win o auto)"),
+            }
+        }
+        if let Some(v) = opts.get::<Option<String>>("renderer")? {
+            match crate::render::Pref::parse(&v) {
+                Some(r) => cfg.renderer = r,
+                None => eprintln!("capyro: {name}: renderer desconocido '{v}' (auto, opengl o direct3d)"),
             }
         }
         if let Some(v) = opts.get::<Option<bool>>("auto_next")? {

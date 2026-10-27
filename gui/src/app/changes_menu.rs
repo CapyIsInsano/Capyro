@@ -66,7 +66,7 @@ impl CapyroApp {
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
-            ctx.request_repaint();
+            ctx.request_repaint_after(super::FRAME_SMOOTH);
             return;
         }
         let x0 = panel.left() + 16.0;

@@ -94,7 +94,7 @@ impl CapyroApp {
         painter.rect_filled(panel, 14.0, BG_PANEL);
         painter.rect_stroke(panel, 14.0, Stroke::new(1.0, Color32::from_white_alpha(16)), StrokeKind::Inside);
         if ease < 0.98 {
-            ctx.request_repaint();
+            ctx.request_repaint_after(super::FRAME_SMOOTH);
             return;
         }
 
@@ -195,7 +195,7 @@ impl CapyroApp {
                     let r = Rect::from_min_size(pos2(x, cy - 12.0), vec2(g.size().x + 20.0, 24.0));
                     p.rect_filled(r, 12.0, accent.gamma_multiply(pulse));
                     p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
-                    ui.ctx().request_repaint();
+                    ui.ctx().request_repaint_after(super::FRAME_SMOOTH);
                 } else {
                     let r = Rect::from_min_size(pos2(x, cy - 12.0), vec2(26.0, 24.0));
                     let a = animate_button(ui, Id::unique(("capyro-key-add", action.name())), r, true);

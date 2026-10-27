@@ -69,6 +69,42 @@ fn debug_sfx(slot: usize) {
     }
 }
 
+/// Con `CAPYRO_DEBUG_FPS=1`, una vez por segundo: cuántos frames se
+/// dibujaron y cuánto CPU costó cada uno (para medir en PCs lentas).
+fn debug_fps(ctx: &egui::Context, cpu: Option<f32>) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("CAPYRO_DEBUG_FPS").is_some()) {
+        return;
+    }
+    let now = ctx.input(|i| i.time);
+    let id = Id::unique("capyro-debug-fps");
+    let (mut t0, mut n, mut sum, mut max) = ctx.data(|d| d.get_temp::<(f64, u32, f32, f32)>(id)).unwrap_or((now, 0, 0.0, 0.0));
+    n += 1;
+    let c = cpu.unwrap_or(0.0) * 1000.0;
+    sum += c;
+    max = max.max(c);
+    if now - t0 >= 1.0 {
+        eprintln!("capyro: {:.0} fps · CPU por frame {:.1} ms (máx {:.1})", n as f64 / (now - t0), sum / n as f32, max);
+        if std::env::var_os("CAPYRO_DEBUG_FPS").is_some_and(|v| v == "2") {
+            for cause in ctx.repaint_causes() {
+                eprintln!("capyro:   repintado por {cause}");
+            }
+        }
+        t0 = now;
+        n = 0;
+        sum = 0.0;
+        max = 0.0;
+    }
+    ctx.data_mut(|d| d.insert_temp(id, (t0, n, sum, max)));
+}
+
+/// Animaciones (menús, transiciones, botones): hasta 60 cuadros por segundo,
+/// aunque la pantalla no tenga vsync.
+pub(crate) const FRAME_SMOOTH: Duration = Duration::from_millis(16);
+/// Lo que se mueve todo el tiempo (milisegundos, visualizador, chispitas del
+/// tutorial): 30 por segundo se ven igual y cuestan la mitad.
+pub(crate) const FRAME_AMBIENT: Duration = Duration::from_millis(33);
+
 /// Marca en la memoria de egui: "se tocó un botón en este frame".
 const CLICK_FLAG: &str = "capyro-button-clicked";
 
@@ -183,6 +219,10 @@ pub struct CapyroApp {
     /// Textura del frame actual (video o carátula) y su número de serie.
     video_tex: Option<TextureHandle>,
     video_serial: u64,
+    /// Copia del último cuadro (se reutiliza: sin reservar memoria por cuadro).
+    frame_buf: Vec<u8>,
+    /// Tamaño del área de video que se le pasó al núcleo la última vez.
+    video_target: (u32, u32),
     video_aspect: f32,
     /// Toast que hay que mostrar en el primer frame (todavía no hay `ctx.time`).
     startup_notice: Option<String>,
@@ -354,6 +394,8 @@ impl CapyroApp {
             last_title: String::new(),
             video_tex: None,
             video_serial: 0,
+            frame_buf: Vec::new(),
+            video_target: (0, 0),
             video_aspect: 16.0 / 9.0,
             startup_notice,
             dialog: None,
@@ -749,7 +791,8 @@ impl CapyroApp {
         if self.shot.is_some() {
             return;
         }
-        let Some((rgba, w, h)) = self.core.with_video_frame(|vf| (vf.rgba.to_vec(), vf.width as u32, vf.height as u32)) else {
+        // en tamaño original (lo que se ve en pantalla puede estar achicado)
+        let Some((rgba, w, h)) = self.core.capture_frame() else {
             self.toast(ctx, "Todavía no hay imagen para capturar", true);
             return;
         };
@@ -961,7 +1004,7 @@ impl CapyroApp {
                 .map(|f| f.path().to_path_buf())
                 .collect::<Vec<_>>();
             let _ = tx.send(files);
-            ctx.request_repaint();
+            ctx.request_repaint_after(FRAME_SMOOTH);
         });
         self.dialog = Some(rx);
     }
@@ -1047,15 +1090,32 @@ impl CapyroApp {
     /* ---------------------------------------------------------------- */
 
     /// Sube a la GPU el frame nuevo del núcleo (si cambió desde el último).
+    ///
+    /// Con el núcleo bloqueado solo se copian los bytes (un memcpy: el audio
+    /// y el decodificador esperan lo menos posible); el armado de la imagen
+    /// va después. Los cuadros son opacos, así que RGBA "sin premultiplicar"
+    /// y premultiplicado son lo mismo y no hay que tocar cada píxel.
     fn sync_video_texture(&mut self, ctx: &egui::Context) {
         let last = self.video_serial;
+        let mut buf = std::mem::take(&mut self.frame_buf);
         let fresh = self.core.with_video_frame(|vf| {
             if vf.serial == last {
                 return None;
             }
-            let img = egui::ColorImage::from_rgba_unmultiplied([vf.width, vf.height], vf.rgba);
-            Some((img, vf.serial, vf.aspect))
+            buf.clear();
+            buf.extend_from_slice(vf.rgba);
+            Some(([vf.width, vf.height], vf.serial, vf.aspect))
         });
+        let fresh = fresh.map(|f| {
+            f.map(|(size, serial, aspect)| {
+                let pixels: Vec<Color32> = buf
+                    .chunks_exact(4)
+                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
+                    .collect();
+                (egui::ColorImage::new(size, pixels), serial, aspect)
+            })
+        });
+        self.frame_buf = buf;
         match fresh {
             None => self.video_tex = None, // no hay frame (nada cargado o mp3 sin carátula)
             Some(None) => {}               // mismo frame que ya tenemos
@@ -1113,7 +1173,7 @@ impl CapyroApp {
             let dt = (now - t0) as f32;
             if dt < 0.7 {
                 bounce = (-dt * 7.0).exp() * (dt * 22.0).sin();
-                ctx.request_repaint();
+                ctx.request_repaint_after(FRAME_SMOOTH);
             } else {
                 self.logo_click = None;
             }
@@ -1174,6 +1234,14 @@ impl CapyroApp {
         let ctx = ui.ctx().clone();
         let painter = ui.painter().clone();
         painter.rect_filled(rect, 10.0, BG_VIDEO);
+
+        // el núcleo convierte los cuadros al tamaño en que se ven, no más
+        let ppp = ctx.pixels_per_point();
+        let target = ((rect.width() * ppp).round().max(1.0) as u32, (rect.height() * ppp).round().max(1.0) as u32);
+        if target != self.video_target {
+            self.video_target = target;
+            self.core.set_video_target(target.0, target.1);
+        }
 
         let resp = ui.interact(rect, Id::unique("capyro-video"), Sense::click());
         if resp.double_clicked() {
@@ -1351,11 +1419,12 @@ impl CapyroApp {
             p.galley(pos2(x, r.center().y - ng.size().y / 2.0), ng, Color32::WHITE);
             p.galley(pos2(x + nw + 5.0, r.center().y - ug.size().y / 2.0), ug, TEXT_DIM);
             if self.core.state() == State::Playing {
-                ui.ctx().request_repaint(); // que corran los números
+                // que corran los números: 30 por segundo alcanzan para verlos correr
+                ui.ctx().request_repaint_after(FRAME_AMBIENT);
             }
         }
         if (0.001..0.999).contains(&tf) || (0.001..0.999).contains(&tm) {
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(FRAME_SMOOTH);
         }
     }
 
@@ -1391,7 +1460,12 @@ impl CapyroApp {
         painter.rect_filled(rect, size.y / 2.0, BG_PANEL);
         painter.rect_stroke(rect, size.y / 2.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() / 2.0, galley, TEXT);
-        ui.ctx().request_repaint(); // la animación necesita frames
+        // frames solo mientras entra o se va; quieto, hasta que empiece a irse
+        if fade_in < 1.0 || fade_out < 1.0 {
+            ui.ctx().request_repaint_after(FRAME_SMOOTH);
+        } else {
+            ui.ctx().request_repaint_after(Duration::from_secs_f64((t.until - 0.35 - now).max(0.0)));
+        }
     }
 
     fn transport(&mut self, ui: &mut Ui, video_bottom: f32, inner: Rect) {
@@ -1859,7 +1933,7 @@ impl CapyroApp {
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
-            ctx.request_repaint();
+            ctx.request_repaint_after(FRAME_SMOOTH);
             return;
         }
 
@@ -1989,7 +2063,7 @@ impl CapyroApp {
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
-            ctx.request_repaint();
+            ctx.request_repaint_after(FRAME_SMOOTH);
             return; // el contenido aparece cuando termina de abrirse
         }
 
@@ -2574,7 +2648,7 @@ impl CapyroApp {
         if rb.resp.clicked() {
             self.restart(&ctx);
         }
-        ctx.request_repaint();
+        ctx.request_repaint_after(FRAME_SMOOTH);
     }
 
     /// Pantalla de carga: logo, "Cargando…" y un ecualizador. Con `intro`
@@ -2697,8 +2771,10 @@ impl eframe::App for CapyroApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame_info: &mut eframe::Frame) {
+        crate::render::FIRST_FRAME.store(true, std::sync::atomic::Ordering::Relaxed);
         let ctx = ui.ctx().clone();
+        debug_fps(&ctx, frame_info.info().cpu_usage);
         let frame = ctx.cumulative_frame_nr();
         self.first_pass = frame != self.last_frame;
         self.last_frame = frame;
@@ -2755,7 +2831,8 @@ impl eframe::App for CapyroApp {
             let got = if playing { self.core.scope(&mut self.viz.samples[..n]) } else { 0 };
             self.viz.update(self.core.audio_rate() as f32, dt, playing && got == n);
             if !self.viz.is_silent() {
-                ctx.request_repaint_after(Duration::from_millis(16));
+                // las barras se suavizan solas (viz.rs): a 30 cuadros se ven igual de fluidas
+                ctx.request_repaint_after(FRAME_AMBIENT);
             }
         }
 
@@ -2798,7 +2875,7 @@ impl eframe::App for CapyroApp {
                 ctx.send_viewport_cmd(ViewportCommand::StartDrag);
             }
             self.splash(ui, full, now, None, logo_dest);
-            ctx.request_repaint();
+            ctx.request_repaint_after(FRAME_SMOOTH);
             return;
         }
 
@@ -2820,7 +2897,7 @@ impl eframe::App for CapyroApp {
             self.draw_toast(&mut child, video);
             self.splash(ui, full, now, Some(intro), logo_dest);
             self.play_click_if_needed(&ctx);
-            ctx.request_repaint();
+            ctx.request_repaint_after(FRAME_SMOOTH);
             return;
         }
         self.hide_header_logo = false;
@@ -2852,9 +2929,13 @@ impl eframe::App for CapyroApp {
 
         if self.core.state() == State::Playing {
             if self.core.media_kind() == MediaKind::Video {
-                ctx.request_repaint(); // al ritmo de la pantalla (vsync)
+                // al ritmo del video (24/30 cuadros), no al de la pantalla
+                match self.core.video_next_due() {
+                    Some(due) => ctx.request_repaint_after(Duration::from_secs_f64(due.clamp(0.002, 0.1))),
+                    None => ctx.request_repaint_after(Duration::from_millis(8)), // el decodificador viene atrás
+                }
             } else {
-                ctx.request_repaint_after(Duration::from_millis(33));
+                ctx.request_repaint_after(FRAME_AMBIENT);
             }
         }
     }

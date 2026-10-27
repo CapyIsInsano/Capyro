@@ -345,12 +345,27 @@ static void test_media(const char *dir) {
     } else {
         CHECK(!"el primer frame debería estar listo sin dar play");
     }
+    /* la captura sale en tamaño original aunque se muestre más chico */
+    CapyroImage shot;
+    CHECK(capyro_core_capture_frame(core, &shot));
+    CHECK(shot.width == 320 && shot.height == 240 && shot.rgba != NULL);
+    capyro_core_free_image(&shot);
+    CHECK(shot.rgba == NULL);
+
+    /* en una ventana chica los cuadros se convierten al tamaño de pantalla */
+    capyro_core_set_video_target(core, 160, 120);
     capyro_core_play(core);
     pump(core, 400);
+    double due = capyro_core_video_next_due(core);
+    printf("video: próximo cuadro en %.3f s\n", due);
+    CHECK(due >= -1.0 && due < 0.5);
     if (capyro_core_lock_video_frame(core, &vf)) {
         CHECK(vf.serial > first_serial);
+        printf("video: cuadro de %dx%d con objetivo 160x120\n", vf.width, vf.height);
+        CHECK(vf.width == 160 && vf.height == 120);
         capyro_core_unlock_video_frame(core);
     }
+    capyro_core_set_video_target(core, 0, 0);
 
     /* --- seek en pausa muestra el frame nuevo --- */
     capyro_core_pause(core);

@@ -4,7 +4,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.0--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.0-alpha">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.1--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.1-alpha">
 <img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Windows-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux y Windows">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
@@ -28,10 +28,10 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.3.0:** **el salto a Windows**. Capyro corre en **Windows 10 y 11**, con
-> su propio instalador ([CapyroInstaller](#windows)). Cada sistema compila e instala **solo lo
-> suyo**: la config guarda `system = "Lin"` o `"Win"` y el actualizador baja únicamente lo de
-> tu sistema. El tutorial ahora te muestra qué sistema detectó.
+> **Novedades de la v0.3.1:** **más liviano**. Capyro usa menos de la mitad de procesador
+> (con música, un cuarto): dibuja solo lo que hace falta, los videos se convierten al tamaño
+> en que se ven y las animaciones siguen igual de suaves. Además aparece en **"Abrir con…"**
+> en Linux y en Windows para todos sus formatos.
 > [Ver el historial completo →](CHANGELOG.md)
 
 <br>
@@ -536,6 +536,30 @@ corriendo y que Capyro no esté silenciado (<kbd>M</kbd>).
 
 Para ver si los sonidos de la app se disparan, abrilo con `CAPYRO_DEBUG_SFX=1 capyro`: cada
 sonido (clic, foto, ready, error...) se anota en la terminal.
+</details>
+
+<details>
+<summary><b>Capyro no aparece en "Abrir con…"</b></summary>
+
+- **Linux:** se registra al instalar (`cmake --install`) con `update-desktop-database`.
+  Si no lo tenés, instalá `desktop-file-utils` (Gentoo: `dev-util/desktop-file-utils`) y
+  reinstalá. Si lo instalaste en `/usr/local`, fijate que `/usr/local/share` esté en
+  `XDG_DATA_DIRS`. Para comprobarlo: `gio mime audio/mpeg` tiene que listar `capyro.desktop`.
+- **Windows:** lo registra CapyroInstaller (mp4, mov, avi, mp3, wav, ogg y aac). No se
+  adueña de ningún formato: si querés que lo abra con doble clic, elegilo en
+  **Configuración → Aplicaciones predeterminadas → Capyro**.
+</details>
+
+<details>
+<summary><b>Va lento o se traba (PCs con pocos recursos)</b></summary>
+
+Desde la v0.3.1 Capyro dibuja solo lo necesario: al ritmo del video, 30 cuadros por segundo
+para lo que se mueve siempre (visualizador, milisegundos) y 60 para las animaciones. Para
+medir en tu PC: `CAPYRO_DEBUG_FPS=1 capyro` anota cada segundo cuántos cuadros dibuja y
+cuánto le cuesta cada uno (con `=2`, además, qué pidió cada redibujado).
+
+Si el video va trabado, fijate en **⚙ → Decodificación** que diga GPU: en placas viejas
+(Intel HD 3000, por ejemplo) la GPU decodifica H.264 y el procesador queda libre.
 </details>
 
 <details>

@@ -26,12 +26,16 @@ struct ma_device;
 struct AVBufferRef;
 struct AVStream;
 
+struct AVFrame;
+
 typedef struct {
     uint8_t *data;
     size_t   cap;
     int      w, h;
     double   pts;
     float    aspect;
+    /* el cuadro decodificado original (para capturas en tamaño completo) */
+    struct AVFrame *src;
 } VideoSlot;
 
 /* Archivo en memoria leído por FFmpeg (sfx.c). */
@@ -134,6 +138,9 @@ struct CapyroCore {
     int       shown;        /* slot visible, -1 = ninguno */
     uint64_t  serial;
     bool      force_frame;  /* mostrar el próximo frame aunque esté en pausa */
+    /* tamaño en pantalla del área de video (píxeles reales): los cuadros se
+     * convierten a ese tamaño y no más (0 = sin dato, hasta 1920×1080) */
+    int       video_target_w, video_target_h;
 
     /* control del hilo */
     bool     quit;

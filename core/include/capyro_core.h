@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.3.0-alpha"
+#define CAPYRO_VERSION "0.3.1-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -232,6 +232,28 @@ const char *capyro_core_get_artist(CapyroCore *core); /* metadato o "" */
  * En un audio con carátula (mp3, ogg...), el frame es la carátula. */
 bool capyro_core_lock_video_frame(CapyroCore *core, CapyroVideoFrame *out);
 void capyro_core_unlock_video_frame(CapyroCore *core);
+
+/* Tamaño en pantalla del área de video, en píxeles reales. Los cuadros se
+ * convierten a ese tamaño (nunca más grandes que el original ni que
+ * 1920×1080): en una ventana chica se ahorra casi todo el trabajo de
+ * convertir y subir cada cuadro. 0×0 = sin dato. */
+void capyro_core_set_video_target(CapyroCore *core, int width, int height);
+
+/* Segundos hasta que toque mostrar el próximo cuadro de video (para no
+ * redibujar más seguido que el video), o -1 si no hay ninguno en cola. */
+double capyro_core_video_next_due(CapyroCore *core);
+
+/* Imagen suelta en RGBA8 (la libera capyro_core_free_image). */
+typedef struct {
+    uint8_t *rgba;
+    int32_t  width;
+    int32_t  height;
+} CapyroImage;
+
+/* El cuadro visible en su tamaño original (hasta 3840 de lado), para las
+ * capturas: no depende del tamaño de la ventana. false = no hay cuadro. */
+bool capyro_core_capture_frame(CapyroCore *core, CapyroImage *out);
+void capyro_core_free_image(CapyroImage *img);
 
 /* ---------- lista de reproducción ---------- */
 int         capyro_core_playlist_add(CapyroCore *core, const char *path);

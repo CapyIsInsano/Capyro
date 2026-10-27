@@ -224,6 +224,7 @@ void player_global_shutdown(CapyroCore *core) {
         free(core->slots[i].data);
         core->slots[i].data = NULL;
         core->slots[i].cap  = 0;
+        av_frame_free(&core->slots[i].src);
     }
 }
 
@@ -359,6 +360,39 @@ static float display_aspect(AVFormatContext *fmt, AVStream *st, AVFrame *frame) 
     return (float)a;
 }
 
+/* Guarda una referencia al cuadro original (no copia: FFmpeg cuenta las
+ * referencias), para poder capturarlo después en tamaño completo. */
+static void keep_source(VideoSlot *slot, const AVFrame *frame) {
+    if (!slot->src) {
+        slot->src = av_frame_alloc();
+    }
+    if (slot->src) {
+        av_frame_unref(slot->src);
+        if (av_frame_ref(slot->src, frame) < 0) {
+            av_frame_unref(slot->src);
+        }
+    }
+}
+
+/* Hasta qué tamaño convertir los cuadros: el del área de video en pantalla
+ * (redondeado a 16 para no rearmar el conversor por cada píxel), sin pasar
+ * de MAX_VIDEO_W×MAX_VIDEO_H. */
+static void video_limits(CapyroCore *core, int *max_w, int *max_h) {
+    cp_mutex_lock(&core->lock);
+    int tw = core->video_target_w, th = core->video_target_h;
+    cp_mutex_unlock(&core->lock);
+    *max_w = MAX_VIDEO_W;
+    *max_h = MAX_VIDEO_H;
+    if (tw > 0 && th > 0) {
+        tw = ((tw + 15) / 16) * 16;
+        th = ((th + 15) / 16) * 16;
+        if (tw < 160) tw = 160;
+        if (th < 90) th = 90;
+        if (tw < *max_w) *max_w = tw;
+        if (th < *max_h) *max_h = th;
+    }
+}
+
 /* Carátula de un mp3 (stream "attached_pic"): se decodifica una sola vez. */
 static void decode_cover(CapyroCore *core, AVStream *st) {
     Player *p = &core->player;
@@ -378,6 +412,7 @@ static void decode_cover(CapyroCore *core, AVStream *st) {
     avcodec_send_packet(ctx, NULL);
     if (avcodec_receive_frame(ctx, frame) == 0) {
         VideoSlot *slot = &core->slots[0];
+        keep_source(slot, frame);
         if (convert_frame(p, frame, slot, MAX_COVER_SIDE, MAX_COVER_SIDE)) {
             slot->pts    = 0.0;
             slot->aspect = display_aspect(p->fmt, st, frame);
@@ -735,7 +770,10 @@ static bool video_step(CapyroCore *core) {
 
     /* El slot libre no lo ve nadie más: se puede escribir sin lock. */
     VideoSlot *slot = &core->slots[idx];
-    bool ok = convert_frame(p, pic, slot, MAX_VIDEO_W, MAX_VIDEO_H);
+    int max_w, max_h;
+    video_limits(core, &max_w, &max_h);
+    keep_source(slot, pic);
+    bool ok = convert_frame(p, pic, slot, max_w, max_h);
     slot->pts    = t < 0 ? 0.0 : t;
     slot->aspect = display_aspect(p->fmt, st, f);
     av_frame_unref(f);
@@ -928,6 +966,9 @@ void player_close(CapyroCore *core) {
     core->shown       = -1;
     core->force_frame = false;
     core->serial++;
+    for (int i = 0; i < VQ_SLOTS; i++) {
+        av_frame_unref(core->slots[i].src); /* suelta los cuadros del archivo anterior */
+    }
     core->title[0]  = '\0';
     core->artist[0] = '\0';
     core->hwdec_reinit = false;
@@ -1093,5 +1134,82 @@ bool capyro_core_lock_video_frame(CapyroCore *core, CapyroVideoFrame *out) {
 void capyro_core_unlock_video_frame(CapyroCore *core) {
     if (core) {
         cp_mutex_unlock(&core->lock);
+    }
+}
+
+void capyro_core_set_video_target(CapyroCore *core, int width, int height) {
+    if (!core) {
+        return;
+    }
+    cp_mutex_lock(&core->lock);
+    core->video_target_w = width > 0 ? width : 0;
+    core->video_target_h = height > 0 ? height : 0;
+    cp_mutex_unlock(&core->lock);
+}
+
+double capyro_core_video_next_due(CapyroCore *core) {
+    if (!core) {
+        return -1.0;
+    }
+    cp_mutex_lock(&core->lock);
+    double due = -1.0;
+    if (core->vq_len > 0) {
+        double clock = player_clock_locked(core);
+        due = core->slots[core->vq[core->vq_head]].pts - clock;
+        if (due < 0.0) {
+            due = 0.0;
+        }
+    }
+    cp_mutex_unlock(&core->lock);
+    return due;
+}
+
+bool capyro_core_capture_frame(CapyroCore *core, CapyroImage *out) {
+    if (!core || !out) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    AVFrame *f = av_frame_alloc();
+    if (!f) {
+        return false;
+    }
+    /* bajo el lock solo se toma una referencia; la conversión va afuera */
+    cp_mutex_lock(&core->lock);
+    advance_video_locked(core);
+    bool have = core->shown >= 0 && core->slots[core->shown].src &&
+                av_frame_ref(f, core->slots[core->shown].src) == 0;
+    cp_mutex_unlock(&core->lock);
+    bool ok = false;
+    if (have && f->width > 0 && f->height > 0) {
+        int w = f->width, h = f->height;
+        double scale = 1.0;
+        if (w > 3840) scale = 3840.0 / w;
+        if (h * scale > 3840) scale = 3840.0 / h;
+        int dw = (int)(w * scale + 0.5), dh = (int)(h * scale + 0.5);
+        struct SwsContext *sws = sws_getContext(w, h, (enum AVPixelFormat)f->format, dw, dh, AV_PIX_FMT_RGBA,
+                                                SWS_BICUBIC, NULL, NULL, NULL);
+        uint8_t *rgba = sws ? malloc((size_t)dw * (size_t)dh * 4) : NULL;
+        if (rgba) {
+            uint8_t *dst[4] = { rgba, NULL, NULL, NULL };
+            int dst_stride[4] = { dw * 4, 0, 0, 0 };
+            if (sws_scale(sws, (const uint8_t *const *)f->data, f->linesize, 0, h, dst, dst_stride) > 0) {
+                out->rgba = rgba;
+                out->width = dw;
+                out->height = dh;
+                ok = true;
+            } else {
+                free(rgba);
+            }
+        }
+        sws_freeContext(sws);
+    }
+    av_frame_free(&f);
+    return ok;
+}
+
+void capyro_core_free_image(CapyroImage *img) {
+    if (img) {
+        free(img->rgba);
+        img->rgba = NULL;
     }
 }

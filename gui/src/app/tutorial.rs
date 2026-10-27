@@ -565,7 +565,17 @@ impl CapyroApp {
             // (en System, Espacio pasa a la bienvenida una vez detectado)
             self.tutorial_next(now);
         }
-        ctx.request_repaint();
+        // 60 cuadros mientras algo entra, se mueve o se escribe; quieto (solo
+        // las chispitas, halos y pulsos), 30
+        let busy = self.tutorial.as_ref().is_none_or(|t| {
+            let since = now - t.t0;
+            t.closing.is_some()
+                || since < 0.9
+                || now - t.spot_t0 < 0.6
+                || !t.complete(now)
+                || matches!(t.phase, Phase::Reveal | Phase::Welcome)
+        });
+        ctx.request_repaint_after(if busy { super::FRAME_SMOOTH } else { super::FRAME_AMBIENT });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -745,7 +755,7 @@ impl CapyroApp {
             sp.angle %= std::f32::consts::TAU;
             ctx.data_mut(|d| d.insert_temp(id, sp));
             if sp.speed.abs() > 0.01 || b.hover > 0.001 {
-                ctx.request_repaint();
+                ctx.request_repaint_after(super::FRAME_SMOOTH);
             }
             let sc = pos2(r.left() - 10.0, cy);
             let pulse = 1.0 + 0.12 * b.hover * ((now * 6.0).sin() as f32 * 0.5 + 0.5);
@@ -811,7 +821,7 @@ impl CapyroApp {
         pt.multiply_opacity(tk);
         pt.text(pos2(card.center().x, card.top() + 90.0 + 8.0 * (1.0 - tk)), Align2::CENTER_CENTER, "¿Estás listo?", bold(22.0), TEXT);
         if k < 0.9 {
-            ui.ctx().request_repaint();
+            ui.ctx().request_repaint_after(super::FRAME_SMOOTH);
         }
         let by = card.bottom() - 42.0;
         let mut out = None;

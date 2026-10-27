@@ -112,6 +112,14 @@ struct RawVideoFrame {
 }
 
 /// Vista prestada del frame actual; solo vive dentro de `Core::with_video_frame`.
+/// Debe coincidir con `CapyroImage` de capyro_core.h.
+#[repr(C)]
+struct RawImage {
+    rgba: *mut u8,
+    width: i32,
+    height: i32,
+}
+
 pub struct VideoFrame<'a> {
     pub rgba: &'a [u8],
     pub width: usize,
@@ -151,6 +159,10 @@ extern "C" {
     fn capyro_core_get_artist(core: *mut CapyroCore) -> *const c_char;
     fn capyro_core_lock_video_frame(core: *mut CapyroCore, out: *mut RawVideoFrame) -> bool;
     fn capyro_core_unlock_video_frame(core: *mut CapyroCore);
+    fn capyro_core_set_video_target(core: *mut CapyroCore, width: c_int, height: c_int);
+    fn capyro_core_video_next_due(core: *mut CapyroCore) -> f64;
+    fn capyro_core_capture_frame(core: *mut CapyroCore, out: *mut RawImage) -> bool;
+    fn capyro_core_free_image(img: *mut RawImage);
 
     fn capyro_core_toggle(core: *mut CapyroCore);
     fn capyro_core_stop(core: *mut CapyroCore);
@@ -556,6 +568,31 @@ impl Core {
             _ => State::Idle,
         }
     }
+    /// Tamaño del área de video en pantalla (píxeles reales): el núcleo
+    /// convierte los cuadros a ese tamaño y no más grandes.
+    pub fn set_video_target(&self, width: u32, height: u32) {
+        unsafe { capyro_core_set_video_target(self.ptr, width.min(i32::MAX as u32) as c_int, height.min(i32::MAX as u32) as c_int) }
+    }
+
+    /// Segundos hasta el próximo cuadro de video (None = no hay en cola).
+    pub fn video_next_due(&self) -> Option<f64> {
+        let d = unsafe { capyro_core_video_next_due(self.ptr) };
+        (d >= 0.0).then_some(d)
+    }
+
+    /// El cuadro visible en su tamaño original (para las capturas).
+    pub fn capture_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
+        let mut img = RawImage { rgba: std::ptr::null_mut(), width: 0, height: 0 };
+        // SAFETY: si devuelve true, `rgba` tiene width*height*4 bytes hasta free_image.
+        if !unsafe { capyro_core_capture_frame(self.ptr, &mut img) } || img.rgba.is_null() {
+            return None;
+        }
+        let (w, h) = (img.width.max(0) as usize, img.height.max(0) as usize);
+        let data = unsafe { std::slice::from_raw_parts(img.rgba, w * h * 4) }.to_vec();
+        unsafe { capyro_core_free_image(&mut img) };
+        Some((data, w as u32, h as u32))
+    }
+
     pub fn media_kind(&self) -> MediaKind {
         match unsafe { capyro_core_get_media_kind(self.ptr) } {
             1 => MediaKind::Video,
