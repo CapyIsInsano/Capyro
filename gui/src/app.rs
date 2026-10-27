@@ -2690,7 +2690,11 @@ impl eframe::App for CapyroApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0] // esquinas redondeadas transparentes
+        if cfg!(windows) {
+            theme::BG_WINDOW.to_normalized_gamma_f32()
+        } else {
+            [0.0, 0.0, 0.0, 0.0] // esquinas redondeadas transparentes
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {

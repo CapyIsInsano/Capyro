@@ -14,7 +14,8 @@ pub const ICON: Color32 = Color32::from_rgb(0xD6, 0xD7, 0xDB);
 pub const ICON_DIM: Color32 = Color32::from_rgb(0xA0, 0xA1, 0xA7);
 pub const ERROR: Color32 = Color32::from_rgb(0xF0, 0x5A, 0x4F);
 
-pub const WINDOW_RADIUS: u8 = 14;
+/// En Windows la ventana no es transparente: esquinas rectas.
+pub const WINDOW_RADIUS: u8 = if cfg!(windows) { 0 } else { 14 };
 pub const PAD: f32 = 12.0;
 
 pub fn regular(size: f32) -> FontId {

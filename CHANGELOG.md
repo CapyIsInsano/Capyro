@@ -14,6 +14,7 @@
   - El núcleo en C usa hilos, reloj y archivos de Win32 (nombres con tildes y ñ incluidos), y el audio sale por WASAPI.
   - La GPU en Windows: D3D11VA, NVDEC o DXVA2, con la misma vuelta a la CPU si no se puede.
   - Fuente Segoe UI, ícono y versión adentro del `.exe`, y sin ventana de consola (salvo que le pases opciones).
+  - Dibuja con OpenGL y, si la placa de video no lo soporta, con Direct3D 12 (wgpu). Si no puede abrir la ventana, lo dice en un cartel y lo anota en `%LOCALAPPDATA%\Capyro\capyro.log` (antes se quedaba sin abrir y sin avisar). `CAPYRO_RENDERER=wgpu` u `opengl` fuerza uno.
 - **Cada sistema compila e instala solo lo suyo:**
   - CMake detecta el sistema (`CAPYRO_SYSTEM` = `Lin` o `Win`); en Linux no entra nada de Windows y al revés (dependencias de Rust, `.desktop` e íconos, DLL, recursos `.rc`...);
   - la config instalada lleva el sistema: `system = "Lin"` o `"Win"` (opción nueva en `capyro.lua`; `"auto"` lo detecta solo);

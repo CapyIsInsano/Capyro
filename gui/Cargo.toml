@@ -28,6 +28,8 @@ libc = "0.2"
 winit = { version = "0.30", default-features = false, features = ["x11", "wayland"] }
 
 [target.'cfg(windows)'.dependencies]
+# wgpu (Direct3D 12) además de OpenGL: si la placa no tiene OpenGL, se usa esto
+eframe = { version = "0.37", default-features = false, features = ["wgpu"] }
 # Carpetas conocidas de Windows (Documentos, Imágenes, AppData), aunque
 # estén movidas a OneDrive u otro disco.
 dirs = "6"
