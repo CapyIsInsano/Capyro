@@ -17,11 +17,15 @@
 #define PREV_RESTART_THRESHOLD      3.0 /* "anterior" con más de 3 s reinicia */
 
 /* Formatos que Capyro acepta. FFmpeg decodifica todos sin nada extra:
- * mp4/mov/avi (H.264, HEVC, MPEG-4/Xvid, AAC, MP3...), mp3, wav (PCM),
- * ogg (Vorbis, Opus, FLAC) y aac (ADTS). Mantener sincronizado con
- * capyro_core_supported_*(). */
-static const char *const VIDEO_EXTS[] = { "mp4", "mov", "avi" };
-static const char *const AUDIO_EXTS[] = { "mp3", "wav", "ogg", "aac" };
+ * mp4/mov/avi (H.264, HEVC, MPEG-4/Xvid, AAC, MP3...), mkv (cualquier
+ * cosa), webm (VP8/VP9/AV1 con Vorbis u Opus), mp3, wav (PCM), ogg
+ * (Vorbis, Opus, FLAC), aac (ADTS), flac, opus (Opus en Ogg), m4a (AAC o
+ * ALAC en MP4) y aiff (PCM big-endian, también .aif/.aifc).
+ * Mantener sincronizado con capyro_core_supported_*(). */
+static const char *const VIDEO_EXTS[] = { "mp4", "mov", "avi", "mkv", "webm" };
+static const char *const AUDIO_EXTS[] = { "mp3", "wav", "ogg", "aac", "flac", "opus", "m4a", "aiff" };
+/* Otras extensiones del mismo formato: se aceptan, pero no se listan aparte. */
+static const char *const AUDIO_ALIASES[] = { "aif", "aifc" };
 
 /* ------------------------------------------------------------------ */
 /* utilidades                                                          */
@@ -351,15 +355,20 @@ int capyro_core_probe_extension(const char *path) {
             return CAPYRO_MEDIA_AUDIO;
         }
     }
+    for (size_t i = 0; i < sizeof(AUDIO_ALIASES) / sizeof(AUDIO_ALIASES[0]); i++) {
+        if (ext_equals(dot + 1, AUDIO_ALIASES[i])) {
+            return CAPYRO_MEDIA_AUDIO;
+        }
+    }
     return CAPYRO_MEDIA_NONE;
 }
 
 const char *capyro_core_supported_video(void) {
-    return "mp4,mov,avi";
+    return "mp4,mov,avi,mkv,webm";
 }
 
 const char *capyro_core_supported_audio(void) {
-    return "mp3,wav,ogg,aac";
+    return "mp3,wav,ogg,aac,flac,opus,m4a,aiff";
 }
 
 int capyro_core_open(CapyroCore *core, const char *path) {

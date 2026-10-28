@@ -280,7 +280,7 @@ else()
         find_program(_desktop_db update-desktop-database)
         if(_desktop_db)
             execute_process(COMMAND "${_desktop_db}" -q "${_share}/applications" OUTPUT_QUIET ERROR_QUIET)
-            message(STATUS "Capyro: registrado para abrir mp4, mov, avi, mp3, wav, ogg y aac")
+            message(STATUS "Capyro: registrado para abrir mp4, mov, avi, mkv, webm, mp3, wav, ogg, aac, flac, opus, m4a y aiff")
         else()
             message(STATUS "Capyro: falta update-desktop-database (desktop-file-utils): "
                 "puede que Capyro no aparezca en \"Abrir con…\" hasta reiniciar la sesión")

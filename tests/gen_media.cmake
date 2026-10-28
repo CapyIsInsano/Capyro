@@ -61,3 +61,41 @@ if(NOT OGG_ENC)
     set(OGG_ENC flac)
 endif()
 run(tono.ogg -f lavfi -i sine=frequency=440:duration=2 -c:a ${OGG_ENC} ${OUT}/tono.ogg)
+
+# --- formatos de la v0.3.1 (extra): mkv, webm, flac, opus, m4a y aiff ---
+# Opus: libopus si está; si no, el encoder interno (experimental).
+if(ENCODERS MATCHES " libopus ")
+    set(OPUS_ENC -c:a libopus)
+else()
+    set(OPUS_ENC -c:a opus -strict -2 -ar 48000)
+endif()
+# mkv acepta lo que sea: mpeg4 + flac (los dos internos)
+run(clip.mkv -f lavfi -i testsrc=size=320x240:rate=25:duration=2
+    -f lavfi -i sine=frequency=500:duration=2
+    -c:v mpeg4 -q:v 5 -c:a flac -shortest ${OUT}/clip.mkv)
+# webm exige VP8/VP9/AV1: depende de libvpx o de algún AV1
+set(WEBM_V "")
+foreach(enc libvpx-vp9 libvpx libaom-av1 libsvtav1)
+    if(ENCODERS MATCHES " ${enc} ")
+        set(WEBM_V ${enc})
+        break()
+    endif()
+endforeach()
+if(WEBM_V)
+    run(clip.webm -f lavfi -i testsrc=size=320x240:rate=25:duration=2
+        -f lavfi -i sine=frequency=600:duration=2
+        -c:v ${WEBM_V} -b:v 200k -deadline realtime -cpu-used 8 ${OPUS_ENC} -shortest ${OUT}/clip.webm)
+else()
+    message(WARNING "Tu ffmpeg no tiene encoder de VP8/VP9/AV1: salteo el .webm con video")
+    file(REMOVE ${OUT}/clip.webm)
+endif()
+# webm con solo audio (como los que baja yt-dlp): tiene que andar igual
+run(solo-audio.webm -f lavfi -i sine=frequency=520:duration=2 ${OPUS_ENC}
+    -metadata "title=Solo audio" ${OUT}/solo-audio.webm)
+run(tono.flac -f lavfi -i sine=frequency=440:duration=2 -c:a flac
+    -metadata "title=Tono FLAC" -metadata artist=Capyro ${OUT}/tono.flac)
+run(tono.opus -f lavfi -i sine=frequency=440:duration=2 ${OPUS_ENC}
+    -metadata "title=Tono Opus" -metadata artist=Capyro ${OUT}/tono.opus)
+run(tono.m4a -f lavfi -i sine=frequency=440:duration=2 -c:a aac
+    -metadata "title=Tono M4A" -metadata artist=Capyro ${OUT}/tono.m4a)
+run(tono.aiff -f lavfi -i sine=frequency=440:duration=2 -c:a pcm_s16be ${OUT}/tono.aiff)

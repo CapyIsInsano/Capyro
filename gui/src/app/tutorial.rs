@@ -129,8 +129,9 @@ const STEPS: [Step; 16] = [
     Step {
         target: None,
         title: "Formatos",
-        text: "Video: MP4, MOV y AVI. Audio: MP3, WAV, OGG y AAC. Los videos se decodifican por GPU cuando se \
-               puede. Si abrís un formato que no está en la lista, Capyro te avisa con un sonido.",
+        text: "Video: MP4, MOV, AVI, MKV y WebM. Audio: MP3, WAV, OGG, AAC, FLAC, Opus, M4A y AIFF. Están \
+               todos en ⓘ → Formatos soportados. Los videos se decodifican por GPU cuando se puede. Si abrís \
+               un formato que no está en la lista, Capyro te avisa con un sonido.",
     },
     Step {
         target: Some("fx"),

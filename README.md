@@ -117,11 +117,12 @@ pongas todo al máximo.
 
 ## Formatos
 
-<img src="docs/readme/formats.svg" width="100%" alt="Formatos soportados: video MP4, MOV y AVI; audio MP3, WAV, OGG y AAC">
+<img src="docs/readme/formats.svg" width="100%" alt="Formatos soportados: video MP4, MOV, AVI, MKV y WebM; audio MP3, WAV, OGG, AAC, FLAC, Opus, M4A y AIFF">
 
 > [!NOTE]
 > Si intentás abrir otro formato, Capyro te avisa con un sonido y un mensaje. Los formatos
-> soportados también se ven dentro de la app, en el menú **ⓘ**: tocá uno para leer su resumen.
+> soportados también se ven dentro de la app: menú **ⓘ → Formatos soportados (abrir)**, y
+> tocá uno para leer su resumen. Los AIFF también se abren como `.aif` o `.aifc`.
 
 <img src="docs/readme/divider-4.svg" width="100%" alt="">
 
@@ -565,7 +566,8 @@ sonido (clic, foto, ready, error...) se anota en la terminal.
   Si no lo tenés, instalá `desktop-file-utils` (Gentoo: `dev-util/desktop-file-utils`) y
   reinstalá. Si lo instalaste en `/usr/local`, fijate que `/usr/local/share` esté en
   `XDG_DATA_DIRS`. Para comprobarlo: `gio mime audio/mpeg` tiene que listar `capyro.desktop`.
-- **Windows:** lo registra CapyroInstaller (mp4, mov, avi, mp3, wav, ogg y aac). No se
+- **Windows:** lo registra CapyroInstaller (mp4, mov, avi, mkv, webm, mp3, wav, ogg, aac,
+  flac, opus, m4a y aiff; para los formatos nuevos, la versión 1.2.0 o más nueva). No se
   adueña de ningún formato: si querés que lo abra con doble clic, elegilo en
   **Configuración → Aplicaciones predeterminadas → Capyro**.
 </details>

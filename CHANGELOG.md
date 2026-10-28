@@ -42,6 +42,9 @@
   - **transiciones más elaboradas**: los menús (⚙, ⓘ, efectos, novedades, lista y atajos) se abren con un rebotecito y su contenido se descubre de arriba abajo con una línea de luz; al cambiar de archivo un destello cruza el área de video y, en las canciones, el título y el artista entran subiendo;
   - **partículas ambientales**: polvito de luz que sube flotando y titila, alrededor de la carátula y por el fondo (nunca encima del video); con música late con los graves;
   - **sin comerse el procesador**: no guarda nada por partícula (sale del tiempo), el degradé y la luz del video van en una sola malla, lo tapado por el video no se dibuja, el fondo se mueve a 15 cuadros por segundo (va despacio) y con la ventana desenfocada se queda quieto y no gasta nada. Con placa de video, cada cuadro le cuesta al procesador unos 3 ms.
+- Extra: **6 formatos nuevos**: video **MKV** y **WebM**; audio **FLAC**, **Opus**, **M4A** y **AIFF** (también `.aif` y `.aifc`). Ya son 13.
+  - En ⓘ ya no se ven todos de una: hay un botón **"Formatos soportados (abrir)"** que despliega la lista (en renglones, Video y Audio) con el resumen de cada uno al tocarlo, como antes.
+  - Están en el selector de archivos, en arrastrar y soltar, en el tutorial y en "Abrir con…" (Linux: el lanzador; Windows: CapyroInstaller 1.2.0).
 
 ## v0.3.0-alpha · El salto a Windows
 

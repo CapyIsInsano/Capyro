@@ -261,6 +261,8 @@ pub struct CapyroApp {
     formats: (Vec<String>, Vec<String>),
     /// Formato cuyo resumen está abierto en el menú ⓘ (uno a la vez).
     info_format: Option<String>,
+    /// ⓘ → "Formatos soportados (abrir)": la lista de formatos desplegada.
+    info_formats_open: bool,
     /// Rueda sobre el volumen: fracciones de "muesca" acumuladas.
     wheel_acc: f32,
     /// Cuándo se tocó el logo (para el rebote) y último sonido que sonó.
@@ -436,6 +438,7 @@ impl CapyroApp {
             info_rect: Rect::NOTHING,
             formats: (ffi::supported_video(), ffi::supported_audio()),
             info_format: None,
+            info_formats_open: false,
             wheel_acc: 0.0,
             logo_click: None,
             last_capy: usize::MAX,
@@ -1035,8 +1038,12 @@ impl CapyroApp {
         // Filtro armado con la lista del núcleo (más las variantes en mayúscula,
         // porque algunos selectores distinguen .MP4 de .mp4).
         let (video, audio) = &self.formats;
+        // (con las otras extensiones del mismo formato: .aif y .aifc son AIFF)
         let with_upper = |list: &[String]| -> Vec<String> {
-            list.iter().flat_map(|e| [e.clone(), e.to_uppercase()]).collect()
+            list.iter()
+                .flat_map(|e| std::iter::once(e.as_str()).chain(crate::formats::aliases(e).iter().copied()))
+                .flat_map(|e| [e.to_owned(), e.to_uppercase()])
+                .collect()
         };
         let all: Vec<String> = with_upper(video).into_iter().chain(with_upper(audio)).collect();
         let pending = rfd::AsyncFileDialog::new()
@@ -2080,13 +2087,15 @@ impl CapyroApp {
         let t = ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, crate::perf::t(0.15));
         if t <= 0.001 {
             self.info_format = None; // al volver a abrirlo arranca sin resumen abierto
+            self.info_formats_open = false; // y con la lista de formatos cerrada
             return;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
         let width = 312.0;
         let inner_w = width - 28.0;
-        let base_h = 244.0;
+        // (encabezado 64 + botón de formatos 36 + actualizaciones y pie 88)
+        let base_h = 188.0;
 
         // --- resúmenes (acordeón): se calcula antes para saber el alto total ---
         // Cada formato tiene su propia animación; como solo uno puede estar
@@ -2120,6 +2129,33 @@ impl CapyroApp {
             region_h += (card_h + 8.0) * k;
             cards.push((k, card_h, title, kind_g, body));
         }
+
+        // --- la lista de formatos (se despliega con el botón) ---
+        // Los chips se acomodan en renglones: con 13 formatos ya no entran
+        // en una sola fila por tipo.
+        let fopen = ctx.animate_bool_with_time(Id::unique("capyro-fmts-open"), self.info_formats_open, crate::perf::t(0.26));
+        let fk = 1.0 - (1.0 - fopen).powi(3);
+        let mut chip_layout: Vec<(String, Rect)> = Vec::new();
+        let mut group_labels: Vec<(&str, f32, bool, usize)> = Vec::new();
+        let mut ry = 4.0;
+        for (label, list, is_video) in [("Video", &formats.0, true), ("Audio", &formats.1, false)] {
+            group_labels.push((label, ry + 8.0, is_video, list.len()));
+            ry += 22.0;
+            let mut cx = 0.0;
+            for ext in list {
+                let w = ui.painter().layout_no_wrap(ext.to_uppercase(), bold(11.0), TEXT).size().x + 16.0;
+                if cx > 0.0 && cx + w > inner_w {
+                    cx = 0.0;
+                    ry += 28.0;
+                }
+                chip_layout.push((ext.clone(), Rect::from_min_size(pos2(cx, ry), vec2(w, 22.0))));
+                cx += w + 6.0;
+            }
+            ry += 22.0 + 12.0;
+        }
+        let chips_h = ry;
+        // los resúmenes van debajo de los chips, adentro de lo desplegado
+        let region_h = (chips_h + region_h) * fk;
 
         let size = vec2(width, base_h + region_h);
         let anchor = pos2(self.info_rect.left() - 6.0, self.info_rect.top() - 10.0);
@@ -2163,60 +2199,108 @@ impl CapyroApp {
         painter.galley(chip.center() - g.size() / 2.0, g, accent);
         painter.text(pos2(tx, top + 44.0), Align2::LEFT_CENTER, "Just press play.", regular(12.0), TEXT_DIM);
 
-        // formatos
+        // formatos: un botón que despliega la lista (son muchos para que
+        // estén siempre a la vista)
         painter.line_segment([pos2(x0, top + 64.0), pos2(x1, top + 64.0)], Stroke::new(1.0, Color32::from_white_alpha(14)));
-        painter.text(pos2(x0, top + 80.0), Align2::LEFT_CENTER, "Formatos soportados", bold(12.5), TEXT);
-        painter.text(pos2(x1, top + 80.0), Align2::RIGHT_CENTER, "tocá uno", regular(10.5), TEXT_FAINT);
-
-        let mut clicked: Option<String> = None;
-        let mut y = top + 108.0;
-        for (label, list, is_video) in [("Video", &formats.0, true), ("Audio", &formats.1, false)] {
-            let ic = pos2(x0 + 8.0, y);
-            if is_video {
-                icons::film(&painter, ic, 14.0, TEXT_DIM);
-            } else {
-                icons::music_note(&painter, ic, 14.0, TEXT_DIM);
+        let row = Rect::from_min_max(pos2(x0 - 6.0, top + 67.0), pos2(x1 + 6.0, top + 97.0));
+        let fb = animate_button(ui, Id::unique("capyro-fmts-toggle"), row, interactive);
+        if fb.hover > 0.001 || fb.press > 0.001 || fk > 0.001 {
+            let a = 10.0 * fb.hover + 10.0 * fb.press + 6.0 * fk;
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha(a as u8));
+        }
+        let cy = row.center().y;
+        let icol = fb.tint(TEXT_DIM, TEXT).lerp_to_gamma(accent, fk);
+        icons::film(&painter, pos2(x0 + 6.0, cy), 13.0, icol);
+        icons::music_note(&painter, pos2(x0 + 21.0, cy), 13.0, icol);
+        let label = if self.info_formats_open { "Formatos soportados (cerrar)" } else { "Formatos soportados (abrir)" };
+        let lr = painter.text(pos2(x0 + 34.0, cy), Align2::LEFT_CENTER, label, bold(12.5), TEXT);
+        // a la derecha: cuántos son y una flechita que gira al abrir
+        let total = formats.0.len() + formats.1.len();
+        let chev = pos2(x1 - 4.0, cy);
+        let st = Stroke::new(1.5, fb.tint(TEXT_FAINT, TEXT).lerp_to_gamma(accent, fk));
+        let (dy, sx) = (3.0 * (1.0 - 2.0 * fk), 4.5);
+        painter.line_segment([chev + vec2(-sx, -dy), chev + vec2(0.0, dy)], st);
+        painter.line_segment([chev + vec2(sx, -dy), chev + vec2(0.0, dy)], st);
+        let ng = painter.layout_no_wrap(total.to_string(), bold(10.5), accent);
+        // la cantidad, al lado del texto (si entra antes de la flechita)
+        let nchip = Rect::from_min_size(pos2(lr.right() + 7.0, cy - 9.0), vec2(ng.size().x + 12.0, 18.0));
+        if nchip.right() < chev.x - 10.0 {
+            painter.rect_filled(nchip, 9.0, accent.gamma_multiply(0.16));
+            painter.galley(nchip.center() - ng.size() / 2.0, ng, accent);
+        }
+        if fb.hover > 0.5 {
+            ctx.set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if fb.resp.clicked() {
+            self.info_formats_open = !self.info_formats_open;
+            if !self.info_formats_open {
+                self.info_format = None;
             }
-            painter.text(pos2(x0 + 22.0, y), Align2::LEFT_CENTER, label, regular(12.0), TEXT_DIM);
-            let mut cx = x0 + 74.0;
-            for ext in list {
+        }
+        let fb_resp = fb.resp;
+        fb_resp.on_hover_text(format!(
+            "Video: {}\nAudio: {}",
+            formats.0.join(", ").to_uppercase(),
+            formats.1.join(", ").to_uppercase()
+        ));
+
+        // lo desplegado: los chips (tocá uno para ver qué es) y los resúmenes
+        let region = Rect::from_min_size(pos2(x0, top + 100.0), vec2(inner_w, region_h));
+        let clipped = painter.with_clip_rect(region.expand2(vec2(4.0, 0.0)).intersect(painter.clip_rect()));
+        let mut clicked: Option<String> = None;
+        if fk > 0.001 {
+            let mut p = clipped.clone();
+            p.multiply_opacity(fk);
+            let origin = region.min + vec2(0.0, -8.0 * (1.0 - fk));
+            let chips_live = interactive && fk > 0.9;
+            for (label, ly, is_video, n) in &group_labels {
+                let ic = origin + vec2(7.0, *ly);
+                if *is_video {
+                    icons::film(&p, ic, 13.0, TEXT_DIM);
+                } else {
+                    icons::music_note(&p, ic, 13.0, TEXT_DIM);
+                }
+                p.text(origin + vec2(20.0, *ly), Align2::LEFT_CENTER, *label, regular(12.0), TEXT_DIM);
+                let hint = if *is_video { format!("{n} formatos · tocá uno") } else { format!("{n} formatos") };
+                p.text(pos2(x1, origin.y + *ly), Align2::RIGHT_CENTER, hint, regular(10.5), TEXT_FAINT);
+            }
+            for (ext, rel) in &chip_layout {
+                let r = rel.translate(origin.to_vec2());
                 let selected = self.info_format.as_deref() == Some(ext.as_str());
-                let g = painter.layout_no_wrap(ext.to_uppercase(), bold(11.0), TEXT);
-                let r = Rect::from_min_size(pos2(cx, y - 11.0), vec2(g.size().x + 14.0, 22.0));
-                let a = animate_button(ui, Id::unique(("capyro-fmt", ext.as_str())), r, interactive);
+                let g = p.layout_no_wrap(ext.to_uppercase(), bold(11.0), TEXT);
+                let a = animate_button(ui, Id::unique(("capyro-fmt", ext.as_str())), r, chips_live);
                 let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-sel", ext.as_str())), selected, crate::perf::t(0.15));
                 let rr = Rect::from_center_size(r.center(), r.size() * (1.0 + 0.04 * a.hover - 0.08 * a.press));
                 let bg = Color32::from_white_alpha((10.0 + 12.0 * a.hover) as u8).lerp_to_gamma(accent, sel);
-                painter.rect_filled(rr, 6.0, bg);
+                p.rect_filled(rr, 6.0, bg);
                 let col = TEXT.lerp_to_gamma(Color32::WHITE, sel);
-                painter.galley(rr.center() - g.size() / 2.0, g, col);
+                p.galley(rr.center() - g.size() / 2.0, g, col);
                 if a.resp.clicked() {
                     clicked = Some(ext.clone());
                 }
-                cx = r.right() + 6.0;
             }
-            y += 30.0;
+
+            // resúmenes (acordeón), debajo de los chips
+            let mut cy = origin.y + chips_h;
+            for (k, card_h, title, kind_g, body) in cards {
+                let mut pc = p.clone();
+                pc.multiply_opacity(k);
+                let card = Rect::from_min_size(pos2(x0, cy - 6.0 * (1.0 - k)), vec2(inner_w, card_h));
+                pc.rect_filled(card, 8.0, Color32::from_white_alpha(9));
+                pc.rect_filled(Rect::from_min_size(card.min + vec2(0.0, 10.0), vec2(3.0, card_h - 20.0)), 1.5, accent);
+                let ty = card.top() + 10.0;
+                pc.galley(pos2(card.left() + 12.0, ty), title.clone(), TEXT);
+                pc.galley(pos2(card.right() - 10.0 - kind_g.size().x, ty + 1.0), kind_g, TEXT_FAINT);
+                pc.galley(pos2(card.left() + 12.0, ty + title.size().y + 5.0), body, TEXT_DIM);
+                cy += (card_h + 8.0) * k;
+            }
+        }
+        if (0.001..0.999).contains(&fopen) {
+            ctx.request_repaint_after(FRAME_SMOOTH);
         }
         if let Some(ext) = clicked {
             // solo uno abierto a la vez; tocar el abierto lo cierra
             self.info_format = if self.info_format.as_deref() == Some(ext.as_str()) { None } else { Some(ext) };
-        }
-
-        // resúmenes
-        let region = Rect::from_min_size(pos2(x0, top + 156.0), vec2(inner_w, region_h));
-        let clipped = painter.with_clip_rect(region.expand2(vec2(2.0, 0.0)).intersect(painter.clip_rect()));
-        let mut cy = region.top();
-        for (k, card_h, title, kind_g, body) in cards {
-            let mut p = clipped.clone();
-            p.multiply_opacity(k);
-            let card = Rect::from_min_size(pos2(x0, cy - 6.0 * (1.0 - k)), vec2(inner_w, card_h));
-            p.rect_filled(card, 8.0, Color32::from_white_alpha(9));
-            p.rect_filled(Rect::from_min_size(card.min + vec2(0.0, 10.0), vec2(3.0, card_h - 20.0)), 1.5, accent);
-            let ty = card.top() + 10.0;
-            p.galley(pos2(card.left() + 12.0, ty), title.clone(), TEXT);
-            p.galley(pos2(card.right() - 10.0 - kind_g.size().x, ty + 1.0), kind_g, TEXT_FAINT);
-            p.galley(pos2(card.left() + 12.0, ty + title.size().y + 5.0), body, TEXT_DIM);
-            cy += (card_h + 8.0) * k;
         }
 
         // actualizaciones

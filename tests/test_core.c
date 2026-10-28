@@ -65,15 +65,24 @@ static void test_os(void) {
 static void test_basics(void) {
     CHECK(capyro_core_probe_extension("a.mp4") == CAPYRO_MEDIA_VIDEO);
     CHECK(capyro_core_probe_extension("A.MP3") == CAPYRO_MEDIA_AUDIO);
-    CHECK(capyro_core_probe_extension("a.mkv") == CAPYRO_MEDIA_NONE);
+    CHECK(capyro_core_probe_extension("a.mkv") == CAPYRO_MEDIA_VIDEO);
+    CHECK(capyro_core_probe_extension("Peli.WebM") == CAPYRO_MEDIA_VIDEO);
+    CHECK(capyro_core_probe_extension("a.mka") == CAPYRO_MEDIA_NONE);
     CHECK(capyro_core_probe_extension("clip.MOV") == CAPYRO_MEDIA_VIDEO);
     CHECK(capyro_core_probe_extension("tono.wav") == CAPYRO_MEDIA_AUDIO);
     CHECK(capyro_core_probe_extension("tono.Ogg") == CAPYRO_MEDIA_AUDIO);
-    CHECK(capyro_core_probe_extension("tono.flac") == CAPYRO_MEDIA_NONE);
+    CHECK(capyro_core_probe_extension("tono.flac") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("voz.OPUS") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("tema.m4a") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("estudio.aiff") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("estudio.AIF") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("estudio.aifc") == CAPYRO_MEDIA_AUDIO);
+    CHECK(capyro_core_probe_extension("estudio.aiffx") == CAPYRO_MEDIA_NONE);
+    CHECK(capyro_core_probe_extension("tono.wma") == CAPYRO_MEDIA_NONE);
     CHECK(capyro_core_probe_extension("viejo.AVI") == CAPYRO_MEDIA_VIDEO);
     CHECK(capyro_core_probe_extension("tema.aac") == CAPYRO_MEDIA_AUDIO);
-    CHECK(strcmp(capyro_core_supported_video(), "mp4,mov,avi") == 0);
-    CHECK(strcmp(capyro_core_supported_audio(), "mp3,wav,ogg,aac") == 0);
+    CHECK(strcmp(capyro_core_supported_video(), "mp4,mov,avi,mkv,webm") == 0);
+    CHECK(strcmp(capyro_core_supported_audio(), "mp3,wav,ogg,aac,flac,opus,m4a,aiff") == 0);
     CHECK(capyro_core_probe_extension("mp4") == CAPYRO_MEDIA_NONE);
     CHECK(capyro_core_probe_extension(NULL) == CAPYRO_MEDIA_NONE);
 
@@ -93,7 +102,7 @@ static void test_basics(void) {
     capyro_core_play(core);
     CHECK(capyro_core_get_state(core) == CAPYRO_STATE_IDLE);
 
-    CHECK(capyro_core_open(core, "video.mkv") == CAPYRO_ERR_UNSUPPORTED);
+    CHECK(capyro_core_open(core, "video.wmv") == CAPYRO_ERR_UNSUPPORTED);
     CHECK(capyro_core_playlist_count(core) == 0);
 
     /* Archivo vacío con extensión válida: FFmpeg no lo puede leer. */
@@ -492,11 +501,16 @@ static void test_media(const char *dir) {
     }
     capyro_core_set_repeat(core, CAPYRO_REPEAT_OFF);
 
-    /* --- formatos nuevos: wav, ogg y mov --- */
-    const char *extra[] = { "tono.wav", "tono.ogg", "clip.mov", "tono.aac", "clip.avi" };
+    /* --- el resto de los formatos: abren, duran lo que tienen que durar y
+     * avanzan al reproducir (un .webm con solo audio es audio) --- */
+    const char *extra[] = { "tono.wav", "tono.ogg", "clip.mov", "tono.aac", "clip.avi",
+                            "clip.mkv", "clip.webm", "solo-audio.webm", "tono.flac",
+                            "tono.opus", "tono.m4a", "tono.aiff" };
     const int   kinds[] = { CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO,
-                            CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO };
-    for (int i = 0; i < 5; i++) {
+                            CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_VIDEO, CAPYRO_MEDIA_VIDEO,
+                            CAPYRO_MEDIA_VIDEO, CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO,
+                            CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO, CAPYRO_MEDIA_AUDIO };
+    for (int i = 0; i < (int)(sizeof(extra) / sizeof(extra[0])); i++) {
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", dir, extra[i]);
         if (!exists(path)) {

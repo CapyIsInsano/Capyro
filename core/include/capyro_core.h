@@ -33,8 +33,8 @@ typedef enum {
 
 typedef enum {
     CAPYRO_MEDIA_NONE  = 0,
-    CAPYRO_MEDIA_VIDEO = 1, /* .mp4, .mov, .avi */
-    CAPYRO_MEDIA_AUDIO = 2  /* .mp3, .wav, .ogg, .aac */
+    CAPYRO_MEDIA_VIDEO = 1, /* .mp4, .mov, .avi, .mkv, .webm */
+    CAPYRO_MEDIA_AUDIO = 2  /* .mp3, .wav, .ogg, .aac, .flac, .opus, .m4a, .aiff */
 } CapyroMediaKind;
 
 typedef enum {
@@ -113,8 +113,9 @@ int  capyro_core_open(CapyroCore *core, const char *path);
  * real se decide al abrir: un .ogg puede traer video). No toca el disco. */
 int  capyro_core_probe_extension(const char *path);
 /* Extensiones soportadas, en minúscula y separadas por comas, sin punto.
- * Video: "mp4,mov,avi"   Audio: "mp3,wav,ogg,aac". Son la única fuente de verdad:
- * la GUI arma con esto el filtro del selector y el menú de información. */
+ * Video: "mp4,mov,avi,mkv,webm"   Audio: "mp3,wav,ogg,aac,flac,opus,m4a,aiff".
+ * Son la única fuente de verdad: la GUI arma con esto el filtro del selector
+ * y el menú de información. (También se aceptan .aif y .aifc, que son AIFF.) */
 const char *capyro_core_supported_video(void);
 const char *capyro_core_supported_audio(void);
 
