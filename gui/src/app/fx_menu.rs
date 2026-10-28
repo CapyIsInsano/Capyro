@@ -96,7 +96,7 @@ struct SliderOut {
 pub(super) fn switch(ui: &Ui, painter: &Painter, id: &str, center: egui::Pos2, on: bool, accent: Color32, interactive: bool) -> bool {
     let r = Rect::from_center_size(center, vec2(34.0, 18.0));
     let a = animate_button(ui, Id::unique(("capyro-fx-switch", id)), r.expand(4.0), interactive);
-    let t = ui.ctx().animate_bool_with_time(Id::unique(("capyro-fx-switch-on", id)), on, 0.15);
+    let t = ui.ctx().animate_bool_with_time(Id::unique(("capyro-fx-switch-on", id)), on, crate::perf::t(0.15));
     let bg = Color32::from_white_alpha((28.0 + 14.0 * a.hover) as u8).lerp_to_gamma(accent, t);
     painter.rect_filled(r, 9.0, bg);
     let x = r.left() + 9.0 + t * (r.width() - 18.0);
@@ -111,7 +111,7 @@ impl CapyroApp {
         let id = Id::unique(("capyro-fx-slider", spec.id));
         let resp = ui.interact(row, id, if interactive { Sense::click_and_drag() } else { Sense::hover() });
         let hovered = interactive && (resp.hovered() || resp.dragged());
-        let hover = ctx.animate_bool_with_time(id.with("h"), hovered, 0.12);
+        let hover = ctx.animate_bool_with_time(id.with("h"), hovered, crate::perf::t(0.12));
         if hovered {
             ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
         }
@@ -179,7 +179,7 @@ impl CapyroApp {
         } else {
             painter.rect_filled(Rect::from_min_max(track.min, pos2(x_val, track.bottom())), th / 2.0, accent);
         }
-        let press = ctx.animate_bool_with_time(id.with("p"), resp.dragged(), 0.08);
+        let press = ctx.animate_bool_with_time(id.with("p"), resp.dragged(), crate::perf::t(0.08));
         painter.circle_filled(pos2(x_val, track.center().y), 5.0 + 1.5 * hover + 1.0 * press, Color32::WHITE);
         painter.circle_stroke(pos2(x_val, track.center().y), 5.0 + 1.5 * hover + 1.0 * press, Stroke::new(1.5, accent));
 
@@ -189,7 +189,7 @@ impl CapyroApp {
     /// El menú. Se ancla al botón de efectos y crece hacia arriba.
     pub(super) fn fx_menu(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-fx-anim"), self.show_fx, 0.15);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-fx-anim"), self.show_fx, crate::perf::t(0.15));
         if t <= 0.001 {
             return;
         }
@@ -250,7 +250,7 @@ impl CapyroApp {
             let r = Rect::from_min_size(pos2(x0 + i as f32 * (chip_w + gap), y - 12.0), vec2(chip_w, 24.0));
             let chip = animate_button(ui, Id::unique(("capyro-fx-preset", i)), r, interactive);
             let selected = same_sound(&fx, preset);
-            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fx-preset-sel", i)), selected, 0.15);
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fx-preset-sel", i)), selected, crate::perf::t(0.15));
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
             body.rect_filled(rr, 7.0, bg);

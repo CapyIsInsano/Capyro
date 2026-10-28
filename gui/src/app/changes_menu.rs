@@ -18,7 +18,7 @@ pub(super) fn open_url(url: &str) -> std::io::Result<()> {
 impl CapyroApp {
     pub(super) fn changes_menu(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-changes-anim"), self.show_changes, 0.15);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-changes-anim"), self.show_changes, crate::perf::t(0.15));
         if t <= 0.001 {
             return;
         }

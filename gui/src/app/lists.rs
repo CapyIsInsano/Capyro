@@ -63,7 +63,7 @@ impl CapyroApp {
     pub(super) fn playlist_panel(&mut self, ui: &mut Ui, video: Rect) {
         // Entra deslizándose desde la derecha y se desvanece al salir.
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-playlist-anim"), self.show_playlist, 0.18);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-playlist-anim"), self.show_playlist, crate::perf::t(0.18));
         if t <= 0.001 {
             self.pl_popup = None;
             self.pl_rename = None;
@@ -136,7 +136,7 @@ impl CapyroApp {
         for (id, label, w) in tabs {
             let r = Rect::from_min_size(pos2(x, ty - 11.0), vec2(w, 22.0));
             let a = animate_button(ui, Id::unique(("capyro-pl-tab", id.map_or(usize::MAX, |i| i))), r, interactive);
-            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-pl-tab-sel", id.map_or(usize::MAX, |i| i))), tab == id, 0.15);
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-pl-tab-sel", id.map_or(usize::MAX, |i| i))), tab == id, crate::perf::t(0.15));
             let bg = Color32::from_white_alpha((8.0 + 12.0 * a.hover) as u8).lerp_to_gamma(accent, sel);
             let fg = TEXT_DIM.lerp_to_gamma(TEXT, a.hover).lerp_to_gamma(Color32::WHITE, sel);
             pill(&painter, Rect::from_center_size(r.center(), r.size() * (1.0 - 0.05 * a.press)), &label, bg, fg, true);
@@ -321,7 +321,7 @@ impl CapyroApp {
                         let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
                         // el hover se mide sobre la fila entera (ver v0.2.2: la ✕ se escondía)
                         let row_hovered = interactive && ui.is_enabled() && ui.rect_contains_pointer(row);
-                        let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-row-hover", in_queue, i)), row_hovered, 0.12);
+                        let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-row-hover", in_queue, i)), row_hovered, crate::perf::t(0.12));
                         let is_current = highlight == Some(i);
                         let missing = !in_queue && !Path::new(path).exists();
                         let p = ui.painter();

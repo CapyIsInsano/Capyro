@@ -64,7 +64,7 @@ impl CapyroApp {
 
     pub(super) fn keys_editor(&mut self, ui: &mut Ui, area: Rect) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-keys-anim"), self.show_keys, 0.18);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-keys-anim"), self.show_keys, crate::perf::t(0.18));
         if t <= 0.001 {
             self.keys_capture = None;
             self.keys_adding = false;
@@ -154,7 +154,7 @@ impl CapyroApp {
                 let action = *action;
                 let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
                 let hovered = ui.is_enabled() && ui.rect_contains_pointer(row);
-                let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-keys-row", action.name())), hovered, 0.12);
+                let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-keys-row", action.name())), hovered, crate::perf::t(0.12));
                 let p = ui.painter().clone();
                 let capturing = capture == Some(action);
                 if capturing {
@@ -190,12 +190,14 @@ impl CapyroApp {
 
                 // "+" o esperando tecla
                 if capturing {
-                    let pulse = 0.6 + 0.4 * ((now * 4.0).sin() as f32).abs();
+                    let pulse = 0.6 + 0.4 * ((crate::perf::clock(now) * 4.0).sin() as f32).abs();
                     let g = p.layout_no_wrap("Presioná una tecla…  (Esc cancela)".to_owned(), regular(11.5), Color32::WHITE);
                     let r = Rect::from_min_size(pos2(x, cy - 12.0), vec2(g.size().x + 20.0, 24.0));
                     p.rect_filled(r, 12.0, accent.gamma_multiply(pulse));
                     p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
-                    ui.ctx().request_repaint_after(super::FRAME_SMOOTH);
+                    if crate::perf::animations() {
+                        ui.ctx().request_repaint_after(super::FRAME_SMOOTH);
+                    }
                 } else {
                     let r = Rect::from_min_size(pos2(x, cy - 12.0), vec2(26.0, 24.0));
                     let a = animate_button(ui, Id::unique(("capyro-key-add", action.name())), r, true);

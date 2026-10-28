@@ -242,6 +242,9 @@ pub struct Config {
     pub decoding: crate::ffi::Hwdec,
     /// Con qué se dibuja la ventana en Windows (OpenGL / Direct3D / auto).
     pub renderer: crate::render::Pref,
+    /// Modo de rendimiento: bajo (sin animaciones ni extras), medio o alto
+    /// (con iluminación cinematográfica).
+    pub performance: crate::perf::Mode,
     /// `options.system` tal cual (None = "auto"). Usar [`Config::system`].
     pub system_setting: Option<System>,
     /// De dónde salió (para el log): ruta o "embebida".
@@ -424,6 +427,7 @@ impl Config {
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
                 "renderer" => lua_quote(self.renderer.name()),
+                "performance" => lua_quote(self.performance.name()),
                 "system" => lua_quote(self.system().code()),
                 "backend" => lua_quote(match self.backend {
                     Backend::Auto => "auto",
@@ -492,7 +496,10 @@ impl Config {
                             // la columna de los comentarios queda donde estaba
                             let old_len = rest[..end].trim().chars().count();
                             let pad = old_len.saturating_sub(v.chars().count());
-                            out += &format!("{}={}{},{}{}\n", &line[..eq], lead, v, " ".repeat(pad), tail);
+                            let new = format!("{}={}{},{}{}", &line[..eq], lead, v, " ".repeat(pad), tail);
+                            // (sin comentario no hace falta rellenar)
+                            out += new.trim_end();
+                            out += "\n";
                             continue;
                         }
                     }
@@ -590,6 +597,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         update_branch: None,
         decoding: crate::ffi::Hwdec::Auto,
         renderer: crate::render::Pref::Auto,
+        performance: crate::perf::Mode::Medio,
         click_sound: true,
         show_format: true,
         show_millis: true,
@@ -719,6 +727,12 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                 None => eprintln!("capyro: {name}: system desconocido '{v}' (Lin, Win o auto)"),
             }
         }
+        if let Some(v) = opts.get::<Option<String>>("performance")? {
+            match crate::perf::Mode::parse(&v) {
+                Some(m) => cfg.performance = m,
+                None => eprintln!("capyro: {name}: performance desconocido '{v}' (bajo, medio o alto)"),
+            }
+        }
         if let Some(v) = opts.get::<Option<String>>("renderer")? {
             match crate::render::Pref::parse(&v) {
                 Some(r) => cfg.renderer = r,
@@ -830,6 +844,7 @@ mod tests {
         cfg.show_format = false;
         cfg.show_millis = false;
         cfg.show_video_info = false;
+        cfg.performance = crate::perf::Mode::Alto;
         let text = cfg.to_lua();
         let back = parse(&text, "prueba").unwrap();
         assert!(!back.bindings.iter().any(|b| b.action == Action::Stop));
@@ -846,6 +861,8 @@ mod tests {
         assert_eq!(back.update_repo.as_deref(), Some("CapyIsInsano/Capyro"));
         assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
         assert!(!back.show_format && !back.show_millis && !back.show_video_info);
+        assert_eq!(back.performance, crate::perf::Mode::Alto);
+        assert!(text.contains("performance      = \"alto\","), "{text}");
         assert_eq!(back.splash, cfg.splash);
         // "auto" se guarda ya resuelto: Lin o Win según dónde corre
         assert_eq!(cfg.system_setting, None);

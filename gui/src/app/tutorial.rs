@@ -18,7 +18,8 @@ use eframe::egui::{
     Rect, Sense, Stroke, StrokeKind, TextureOptions, Ui, Vec2,
 };
 
-use super::{animate_button, decode_png, ease_in_out, ease_out, CapyroApp};
+use super::{animate_button, decode_png, CapyroApp};
+use crate::perf;
 use crate::ffi::{OsInfo, State};
 use crate::icons;
 use crate::theme::*;
@@ -284,7 +285,8 @@ impl Tutorial {
     fn go(&mut self, phase: Phase, now: f64) {
         self.phase = phase;
         self.t0 = now;
-        self.revealed_all = false;
+        // en Bajo, el texto aparece entero (sin máquina de escribir)
+        self.revealed_all = !perf::animations();
     }
 }
 
@@ -329,7 +331,7 @@ impl CapyroApp {
             phase: Phase::Intro(0),
             t0: now + 0.6, // el primer texto arranca cuando ya se ve la pantalla
             start: now,
-            revealed_all: false,
+            revealed_all: !perf::animations(),
             spot_from: center,
             spot_to: center,
             spot_t0: now,
@@ -441,6 +443,8 @@ impl CapyroApp {
         let Some(t) = &self.tutorial else { return };
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
+        // lo que solo decora (pulsos, esquinas que respiran): quieto en Bajo
+        let deco = perf::clock(now);
         let accent = self.cfg.accent;
 
         // ¿terminó de cerrarse? (la música baja de a poco y después vuelve todo)
@@ -517,14 +521,14 @@ impl CapyroApp {
             Phase::Tour(i) => {
                 let k = ease_in_out(((now - t.spot_t0) / 0.42) as f32);
                 let spot = lerp_rect(t.spot_from, t.spot_to, k);
-                draw_spotlight(&p, full, spot, accent, now, STEPS[i].target.is_some());
+                draw_spotlight(&p, full, spot, accent, deco, STEPS[i].target.is_some());
                 if STEPS[i].target.is_some() {
-                    draw_corners(&p, spot, accent, now, k);
+                    draw_corners(&p, spot, accent, deco, k);
                 }
                 let shown = if t.revealed_all { usize::MAX } else { revealed(STEPS[i].text, (now - t.t0) as f32) };
                 let complete = t.complete(now);
                 let enter = ((now - t.t0) / 0.35) as f32;
-                draw_bubble(&p, full, spot, &STEPS[i], i, shown, complete, enter, accent, now, t.rounds);
+                draw_bubble(&p, full, spot, &STEPS[i], i, shown, complete, enter, accent, deco, t.rounds);
             }
             Phase::Ask => {
                 p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha(165));
@@ -532,7 +536,7 @@ impl CapyroApp {
             }
             Phase::System => {
                 p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha(165));
-                draw_system(&p, full, &t.os, (now - t.t0) as f32, now, accent);
+                draw_system(&p, full, &t.os, (now - t.t0) as f32, deco, accent);
             }
             Phase::Welcome => {
                 p.rect_filled(full, WINDOW_RADIUS, Color32::from_black_alpha(165));
@@ -576,7 +580,14 @@ impl CapyroApp {
                 || !t.complete(now)
                 || matches!(t.phase, Phase::Reveal | Phase::Welcome)
         });
-        ctx.request_repaint_after(if busy { super::FRAME_SMOOTH } else { super::FRAME_AMBIENT });
+        // en Bajo no hay nada que se mueva: solo hace falta ver pasar el
+        // tiempo (pasos que avanzan solos, la música que baja al cerrar)
+        ctx.request_repaint_after(match (perf::animations(), busy) {
+            (true, true) => super::FRAME_SMOOTH,
+            (true, false) => super::FRAME_AMBIENT,
+            (false, true) => perf::ambient(),
+            (false, false) => std::time::Duration::from_millis(250),
+        });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -614,21 +625,24 @@ impl CapyroApp {
             p.add(egui::Shape::mesh(mesh));
         }
 
-        // chispitas que suben
+        // chispitas que suben (en Bajo no hay)
+        let anim = perf::animations();
         let since = (now - t.start) as f32;
-        draw_embers(&p, full, accent, since, 34);
+        if anim {
+            draw_embers(&p, full, accent, since, 34);
+        }
 
         // logo, nombre y lema: entra saltando y después respira
-        let bob = (since * 1.6).sin() * 3.0;
+        let bob = if anim { (since * 1.6).sin() * 3.0 } else { 0.0 };
         let logo_c = pos2(full.center().x, full.top() + full.height() * 0.2 + bob);
         // halos que salen del logo cada tanto
-        for k in 0..2 {
+        for k in 0..if anim { 2 } else { 0 } {
             let ph = ((since / 2.6) + k as f32 * 0.5).fract();
             p.circle_stroke(logo_c, 50.0 + 70.0 * ph, Stroke::new(1.5, accent.gamma_multiply(0.35 * (1.0 - ph))));
         }
         if let Some(logo) = &self.logo {
             let pop = ease_back((since / 0.7).min(1.0));
-            let breathe = 1.0 + 0.025 * (since * 2.2).sin();
+            let breathe = if anim { 1.0 + 0.025 * (since * 2.2).sin() } else { 1.0 };
             let side = 92.0 * pop * breathe;
             p.image(logo.id(), Rect::from_center_size(logo_c, Vec2::splat(side)), uv(), Color32::WHITE);
         }
@@ -649,7 +663,7 @@ impl CapyroApp {
         let mut shown: String = text.chars().take(n).collect();
         // cursor de máquina de escribir mientras escribe (y un ratito después)
         let typing = n < text.chars().count();
-        if typing || ((now * 2.0) as i64 % 2 == 0 && !t.complete(now)) {
+        if typing || (anim && (now * 2.0) as i64 % 2 == 0 && !t.complete(now)) {
             shown.push('▌');
         }
         let g = p.layout_job(centered_job(&shown, font, TEXT, width));
@@ -663,7 +677,7 @@ impl CapyroApp {
         let below = top + full_g.size().y + 26.0;
         let dots = INTRO.len();
         let widths: Vec<f32> = (0..dots)
-            .map(|d| ui.ctx().animate_value_with_time(Id::unique(("capyro-tut-dot", d)), if d == para { 22.0 } else { 6.0 }, 0.25))
+            .map(|d| ui.ctx().animate_value_with_time(Id::unique(("capyro-tut-dot", d)), if d == para { 22.0 } else { 6.0 }, crate::perf::t(0.25)))
             .collect();
         let total: f32 = widths.iter().sum::<f32>() + 6.0 * (dots as f32 - 1.0);
         let mut x = full.center().x - total / 2.0;
@@ -675,7 +689,7 @@ impl CapyroApp {
         if t.complete(now) && matches!(t.phase, Phase::Intro(_)) {
             // la tecla "Espacio" dibujada, que se hunde de a ratos
             let k = ease_out(((now - t.t0) as f32 - total_time(text)).max(0.0) / 0.3);
-            let press = ((now * 1.4).fract() < 0.12) as i32 as f32;
+            let press = ((perf::clock(now) * 1.4).fract() < 0.12) as i32 as f32;
             let mut ph = p.clone();
             ph.multiply_opacity(k);
             let cy = below + 30.0;
@@ -755,11 +769,14 @@ impl CapyroApp {
             }
             sp.angle %= std::f32::consts::TAU;
             ctx.data_mut(|d| d.insert_temp(id, sp));
-            if sp.speed.abs() > 0.01 || b.hover > 0.001 {
+            if !anim {
+                sp.speed = 0.0; // en Bajo el destello no gira
+            }
+            if anim && (sp.speed.abs() > 0.01 || b.hover > 0.001) {
                 ctx.request_repaint_after(super::FRAME_SMOOTH);
             }
             let sc = pos2(r.left() - 10.0, cy);
-            let pulse = 1.0 + 0.12 * b.hover * ((now * 6.0).sin() as f32 * 0.5 + 0.5);
+            let pulse = 1.0 + 0.12 * b.hover * ((perf::clock(now) * 6.0).sin() as f32 * 0.5 + 0.5);
             let col = TEXT_DIM.lerp_to_gamma(accent, b.hover);
             if b.hover > 0.001 {
                 p.circle_filled(sc, 11.0, accent.gamma_multiply(0.12 * b.hover));
@@ -806,29 +823,30 @@ impl CapyroApp {
         let mut p = p.clone();
         p.multiply_opacity(k);
         // brillo naranja que late detrás de la tarjeta
-        let glow = 0.5 + 0.5 * ((since * 2.0).sin() as f32);
+        let anim = perf::animations();
+        let glow = if anim { 0.5 + 0.5 * ((since * 2.0).sin() as f32) } else { 0.5 };
         p.rect_filled(card.expand(6.0 + 4.0 * glow), 24.0, accent.gamma_multiply(0.06 + 0.05 * glow));
         p.rect_filled(card.translate(vec2(0.0, 6.0)), 18.0, Color32::from_black_alpha(90));
         p.rect_filled(card, 18.0, BG_PANEL);
         p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
         if let Some(logo) = &self.logo {
             // el capibara mira a los costados, como esperando la respuesta
-            let tilt = ((since * 1.8).sin() as f32) * 4.0;
-            let lc = pos2(card.center().x + tilt, card.top() + 40.0 - ((since * 3.6).sin() as f32).abs() * 3.0);
+            let (tilt, hop) = if anim { (((since * 1.8).sin() as f32) * 4.0, ((since * 3.6).sin() as f32).abs() * 3.0) } else { (0.0, 0.0) };
+            let lc = pos2(card.center().x + tilt, card.top() + 40.0 - hop);
             p.image(logo.id(), Rect::from_center_size(lc, Vec2::splat(46.0)), uv(), Color32::WHITE);
         }
         let tk = ease_out(((since - 0.12) / 0.3) as f32);
         let mut pt = p.clone();
         pt.multiply_opacity(tk);
         pt.text(pos2(card.center().x, card.top() + 90.0 + 8.0 * (1.0 - tk)), Align2::CENTER_CENTER, "¿Estás listo?", bold(22.0), TEXT);
-        if k < 0.9 {
+        if k < 0.9 && anim {
             ui.ctx().request_repaint_after(super::FRAME_SMOOTH);
         }
         let by = card.bottom() - 42.0;
         let mut out = None;
         for (n, (yes, label, x)) in [(true, "Sí", card.center().x - 66.0), (false, "No", card.center().x + 66.0)].into_iter().enumerate() {
             // los botones aparecen uno detrás del otro, con saltito
-            let bk = ((since - 0.25 - 0.1 * n as f64) / 0.35) as f32;
+            let bk = perf::k(((since - 0.25 - 0.1 * n as f64) / 0.35) as f32);
             if bk <= 0.0 {
                 continue;
             }
@@ -856,7 +874,8 @@ impl CapyroApp {
 
     fn draw_welcome(&self, p: &egui::Painter, full: Rect, since: f32, accent: Color32) {
         let c = full.center();
-        // papelitos que caen
+        let anim = perf::animations();
+        // papelitos que caen (en Bajo no hay)
         let mut seed: u32 = 0x9E37_79B9;
         let mut rnd = || {
             seed ^= seed << 13;
@@ -864,7 +883,7 @@ impl CapyroApp {
             seed ^= seed << 5;
             (seed % 10_000) as f32 / 10_000.0
         };
-        for i in 0..60 {
+        for i in 0..if anim { 60 } else { 0 } {
             let x0 = full.left() + rnd() * full.width();
             let speed = 120.0 + 160.0 * rnd();
             let delay = rnd() * 0.8;
@@ -892,7 +911,7 @@ impl CapyroApp {
             p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
         }
         // rayos de luz que giran detrás del logo
-        {
+        if anim {
             let lc = c - vec2(0.0, 70.0);
             let k = ease_out(since / 0.6);
             let n = 12;
@@ -915,7 +934,7 @@ impl CapyroApp {
         }
         // logo que salta y el título
         let pop = ease_back(since / 0.5);
-        let bounce = (-since * 3.0).exp() * (since * 10.0).sin().abs() * 26.0;
+        let bounce = if anim { (-since * 3.0).exp() * (since * 10.0).sin().abs() * 26.0 } else { 0.0 };
         if let Some(logo) = &self.logo {
             let side = 110.0 * pop;
             p.image(logo.id(), Rect::from_center_size(c - vec2(0.0, 70.0 + bounce), Vec2::splat(side)), uv(), Color32::WHITE);
@@ -970,7 +989,7 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     }
     let t = since - SCAN_TIME as f32;
     let pop = ease_out(t / 0.4);
-    let bounce = (-t * 4.0).exp() * (t * 12.0).sin().abs() * 10.0;
+    let bounce = if perf::animations() { (-t * 4.0).exp() * (t * 12.0).sin().abs() * 10.0 } else { 0.0 };
     // brillo detrás del ícono
     p.circle_filled(icon_c, 44.0 * pop, accent.gamma_multiply(0.12));
     let side = 72.0 * (0.6 + 0.4 * pop);
@@ -1037,9 +1056,19 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     p.rect_filled(bar, 1.0, accent.gamma_multiply(0.6));
 }
 
+// En el tutorial todas las curvas miden tiempo: en modo Bajo (sin
+// animaciones) todo aparece ya terminado.
+fn ease_out(t: f32) -> f32 {
+    super::ease_out(perf::k(t))
+}
+
+fn ease_in_out(t: f32) -> f32 {
+    super::ease_in_out(perf::k(t))
+}
+
 /// Sale un poco de más y vuelve (para las cosas que "saltan" al aparecer).
 fn ease_back(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
+    let t = perf::k(t).clamp(0.0, 1.0);
     let c = 1.70158;
     1.0 + (c + 1.0) * (t - 1.0).powi(3) + c * (t - 1.0).powi(2)
 }

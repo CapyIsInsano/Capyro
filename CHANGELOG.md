@@ -31,6 +31,11 @@
   - la **resolución** con su nombre, de 144p a 16K (480p SD, 720p HD, 1080p Full HD, 1440p 2K, 4K, 5K, 8K, 16K). Es solo el indicador: un video de 2786×1567 dice "1440p · 2K" y se ve tal cual es. Los videos verticales y los de cine (más anchos) caen en su escalón. Con el mouse encima, la resolución exacta;
   - los **fps** del video (30, 29.97, 60...). Si la PC no llega a mostrarlos todos, se pone amarillo y dice cuántos se están viendo.
   - Las dos se ocultan juntas en ⚙ → Mostrar resolución y fps (`show_video_info`).
+- Extra: **modos de rendimiento** en ⚙ → Rendimiento (`performance` en capyro.lua):
+  - **Bajo**: sin nada de más, pero sin sacar funciones. Se apagan todas las animaciones (menús, botones, avisos y el tutorial aparecen y se van al toque, el texto sale entero), la pantalla de carga, el visualizador, las chispitas, halos, papelitos y brillos del tutorial. Lo que se mueve solo se redibuja 20 veces por segundo en vez de 30. Con música y en el tutorial gasta alrededor de un tercio menos que en Medio;
+  - **Medio** (el de siempre, viene por defecto): Capyro como hasta ahora;
+  - **Alto**: suma la **iluminación cinematográfica**, como la de YouTube pero en toda la ventana: los colores del video (o de la carátula de la canción) se derraman por el header, los controles y las franjas negras del video, y cambian despacio siguiendo la imagen. Para no comerse el procesador, de cada cuadro se promedian unos pocos píxeles (una grilla de 16×9) y la luz es una malla con colores por vértice que pinta la placa de video; lo que queda tapado por el video ni se dibuja, y con la imagen quieta deja de recalcular.
+  - Se cambia al instante, sin reiniciar.
 
 ## v0.3.0-alpha · El salto a Windows
 

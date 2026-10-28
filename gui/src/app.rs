@@ -193,16 +193,28 @@ impl Anim {
     }
 }
 
+/// Aplica el modo de rendimiento: el global de `perf` y las animaciones
+/// propias de egui (tooltips, scroll), que en Bajo también se apagan.
+pub(crate) fn apply_performance(ctx: &egui::Context, mode: crate::perf::Mode) {
+    crate::perf::set(mode);
+    let low = mode == crate::perf::Mode::Bajo;
+    ctx.all_styles_mut(|s| {
+        let d = egui::Style::default();
+        s.animation_time = if low { 0.0 } else { d.animation_time };
+        s.scroll_animation = if low { egui::style::ScrollAnimation::none() } else { d.scroll_animation };
+    });
+}
+
 fn animate_button(ui: &Ui, id: Id, rect: Rect, enabled: bool) -> Anim {
     let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
     let ctx = ui.ctx();
     let hovered = enabled && resp.hovered();
-    let hover = ctx.animate_bool_with_time(id.with("hover"), hovered, 0.14);
+    let hover = ctx.animate_bool_with_time(id.with("hover"), hovered, crate::perf::t(0.14));
     if resp.clicked() {
         // el clic suena al final del frame (si el botón no hizo sonar otra cosa)
         ctx.data_mut(|d| d.insert_temp(Id::unique(CLICK_FLAG), true));
     }
-    let press = ctx.animate_bool_with_time(id.with("press"), enabled && resp.is_pointer_button_down_on(), 0.07);
+    let press = ctx.animate_bool_with_time(id.with("press"), enabled && resp.is_pointer_button_down_on(), crate::perf::t(0.07));
     if hovered {
         ctx.set_cursor_icon(CursorIcon::PointingHand);
     }
@@ -225,6 +237,10 @@ pub struct CapyroApp {
     fps_meter: crate::videoinfo::FpsMeter,
     /// Tamaño del área de video que se le pasó al núcleo la última vez.
     video_target: (u32, u32),
+    /// Iluminación cinematográfica (modo de rendimiento Alto).
+    ambient: crate::perf::Ambient,
+    /// Área de video del cuadro anterior (lo que tapa la luz de la ventana).
+    ambient_under: Option<Rect>,
     video_aspect: f32,
     /// Toast que hay que mostrar en el primer frame (todavía no hay `ctx.time`).
     startup_notice: Option<String>,
@@ -356,6 +372,7 @@ impl CapyroApp {
     pub fn new(cc: &eframe::CreationContext<'_>, core: Core, cfg: Config) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         theme::apply_visuals(&cc.egui_ctx, cfg.accent);
+        apply_performance(&cc.egui_ctx, cfg.performance);
 
         let logo = decode_png(LOGO_PNG).map(|(w, h, rgba)| {
             let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
@@ -372,7 +389,8 @@ impl CapyroApp {
             .audio_backend()
             .is_empty()
             .then(|| "No encontré dispositivo de audio: reproduzco sin sonido".to_owned());
-        let splash = cfg.splash;
+        // en Bajo no hay pantalla de carga: la interfaz aparece directo
+        let splash = cfg.splash && cfg.performance != crate::perf::Mode::Bajo;
         // Lo que dejó la actualización anterior (Windows: los .old).
         updater::cleanup_after_update();
         // Recién actualizado (lo abrió el Capyro viejo al reiniciar): contarlo.
@@ -399,6 +417,8 @@ impl CapyroApp {
             frame_buf: Vec::new(),
             fps_meter: Default::default(),
             video_target: (0, 0),
+            ambient: Default::default(),
+            ambient_under: None,
             video_aspect: 16.0 / 9.0,
             startup_notice,
             dialog: None,
@@ -929,9 +949,28 @@ impl CapyroApp {
         }
     }
 
+    /// Cambia el modo de rendimiento (⚙ → Rendimiento) y lo guarda.
+    fn set_performance(&mut self, ctx: &egui::Context, mode: crate::perf::Mode) {
+        self.cfg.performance = mode;
+        apply_performance(ctx, mode);
+        // la luz arranca de cero; y si es Alto, que saque los colores de la
+        // imagen que ya está (una carátula no manda cuadros nuevos)
+        self.ambient = Default::default();
+        if mode == crate::perf::Mode::Alto {
+            self.video_serial = u64::MAX;
+        }
+        let msg = match mode {
+            crate::perf::Mode::Bajo => "Rendimiento bajo: sin animaciones ni extras",
+            crate::perf::Mode::Medio => "Rendimiento medio",
+            crate::perf::Mode::Alto => "Rendimiento alto: iluminación cinematográfica",
+        };
+        self.save_config(ctx, msg.to_owned());
+    }
+
     fn reload_config(&mut self, ctx: &egui::Context) {
         self.cfg = Config::load();
         theme::apply_visuals(ctx, self.cfg.accent);
+        apply_performance(ctx, self.cfg.performance);
         self.core.set_auto_next(self.cfg.auto_next);
         self.core.set_hwdec(self.cfg.decoding);
         let src = self.cfg.source.clone();
@@ -1109,8 +1148,12 @@ impl CapyroApp {
             buf.extend_from_slice(vf.rgba);
             Some(([vf.width, vf.height], vf.serial, vf.aspect))
         });
+        let alto = self.cfg.performance == crate::perf::Mode::Alto;
         let fresh = fresh.map(|f| {
             f.map(|(size, serial, aspect)| {
+                if alto {
+                    self.ambient.sample(&buf, size[0], size[1]);
+                }
                 let pixels: Vec<Color32> = buf
                     .chunks_exact(4)
                     .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
@@ -1120,7 +1163,11 @@ impl CapyroApp {
         });
         self.frame_buf = buf;
         match fresh {
-            None => self.video_tex = None, // no hay frame (nada cargado o mp3 sin carátula)
+            None => {
+                // no hay frame (nada cargado o mp3 sin carátula)
+                self.video_tex = None;
+                self.ambient.clear();
+            }
             Some(None) => {}               // mismo frame que ya tenemos
             Some(Some((img, serial, aspect))) => {
                 if self.core.state() == State::Playing && self.core.media_kind() == MediaKind::Video {
@@ -1179,7 +1226,7 @@ impl CapyroApp {
         let mut bounce = 0.0;
         if let Some(t0) = self.logo_click {
             let dt = (now - t0) as f32;
-            if dt < 0.7 {
+            if dt < 0.7 && crate::perf::animations() {
                 bounce = (-dt * 7.0).exp() * (dt * 22.0).sin();
                 ctx.request_repaint_after(FRAME_SMOOTH);
             } else {
@@ -1242,6 +1289,15 @@ impl CapyroApp {
         let ctx = ui.ctx().clone();
         let painter = ui.painter().clone();
         painter.rect_filled(rect, 10.0, BG_VIDEO);
+        // Alto: también adentro del área de video, alrededor de la imagen
+        // (las franjas negras y el fondo de la carátula)
+        let lit = self.cfg.performance == crate::perf::Mode::Alto;
+        if lit {
+            let reach = rect.width().max(rect.height()) * 0.45;
+            self.ambient.paint(&painter, rect.shrink(2.0), 0.30, reach, self.ambient.source);
+            self.ambient_under = Some(rect);
+        }
+        let mut source = None;
 
         // el núcleo convierte los cuadros al tamaño en que se ven, no más
         let ppp = ctx.pixels_per_point();
@@ -1294,6 +1350,7 @@ impl CapyroApp {
                             size = vec2(avail.y * self.video_aspect, avail.y);
                         }
                         let dest = Rect::from_center_size(c, size);
+                        source = Some(dest);
                         painter.rect_filled(dest, 0.0, Color32::BLACK);
                         painter.image(tex.id(), dest, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                     } else {
@@ -1307,7 +1364,7 @@ impl CapyroApp {
                     let side = (rect.height() * 0.5).clamp(80.0, 260.0);
                     let art_center = c - vec2(0.0, if has_cover { 28.0 } else { 36.0 });
                     let text_y = if has_cover { art_center.y + side / 2.0 + 24.0 } else { c.y + 6.0 };
-                    if self.cfg.visualizer && !self.viz.is_silent() {
+                    if self.cfg.visualizer && crate::perf::animations() && !self.viz.is_silent() {
                         // barras de frecuencia de fondo, debajo del título y el artista
                         let text_bottom = text_y + if artist.is_empty() { 14.0 } else { 34.0 };
                         let top = (rect.bottom() - rect.height() * 0.30).max(text_bottom + 6.0);
@@ -1326,6 +1383,7 @@ impl CapyroApp {
                         if size.y > side {
                             size = vec2(side * self.video_aspect, side);
                         }
+                        source = Some(Rect::from_center_size(art_center, size));
                         painter.rect_filled(art.expand(1.0), 10.0, BG_PANEL);
                         painter.image(
                             tex.id(),
@@ -1351,6 +1409,9 @@ impl CapyroApp {
             }
         }
 
+        if lit && source.is_some() {
+            self.ambient.source = source;
+        }
         if !hovering_files && self.core.media_kind() != MediaKind::None {
             self.format_badge(ui, rect);
         }
@@ -1368,8 +1429,8 @@ impl CapyroApp {
     /// los milisegundos sube deslizándose a su lugar (y baja si vuelve).
     fn format_badge(&self, ui: &Ui, area: Rect) {
         let ctx = ui.ctx();
-        let tf = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-format-badge"), self.cfg.show_format, 0.3));
-        let tm = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-millis-badge"), self.cfg.show_millis, 0.3));
+        let tf = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-format-badge"), self.cfg.show_format, crate::perf::t(0.3)));
+        let tm = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-millis-badge"), self.cfg.show_millis, crate::perf::t(0.3)));
         if tf <= 0.001 && tm <= 0.001 {
             return;
         }
@@ -1431,7 +1492,7 @@ impl CapyroApp {
             p.galley(pos2(x + nw + 5.0, r.center().y - ug.size().y / 2.0), ug, TEXT_DIM);
             if self.core.state() == State::Playing {
                 // que corran los números: 30 por segundo alcanzan para verlos correr
-                ui.ctx().request_repaint_after(FRAME_AMBIENT);
+                ui.ctx().request_repaint_after(crate::perf::ambient());
             }
         }
         if (0.001..0.999).contains(&tf) || (0.001..0.999).contains(&tm) {
@@ -1445,7 +1506,7 @@ impl CapyroApp {
     /// juntas en Ajustes (entran y salen deslizándose).
     fn video_info_badges(&self, ui: &Ui, area: Rect) {
         let ctx = ui.ctx();
-        let t = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-videoinfo-badge"), self.cfg.show_video_info, 0.3));
+        let t = ease_out(ctx.animate_bool_with_time(Id::unique("capyro-videoinfo-badge"), self.cfg.show_video_info, crate::perf::t(0.3)));
         if t <= 0.001 {
             return;
         }
@@ -1487,7 +1548,7 @@ impl CapyroApp {
         p.rect_filled(f, 12.0, Color32::from_black_alpha(150));
         p.rect_stroke(f, 12.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
         // puntito: late mientras corre el video, quieto en pausa
-        let beat = if playing { 0.6 + 0.4 * ((now * 2.0 * std::f64::consts::PI).sin() as f32).abs() } else { 0.45 };
+        let beat = if playing { 0.6 + 0.4 * ((crate::perf::clock(now) * 2.0 * std::f64::consts::PI).sin() as f32).abs() } else { 0.45 };
         p.circle_filled(pos2(f.left() + 9.0, f.center().y), 2.5, if slow { col } else { accent.gamma_multiply(beat) });
         p.galley(pos2(f.left() + 16.0, f.center().y - ng.size().y / 2.0), ng.clone(), col);
         p.galley(pos2(f.left() + 16.0 + ng.size().x + 5.0, f.center().y - ug.size().y / 2.0), ug, TEXT_DIM);
@@ -1526,8 +1587,8 @@ impl CapyroApp {
             return;
         }
         // Aparece subiendo un poco y se desvanece al final.
-        let fade_in = ((now - t.start) / 0.15).clamp(0.0, 1.0) as f32;
-        let fade_out = ((t.until - now) / 0.35).clamp(0.0, 1.0) as f32;
+        let fade_in = crate::perf::k(((now - t.start) / 0.15).clamp(0.0, 1.0) as f32);
+        let fade_out = crate::perf::k(((t.until - now) / 0.35).clamp(0.0, 1.0) as f32);
         let alpha = fade_in.min(fade_out);
         let rise = (1.0 - fade_in) * 8.0;
 
@@ -1543,7 +1604,9 @@ impl CapyroApp {
         if fade_in < 1.0 || fade_out < 1.0 {
             ui.ctx().request_repaint_after(FRAME_SMOOTH);
         } else {
-            ui.ctx().request_repaint_after(Duration::from_secs_f64((t.until - 0.35 - now).max(0.0)));
+            // (en Bajo no se desvanece: se va justo al final)
+            let fade_at = if crate::perf::animations() { t.until - 0.35 } else { t.until };
+            ui.ctx().request_repaint_after(Duration::from_secs_f64((fade_at - now).max(0.0)));
         }
     }
 
@@ -1569,7 +1632,7 @@ impl CapyroApp {
         let position = self.core.position();
         let frac = if can_seek { (position / duration).clamp(0.0, 1.0) as f32 } else { 0.0 };
         let active = can_seek && (seek.hovered() || seek.dragged());
-        let grow = ctx.animate_bool_with_time(Id::unique("capyro-seek-grow"), active, 0.12);
+        let grow = ctx.animate_bool_with_time(Id::unique("capyro-seek-grow"), active, crate::perf::t(0.12));
         let th = 3.0 + 2.0 * grow;
         let track = Rect::from_min_max(pos2(left, ty - th / 2.0), pos2(right, ty + th / 2.0));
         painter.rect_filled(track, th / 2.0, TRACK);
@@ -1587,7 +1650,7 @@ impl CapyroApp {
         }
         painter.rect_filled(Rect::from_min_max(track.min, pos2(fill_x, track.max.y)), th / 2.0, accent);
         if grow > 0.001 {
-            let pressed = ctx.animate_bool_with_time(Id::unique("capyro-seek-press"), seek.dragged(), 0.08);
+            let pressed = ctx.animate_bool_with_time(Id::unique("capyro-seek-press"), seek.dragged(), crate::perf::t(0.08));
             painter.circle_filled(pos2(fill_x, ty), 6.5 * grow + 1.5 * pressed, accent);
         }
         if active {
@@ -1641,7 +1704,7 @@ impl CapyroApp {
         let shuffle_on = self.core.shuffle();
         let shuffle_c = pos2(cx - 105.0, cy);
         let sh = Self::icon_button(ui, "shuffle", shuffle_c, 30.0);
-        let sh_on = ctx.animate_bool_with_time(Id::unique("capyro-shuffle-on"), shuffle_on, 0.15);
+        let sh_on = ctx.animate_bool_with_time(Id::unique("capyro-shuffle-on"), shuffle_on, crate::perf::t(0.15));
         let sh_col = sh.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, sh_on);
         icons::shuffle(&painter, shuffle_c, 16.0 * sh.scale(), sh_col);
         if sh_on > 0.001 {
@@ -1671,7 +1734,7 @@ impl CapyroApp {
         let play_c = pos2(cx + 17.0, cy);
         let play = animate_button(ui, Id::unique("capyro-play"), Rect::from_center_size(play_c, Vec2::splat(46.0)), true);
         let playing = self.core.state() == State::Playing;
-        let morph = ctx.animate_bool_with_time(Id::unique("capyro-play-morph"), playing, 0.16);
+        let morph = ctx.animate_bool_with_time(Id::unique("capyro-play-morph"), playing, crate::perf::t(0.16));
         let scale = 1.0 + 0.06 * play.hover - 0.1 * play.press;
         if play.hover > 0.001 {
             painter.circle_filled(play_c, 23.0 * scale + 6.0 * play.hover, accent.gamma_multiply(0.18 * play.hover));
@@ -1700,7 +1763,7 @@ impl CapyroApp {
         let repeat_c = pos2(cx + 105.0, cy);
         self.ui_rects.insert("controls", Rect::from_min_max(pos2(cx - 123.0, cy - 25.0), pos2(cx + 123.0, cy + 25.0)));
         let rp = Self::icon_button(ui, "repeat", repeat_c, 30.0);
-        let rp_on = ctx.animate_bool_with_time(Id::unique("capyro-repeat-on"), repeat != Repeat::Off, 0.15);
+        let rp_on = ctx.animate_bool_with_time(Id::unique("capyro-repeat-on"), repeat != Repeat::Off, crate::perf::t(0.15));
         let rp_col = rp.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, rp_on);
         icons::repeat(&painter, repeat_c, 16.0 * rp.scale(), rp_col, repeat == Repeat::One);
         if rp_on > 0.001 {
@@ -1759,7 +1822,7 @@ impl CapyroApp {
         /* --- botón de información (arriba de "Lista", a la izquierda) --- */
         let info_c = pos2(left + 9.0, cy);
         let info = Self::icon_button(ui, "info", info_c, 30.0);
-        let info_on = ctx.animate_bool_with_time(Id::unique("capyro-info-on"), self.show_info, 0.15);
+        let info_on = ctx.animate_bool_with_time(Id::unique("capyro-info-on"), self.show_info, crate::perf::t(0.15));
         let info_col = info.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, info_on);
         icons::info(&painter, info_c, 17.0 * info.scale(), info_col);
         // puntito: actualizando (late) o lista para reiniciar
@@ -1767,10 +1830,10 @@ impl CapyroApp {
         let badge = ctx.animate_bool_with_time(
             Id::unique("capyro-info-badge"),
             self.updater.is_running() || pending_restart,
-            0.2,
+            crate::perf::t(0.2),
         );
         if badge > 0.001 {
-            let beat = if self.updater.is_running() { 0.6 + 0.4 * (ctx.input(|i| i.time) * 5.0).sin().abs() as f32 } else { 1.0 };
+            let beat = if self.updater.is_running() { 0.6 + 0.4 * (crate::perf::clock(ctx.input(|i| i.time)) * 5.0).sin().abs() as f32 } else { 1.0 };
             painter.circle_filled(info_c + vec2(0.0, 13.0), 2.0 * badge, accent.gamma_multiply(beat));
         }
         self.info_rect = Rect::from_center_size(info_c, Vec2::splat(30.0));
@@ -1792,13 +1855,13 @@ impl CapyroApp {
         /* --- botón de novedades (al lado de ⓘ) --- */
         let ch_c = pos2(left + 43.0, cy);
         let ch = Self::icon_button(ui, "changes", ch_c, 30.0);
-        let ch_on = ctx.animate_bool_with_time(Id::unique("capyro-changes-on"), self.show_changes, 0.15);
+        let ch_on = ctx.animate_bool_with_time(Id::unique("capyro-changes-on"), self.show_changes, crate::perf::t(0.15));
         let ch_col = ch.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, ch_on);
         icons::news(&painter, ch_c, 17.0 * ch.scale(), ch_col);
         self.changes_rect = Rect::from_center_size(ch_c, Vec2::splat(30.0));
         // puntito mientras no se hayan visto las novedades de esta versión
         let unseen = self.changes_seen != ffi::version();
-        let dot = ctx.animate_bool_with_time(Id::unique("capyro-changes-dot"), unseen, 0.3);
+        let dot = ctx.animate_bool_with_time(Id::unique("capyro-changes-dot"), unseen, crate::perf::t(0.3));
         if dot > 0.001 {
             painter.circle_filled(ch_c + vec2(0.0, 13.0), 2.0 * dot, accent);
         }
@@ -1821,7 +1884,7 @@ impl CapyroApp {
         let list_rect = Rect::from_min_max(pos2(left - 6.0, by - 14.0), pos2(left + 66.0, by + 14.0));
         self.ui_rects.insert("list", list_rect);
         let list = animate_button(ui, Id::unique("capyro-list"), list_rect, true);
-        let list_on = ctx.animate_bool_with_time(Id::unique("capyro-list-on"), self.show_playlist, 0.15);
+        let list_on = ctx.animate_bool_with_time(Id::unique("capyro-list-on"), self.show_playlist, crate::perf::t(0.15));
         let list_col = list.tint(ICON_DIM, TEXT).lerp_to_gamma(accent, list_on);
         let bg = (10.0 * list.hover + 10.0 * list.press) as u8;
         if bg > 0 {
@@ -1888,8 +1951,8 @@ impl CapyroApp {
         // efectos de audio: a la izquierda del volumen
         let fx_c = pos2(right - 120.0, by);
         let fxb = Self::icon_button(ui, "effects", fx_c, 26.0);
-        let fx_on = ctx.animate_bool_with_time(Id::unique("capyro-fx-on"), self.show_fx, 0.15);
-        let fx_active = ctx.animate_bool_with_time(Id::unique("capyro-fx-active"), self.fx_active(), 0.15);
+        let fx_on = ctx.animate_bool_with_time(Id::unique("capyro-fx-on"), self.show_fx, crate::perf::t(0.15));
+        let fx_active = ctx.animate_bool_with_time(Id::unique("capyro-fx-active"), self.fx_active(), crate::perf::t(0.15));
         let fx_col = fxb
             .tint(ICON_DIM, Color32::WHITE)
             .lerp_to_gamma(accent, fx_on.max(fx_active));
@@ -1921,7 +1984,7 @@ impl CapyroApp {
         // engranaje: abre el menú de ajustes (y gira un poco al pasar el mouse)
         let gear_c = pos2(right - 36.0, by);
         let gear = Self::icon_button(ui, "settings", gear_c, 26.0);
-        let gear_on = ctx.animate_bool_with_time(Id::unique("capyro-gear-on"), self.show_settings, 0.15);
+        let gear_on = ctx.animate_bool_with_time(Id::unique("capyro-gear-on"), self.show_settings, crate::perf::t(0.15));
         let gear_col = gear.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, gear_on);
         icons::gear(&painter, gear_c, 16.0 * gear.scale(), gear_col);
         self.gear_rect = Rect::from_center_size(gear_c, Vec2::splat(26.0));
@@ -1948,7 +2011,7 @@ impl CapyroApp {
     /// Crece desde el botón ⓘ (abajo a la izquierda), igual que el de ajustes.
     fn info_menu(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, 0.15);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, crate::perf::t(0.15));
         if t <= 0.001 {
             self.info_format = None; // al volver a abrirlo arranca sin resumen abierto
             return;
@@ -1973,7 +2036,7 @@ impl CapyroApp {
         let mut region_h = 0.0;
         for (ext, is_video) in &all {
             let open = self.info_format.as_deref() == Some(ext.as_str());
-            let k = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-open", ext.as_str())), open, 0.22);
+            let k = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-open", ext.as_str())), open, crate::perf::t(0.22));
             if k <= 0.001 {
                 continue;
             }
@@ -2054,7 +2117,7 @@ impl CapyroApp {
                 let g = painter.layout_no_wrap(ext.to_uppercase(), bold(11.0), TEXT);
                 let r = Rect::from_min_size(pos2(cx, y - 11.0), vec2(g.size().x + 14.0, 22.0));
                 let a = animate_button(ui, Id::unique(("capyro-fmt", ext.as_str())), r, interactive);
-                let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-sel", ext.as_str())), selected, 0.15);
+                let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fmt-sel", ext.as_str())), selected, crate::perf::t(0.15));
                 let rr = Rect::from_center_size(r.center(), r.size() * (1.0 + 0.04 * a.hover - 0.08 * a.press));
                 let bg = Color32::from_white_alpha((10.0 + 12.0 * a.hover) as u8).lerp_to_gamma(accent, sel);
                 painter.rect_filled(rr, 6.0, bg);
@@ -2114,14 +2177,16 @@ impl CapyroApp {
     /// creciendo desde el engranaje y se cierra al hacer clic afuera o con Esc.
     fn settings_menu(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-settings-anim"), self.show_settings, 0.15);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-settings-anim"), self.show_settings, crate::perf::t(0.15));
         if t <= 0.001 {
             return;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let size = vec2(288.0, 410.0);
-        let anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
+        let size = vec2(288.0, 496.0);
+        let mut anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
+        // en ventanas bajitas no se sale por arriba (tapa el engranaje)
+        anchor.y = anchor.y.max(ui.max_rect().top() + 8.0 + size.y);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
         let panel = Rect::from_min_max(anchor - size * (0.85 + 0.15 * ease), anchor);
@@ -2163,7 +2228,7 @@ impl CapyroApp {
             let r = Rect::from_min_size(pos2(x0 + i as f32 * (chip_w + gap), y - 13.0), vec2(chip_w, 26.0));
             let chip = animate_button(ui, Id::unique(("capyro-speed", i)), r, interactive);
             let selected = (speed - v).abs() < 1e-6;
-            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-speed-sel", i)), selected, 0.15);
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-speed-sel", i)), selected, crate::perf::t(0.15));
             let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             painter.rect_filled(rr, 7.0, bg);
@@ -2197,7 +2262,7 @@ impl CapyroApp {
             let r = Rect::from_min_size(pos2(x0 + i as f32 * (chip_w + gap), y - 13.0), vec2(chip_w, 26.0));
             let chip = animate_button(ui, Id::unique(("capyro-hwdec", i)), r, interactive);
             let selected = mode == m;
-            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-hwdec-sel", i)), selected, 0.15);
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-hwdec-sel", i)), selected, crate::perf::t(0.15));
             let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             painter.rect_filled(rr, 7.0, bg);
@@ -2226,6 +2291,37 @@ impl CapyroApp {
         if status.chars().count() > 46 {
             st.on_hover_text(status);
         }
+
+        /* separador */
+        y += 18.0;
+        painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
+
+        /* modo de rendimiento: bajo / medio / alto */
+        y += 22.0;
+        let perf_mode = self.cfg.performance;
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Rendimiento", regular(12.5), TEXT_DIM);
+        y += 24.0;
+        for (i, m) in crate::perf::Mode::ALL.iter().copied().enumerate() {
+            let r = Rect::from_min_size(pos2(x0 + i as f32 * (chip_w + gap), y - 13.0), vec2(chip_w, 26.0));
+            let chip = animate_button(ui, Id::unique(("capyro-perf", i)), r, interactive);
+            let selected = perf_mode == m;
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-perf-sel", i)), selected, crate::perf::t(0.15));
+            let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
+            let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
+            painter.rect_filled(rr, 7.0, bg);
+            let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
+            painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected { bold(11.5) } else { regular(11.5) }, col);
+            if chip.resp.clicked() && !selected {
+                self.set_performance(&ctx, m);
+            }
+            chip.resp.on_hover_text(match m {
+                crate::perf::Mode::Bajo => "Sin animaciones, sin pantalla de carga, sin visualizador ni brillos. Todo sigue funcionando, gastando lo mínimo",
+                crate::perf::Mode::Medio => "Capyro como siempre",
+                crate::perf::Mode::Alto => "Suma la iluminación cinematográfica: los colores del video (o de la carátula) iluminan toda la ventana, como en YouTube",
+            });
+        }
+        y += 22.0;
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, self.cfg.performance.blurb(), regular(10.5), TEXT_FAINT);
 
         /* separador */
         y += 18.0;
@@ -2489,7 +2585,7 @@ impl CapyroApp {
     /// son más nuevos que el tuyo) y los botones Instalar / Ahora no.
     fn draw_update_offer(&mut self, ui: &mut Ui, video: Rect) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-offer-anim"), self.show_offer, 0.22);
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-offer-anim"), self.show_offer, crate::perf::t(0.22));
         if t <= 0.001 {
             return;
         }
@@ -2524,7 +2620,7 @@ impl CapyroApp {
         // encabezado
         let hc = pos2(rect.left() + 30.0, rect.top() + 31.0);
         p.circle_filled(hc, 15.0, accent.gamma_multiply(0.18));
-        let bob = ((now * 3.0).sin() as f32 * 0.5 + 0.5) * 0.6;
+        let bob = ((crate::perf::clock(now) * 3.0).sin() as f32 * 0.5 + 0.5) * 0.6;
         icons::download(&p, hc, 17.0, accent, bob);
         let tx = hc.x + 26.0;
         p.text(pos2(tx, rect.top() + 22.0), Align2::LEFT_CENTER, "Hay una actualización", bold(14.0), TEXT);
@@ -2536,8 +2632,8 @@ impl CapyroApp {
             format!("{total} cambio{s} más nuevo{s} que tu versión ({mine})")
         };
         p.text(pos2(tx, rect.top() + 40.0), Align2::LEFT_CENTER, sub, regular(11.5), TEXT_DIM);
-        if interactive {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        if interactive && crate::perf::animations() {
+            ctx.request_repaint_after(FRAME_AMBIENT); // el ícono que flota
         }
         p.line_segment(
             [pos2(rect.left() + 16.0, rect.top() + 58.0), pos2(rect.right() - 16.0, rect.top() + 58.0)],
@@ -2639,8 +2735,8 @@ impl CapyroApp {
             self.update_banner = None;
             return;
         }
-        let fade_in = ease_out(((now - b.start) / 0.35) as f32);
-        let fade_out = ((b.until - now) / 0.45).clamp(0.0, 1.0) as f32;
+        let fade_in = ease_out(crate::perf::k(((now - b.start) / 0.35) as f32));
+        let fade_out = crate::perf::k(((b.until - now) / 0.45).clamp(0.0, 1.0) as f32);
         let alpha = fade_in.min(fade_out);
 
         let shown: Vec<CommitInfo> = b.commits.iter().take(3).cloned().collect();
@@ -2666,7 +2762,7 @@ impl CapyroApp {
 
         // encabezado
         let hc = pos2(rect.left() + 30.0, rect.top() + 31.0);
-        let pop = ease_out(((now - start - 0.15) / 0.3) as f32);
+        let pop = ease_out(crate::perf::k(((now - start - 0.15) / 0.3) as f32));
         p.circle_filled(hc, 15.0 + 5.0 * (1.0 - pop) * pop * 4.0 * 0.25, accent.gamma_multiply(0.2));
         p.circle_filled(hc, 12.0 * (0.6 + 0.4 * pop), accent);
         if pop > 0.05 {
@@ -2700,7 +2796,7 @@ impl CapyroApp {
         let mut y = rect.top() + 76.0;
         for (i, c) in shown.iter().enumerate() {
             // cada línea entra un poquito después de la anterior
-            let k = ease_out(((now - start - 0.2 - 0.08 * i as f64) / 0.3) as f32);
+            let k = ease_out(crate::perf::k(((now - start - 0.2 - 0.08 * i as f64) / 0.3) as f32));
             let mut lp = p.clone();
             lp.multiply_opacity(k);
             let dx = 8.0 * (1.0 - k);
@@ -2734,7 +2830,8 @@ impl CapyroApp {
         if rb.resp.clicked() {
             self.restart(&ctx);
         }
-        ctx.request_repaint_after(FRAME_SMOOTH);
+        // la barrita del tiempo que queda (en Bajo, a menos cuadros)
+        ctx.request_repaint_after(if crate::perf::animations() { FRAME_SMOOTH } else { crate::perf::ambient() });
     }
 
     /// Pantalla de carga: logo, "Cargando…" y un ecualizador. Con `intro`
@@ -2911,7 +3008,7 @@ impl eframe::App for CapyroApp {
         // visualizador: se alimenta con lo último que sonó
         let dt = ((now - self.last_time) as f32).clamp(0.0, 0.1);
         self.last_time = now;
-        if self.cfg.visualizer && self.first_pass && self.core.media_kind() == MediaKind::Audio {
+        if self.cfg.visualizer && crate::perf::animations() && self.first_pass && self.core.media_kind() == MediaKind::Audio {
             let playing = self.core.state() == State::Playing;
             let n = self.viz.len();
             let got = if playing { self.core.scope(&mut self.viz.samples[..n]) } else { 0 };
@@ -2946,6 +3043,17 @@ impl eframe::App for CapyroApp {
                 Stroke::new(1.0, Color32::from_white_alpha(10)),
                 StrokeKind::Inside,
             );
+        }
+
+        // Alto: la luz del video se derrama por toda la ventana
+        if self.cfg.performance == crate::perf::Mode::Alto {
+            if self.ambient.step(now) {
+                ctx.request_repaint_after(FRAME_AMBIENT);
+            }
+            let reach = full.width().max(full.height()) * 0.42;
+            // (el área de video es opaca: ahí no hace falta, tiene su propia luz)
+            let under = self.ambient_under.map(|r: Rect| r.shrink(4.0));
+            self.ambient.paint(ui.painter(), full.shrink(1.0), 0.42, reach, under);
         }
 
         let inner = full.shrink(PAD);
@@ -3021,7 +3129,7 @@ impl eframe::App for CapyroApp {
                     None => ctx.request_repaint_after(Duration::from_millis(8)), // el decodificador viene atrás
                 }
             } else {
-                ctx.request_repaint_after(FRAME_AMBIENT);
+                ctx.request_repaint_after(crate::perf::ambient());
             }
         }
     }

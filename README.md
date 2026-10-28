@@ -31,7 +31,9 @@ Abrís un archivo, apretás play y listo: *just press play*.
 > **Novedades de la v0.3.1:** **más liviano**. Capyro usa menos de la mitad de procesador
 > (con música, un cuarto): dibuja solo lo que hace falta, los videos se convierten al tamaño
 > en que se ven y las animaciones siguen igual de suaves. Además aparece en **"Abrir con…"**
-> en Linux y en Windows para todos sus formatos.
+> en Linux y en Windows para todos sus formatos. Y en ⚙ hay **modos de rendimiento**: Bajo
+> (sin animaciones ni extras, para PCs justas), Medio y Alto, con **iluminación cinematográfica**
+> en toda la ventana.
 > [Ver el historial completo →](CHANGELOG.md)
 
 <br>
@@ -51,7 +53,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-info.png" alt="Menú de información"><br><sub><b>ⓘ</b> versión, formatos y buscar actualizaciones</sub></td>
-<td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, decodificación GPU/CPU, configuración y capturas</sub></td>
+<td align="center"><img src="docs/screenshot-ajustes.png" alt="Menú de ajustes"><br><sub><b>⚙</b> velocidad, decodificación, <b>rendimiento</b> (acá en Alto: iluminación cinematográfica)</sub></td>
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-playlists.png" alt="Playlists en la lista"><br><sub><b>Playlists</b>: hasta 3, además de la cola</sub></td>
@@ -77,6 +79,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 🪟 **Linux y Windows** | El mismo Capyro en los dos: cada uno compila e instala solo lo suyo (`system = "Lin"` o `"Win"`). En Windows se instala con [CapyroInstaller](#windows). |
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
 | 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, instala la versión nueva (en Linux la compila; en Windows baja la ya compilada) y te muestra qué cambió. |
+| ⚡ **Rendimiento** | Tres modos en ⚙: **Bajo** (sin animaciones ni extras, para PCs con pocos recursos), **Medio** y **Alto** (con iluminación cinematográfica: los colores del video iluminan toda la ventana). |
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
 | 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
 | ⚙️ **Personalizable** | Los atajos se cambian **desde la app** (⚙ → Editar configuración) y todo queda en un archivo **Lua** que también podés editar a mano. |
@@ -426,6 +429,20 @@ pasa solo a la CPU sin cortar. Queda guardado en `capyro.lua` como `decoding = "
 Prueba, en orden: **VA-API** (Intel, AMD, y NVIDIA con `nvidia-vaapi-driver`), **NVDEC** (NVIDIA
 por CUDA) y **VDPAU**. La GPU decodifica, y el cuadro se copia a memoria para mostrarlo.
 
+### Modos de rendimiento
+
+En **⚙ → Rendimiento** (o `performance` en `capyro.lua`):
+
+| | |
+|---|---|
+| **Bajo** | Todas las funciones, nada de más: sin animaciones (todo aparece y se va al toque), sin pantalla de carga, sin visualizador y sin los brillos del tutorial. Para PCs con pocos recursos. |
+| **Medio** | Capyro como siempre. Es el que viene. |
+| **Alto** | Suma la **iluminación cinematográfica**: como la de YouTube, pero en toda la ventana. Los colores del video (o de la carátula) iluminan el header, los controles y las franjas del video, y cambian despacio con la imagen. |
+
+Se aplica al instante. La iluminación casi no usa procesador (promedia unos pocos píxeles de
+cada cuadro y la luz la pinta la placa de video); en una PC sin aceleración gráfica (que
+dibuja por software) sí se nota, y ahí conviene Medio o Bajo.
+
 ### Cola y playlists
 
 La **Lista** (abajo a la izquierda) tiene pestañas: la **Cola**, que es temporal como
@@ -488,6 +505,7 @@ return {
         show_format      = true,       -- "MP4 · H.264" arriba a la izquierda del video
         show_millis      = true,       -- y debajo, los milisegundos (000..999)
         show_video_info  = true,       -- abajo a la izquierda: resolución (1080p, 4K...) y fps
+        performance      = "medio",    -- "bajo" (sin animaciones ni extras), "medio" o "alto" (iluminación)
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         system           = "Lin",      -- "Lin" o "Win": lo pone la instalación ("auto" = detectarlo)
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
@@ -561,6 +579,9 @@ cuánto le cuesta cada uno (con `=2`, además, qué pidió cada redibujado).
 
 Si el video va trabado, fijate en **⚙ → Decodificación** que diga GPU: en placas viejas
 (Intel HD 3000, por ejemplo) la GPU decodifica H.264 y el procesador queda libre.
+
+Y si todavía va pesado, poné **⚙ → Rendimiento → Bajo**: se apagan las animaciones y los
+extras (pantalla de carga, visualizador, brillos) sin perder ninguna función.
 </details>
 
 <details>

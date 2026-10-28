@@ -80,6 +80,14 @@ local options = {
     show_millis      = true,   -- debajo, los milisegundos del segundo actual (000..999)
     show_video_info  = true,   -- abajo a la izquierda del video: resolución (1080p, 4K...) y fps
 
+    -- Modo de rendimiento (también en ⚙ → Rendimiento):
+    --   "bajo"  = sin animaciones ni extras (pantalla de carga, visualizador,
+    --             brillos): todo funciona igual, pero gasta lo mínimo.
+    --   "medio" = Capyro como siempre.
+    --   "alto"  = suma la iluminación cinematográfica: los colores del video
+    --             (o de la carátula) iluminan toda la ventana, como en YouTube.
+    performance      = "medio",
+
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
     -- "gpu" (Linux: VA-API / NVDEC / VDPAU; Windows: D3D11VA / NVDEC / DXVA2;
     -- si no hay, avisa y usa la CPU) o "cpu".
