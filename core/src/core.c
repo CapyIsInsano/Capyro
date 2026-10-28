@@ -326,10 +326,26 @@ void capyro_core_update(CapyroCore *core) {
         return;
     }
     if (core->auto_next) {
-        long next = order_next(core, core->repeat == CAPYRO_REPEAT_ALL);
-        if (next >= 0 && load_index(core, (size_t)next) == CAPYRO_OK) {
-            capyro_core_play(core);
+        /* Si el que sigue no abre (roto, borrado, de un formato raro), se
+         * saltea y se prueba el próximo: antes se cortaba todo el disco. */
+        bool wrap = core->repeat == CAPYRO_REPEAT_ALL;
+        long next = order_next(core, wrap);
+        bool failed = false;
+        for (size_t tries = core->playlist_len; next >= 0 && tries > 0; tries--) {
+            int err = load_index(core, (size_t)next);
+            if (err == CAPYRO_OK) {
+                capyro_core_play(core);
+                return;
+            }
+            fprintf(stderr, "capyro: salteo %s: %s\n", core->playlist[next], capyro_core_error_string(err));
+            failed = true;
+            core->playlist_current = next; /* para que order_next siga desde acá */
+            next = order_next(core, wrap);
         }
+        if (failed) {
+            core->playlist_current = -1; /* ninguno abrió: queda sin nada (como load_index) */
+        }
+        /* (si no había siguiente, queda el que terminó, en pausa al final) */
     }
 }
 

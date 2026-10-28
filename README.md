@@ -406,7 +406,7 @@ capyro cancion.mp3 video.mov tema.ogg   # carga la lista y arranca a sonar
 capyro --help
 ```
 
-- **Agregar archivos**: con el botón naranja, con <kbd>Ctrl</kbd>+<kbd>O</kbd> o haciendo clic en el área vacía.
+- **Agregar archivos**: con el botón naranja, con <kbd>Ctrl</kbd>+<kbd>O</kbd>, haciendo clic en el área vacía o arrastrándolos a la ventana. También podés soltar una **carpeta**: se agregan todos sus archivos compatibles (con las subcarpetas), en orden.
 - **Barra de progreso**: clic o arrastrar para saltar. Si hacés clic en el tiempo de la derecha, alterna entre la duración total y lo que falta.
 - **Volumen**: clic para silenciar, y la rueda del mouse encima sube y baja un paso por muesca.
 - **Área de video**: clic para play/pausa, doble clic para pantalla completa.

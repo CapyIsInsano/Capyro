@@ -45,6 +45,15 @@
 - Extra: **6 formatos nuevos**: video **MKV** y **WebM**; audio **FLAC**, **Opus**, **M4A** y **AIFF** (también `.aif` y `.aifc`). Ya son 13.
   - En ⓘ ya no se ven todos de una: hay un botón **"Formatos soportados (abrir)"** que despliega la lista (en renglones, Video y Audio) con el resumen de cada uno al tocarlo, como antes.
   - Están en el selector de archivos, en arrastrar y soltar, en el tutorial y en "Abrir con…" (Linux: el lanzador; Windows: CapyroInstaller 1.2.0).
+- Extra: **revisión de los 13 formatos**, con 42 archivos de prueba "de la vida real" (con y sin carátula, con tags, 24 bits, 96 kHz, 5.1, mono, 8 bits, VBR, ALAC, Theora, ProRes, HEVC 10 bits, VP8, VP9, AV1, videos de celular, anamórficos, sin duración, que no empiezan en 0...), revisados también con valgrind. Bugs arreglados:
+  - **cuelgue al abrir algunas carátulas o videos verticales**: al convertir la imagen, FFmpeg escribía unos bytes más allá del final cuando el ancho no era múltiplo de 8 (una carátula de 300 px, un video vertical achicado) y pisaba memoria. Según lo que hubiera al lado, Capyro se cerraba al rato ("corrupted size vs. prev_size");
+  - **videos de celular acostados**: los mp4/mov grabados con el celular parado se veían de costado. Ahora se giran como corresponde (90°, 180° o 270°), la burbuja de resolución los muestra parados (1080×1920) y las capturas salen derechas;
+  - **duración mal o desconocida**: los mp3 VBR sin encabezado y los .aac sueltos mostraban una duración estimada (2,88 s en vez de 3), y los .mkv/.webm sin duración (como los grabados en el navegador) no se podían adelantar ni mostraban la barra. Ahora la duración se cuenta al abrir (leyendo el archivo sin decodificar, con tope de tiempo); si no se puede, se aprende al llegar al final;
+  - **títulos falsos en MKV/WebM**: el nombre de la pista de audio ("Stereo", "Principal", "Track1") aparecía como título de la canción. Ahora los datos de las pistas solo se usan en Ogg/Opus, que es donde de verdad van; y si no hay artista se busca el "artista del álbum" o el autor;
+  - **se cortaba la lista**: si el archivo siguiente estaba roto o lo habías borrado, la reproducción se paraba. Ahora se saltea y sigue con el próximo (lo mismo al abrir varios por línea de comandos);
+  - un valor sin inicializar al armar el filtro de audio (lo marcó valgrind; en algunos sistemas podía colgarse);
+  - "Abrir con…" en Linux no ofrecía Capyro para los .ogg con video (Theora);
+  - al arrastrar archivos encima, la lista de formatos ya no entraba en una ventana chica: ahora va en dos renglones (video y audio). Y **se pueden soltar carpetas**: se agregan sus archivos compatibles, con las subcarpetas, en orden.
 
 ## v0.3.0-alpha · El salto a Windows
 

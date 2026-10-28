@@ -94,6 +94,56 @@ pub fn aliases(ext: &str) -> &'static [&'static str] {
     }
 }
 
+/// ¿Capyro abre este archivo? (por la extensión, como el núcleo)
+pub fn is_supported(path: &std::path::Path, formats: &(Vec<String>, Vec<String>)) -> bool {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else { return false };
+    let ext = ext.to_ascii_lowercase();
+    formats
+        .0
+        .iter()
+        .chain(formats.1.iter())
+        .any(|f| *f == ext || aliases(f).contains(&ext.as_str()))
+}
+
+/// Los archivos compatibles de una carpeta y sus subcarpetas, en orden
+/// alfabético (sin distinguir mayúsculas), sin los ocultos. Con tope de
+/// profundidad y de cantidad, por si alguien suelta la carpeta personal.
+pub fn files_in_dir(dir: &std::path::Path, formats: &(Vec<String>, Vec<String>)) -> Vec<std::path::PathBuf> {
+    const MAX_FILES: usize = 5000;
+    const MAX_DEPTH: usize = 6;
+    fn walk(
+        dir: &std::path::Path,
+        depth: usize,
+        formats: &(Vec<String>, Vec<String>),
+        out: &mut Vec<std::path::PathBuf>,
+    ) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+        entries.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default());
+        // primero los archivos de esta carpeta, después las subcarpetas
+        let (dirs, files): (Vec<_>, Vec<_>) = entries.into_iter().partition(|p| p.is_dir());
+        for f in files {
+            if out.len() >= MAX_FILES {
+                return;
+            }
+            let hidden = f.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+            if !hidden && is_supported(&f, formats) {
+                out.push(f);
+            }
+        }
+        if depth < MAX_DEPTH {
+            for d in dirs {
+                if !d.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+                    walk(&d, depth + 1, formats, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, 0, formats, &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +157,25 @@ mod tests {
         }
         assert_eq!(aliases("aiff"), &["aif", "aifc"]);
         assert!(aliases("mp3").is_empty());
+    }
+
+    #[test]
+    fn carpetas() {
+        let formats = (vec!["mp4".to_owned(), "mkv".to_owned()], vec!["mp3".to_owned(), "aiff".to_owned()]);
+        let dir = std::env::temp_dir().join(format!("capyro-carpeta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Disco 2")).unwrap();
+        std::fs::create_dir_all(dir.join(".oculta")).unwrap();
+        for f in ["b.MP3", "a.aif", "notas.txt", ".escondido.mp3", "Disco 2/c.mkv", ".oculta/d.mp4"] {
+            std::fs::write(dir.join(f), b"").unwrap();
+        }
+        let got: Vec<String> = files_in_dir(&dir, &formats)
+            .iter()
+            .map(|p| p.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(got, ["a.aif", "b.MP3", "Disco 2/c.mkv"]);
+        assert!(is_supported(std::path::Path::new("x.AIFC"), &formats));
+        assert!(!is_supported(std::path::Path::new("x.wma"), &formats));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

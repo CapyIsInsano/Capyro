@@ -994,6 +994,21 @@ impl CapyroApp {
         let first_new = self.core.playlist_len();
         let was_idle = self.core.state() == State::Idle;
         let mut errors = Vec::new();
+        // una carpeta (arrastrada o por línea de comandos) = sus archivos
+        // compatibles, con las subcarpetas, en orden alfabético
+        let mut files = Vec::new();
+        for path in paths {
+            if path.is_dir() {
+                let found = crate::formats::files_in_dir(&path, &self.formats);
+                if found.is_empty() {
+                    errors.push(format!("{}: no tiene archivos que Capyro pueda abrir", file_name(&path.to_string_lossy())));
+                }
+                files.extend(found);
+            } else {
+                files.push(path);
+            }
+        }
+        let paths = files;
         for path in &paths {
             if let Err(e) = self.core.playlist_add(path) {
                 errors.push(format!("{}: {}", file_name(&path.to_string_lossy()), e.0));
@@ -1366,9 +1381,14 @@ impl CapyroApp {
         if hovering_files {
             painter.rect_stroke(rect.shrink(1.0), 10.0, Stroke::new(2.0, accent), StrokeKind::Inside);
             icons::film(&painter, c - vec2(0.0, 30.0), 28.0, accent);
-            painter.text(c + vec2(0.0, 4.0), Align2::CENTER_CENTER, "Suelta para abrir", regular(14.0), TEXT);
-            let formats = self.formats_label(" · ").to_uppercase();
-            painter.text(c + vec2(0.0, 26.0), Align2::CENTER_CENTER, formats, regular(12.0), TEXT_FAINT);
+            painter.text(c + vec2(0.0, 4.0), Align2::CENTER_CENTER, "Suelta para abrir (archivos o carpetas)", regular(14.0), TEXT);
+            // video en una línea y audio en otra: con 13 formatos, en una sola
+            // no entraban en una ventana chica
+            let (v, a) = &self.formats;
+            for (i, list) in [v, a].into_iter().enumerate() {
+                let line = list.join(" · ").to_uppercase();
+                painter.text(c + vec2(0.0, 26.0 + 17.0 * i as f32), Align2::CENTER_CENTER, line, regular(12.0), TEXT_FAINT);
+            }
         } else {
             match self.core.media_kind() {
                 MediaKind::None => {

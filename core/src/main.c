@@ -111,12 +111,13 @@ int main(int argc, char **argv) {
             fprintf(stderr, "capyro: %s: %s\n", argv[i], capyro_core_error_string(err));
         }
     }
-    if (capyro_core_playlist_count(core) > 0) {
-        int err = capyro_core_playlist_select(core, 0);
-        if (err != CAPYRO_OK) {
-            fprintf(stderr, "capyro: %s: %s\n",
-                    capyro_core_playlist_get(core, 0), capyro_core_error_string(err));
+    /* el primero que abra (si uno está roto, no se queda todo parado) */
+    for (size_t i = 0; i < capyro_core_playlist_count(core); i++) {
+        int err = capyro_core_playlist_select(core, i);
+        if (err == CAPYRO_OK) {
+            break;
         }
+        fprintf(stderr, "capyro: %s: %s\n", capyro_core_playlist_get(core, i), capyro_core_error_string(err));
     }
 
     int ret = capyro_gui_run(core);

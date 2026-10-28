@@ -83,6 +83,14 @@ typedef struct {
     bool                    demux_eof, a_flushed, v_flushed, a_done, v_done;
     double                  start_time;
     double                  a_drop_until, v_drop_until; /* < 0 = no descartar */
+    /* giro del video (los celulares graban "acostado" y anotan cuánto
+     * girarlo): 0, 90, 180 o 270 grados en el sentido del reloj */
+    int                     rotation;
+    uint8_t                *rot_buf;    /* el cuadro antes de girarlo */
+    size_t                  rot_cap;
+    /* el tiempo más grande que salió del archivo (para saber la duración
+     * de los que no la dicen, como los .webm grabados en el navegador) */
+    double                  max_pts;
     uint64_t                seek_serial_done;
     cp_thread               thread;
     bool                    thread_running;
@@ -144,6 +152,9 @@ struct CapyroCore {
     /* el video original: resolución y cuadros por segundo (0 = no hay) */
     int       video_w, video_h;
     double    video_fps;
+    int       video_rotation; /* como Player.rotation (para las capturas) */
+    /* la duración no venía en el archivo: se calcula mientras suena */
+    bool      duration_guess;
 
     /* control del hilo */
     bool     quit;

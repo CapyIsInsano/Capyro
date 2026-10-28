@@ -519,12 +519,90 @@ static void test_media(const char *dir) {
         capyro_core_playlist_clear(core);
         CHECK(capyro_core_open(core, path) == CAPYRO_OK);
         CHECK(capyro_core_get_media_kind(core) == kinds[i]);
-        CHECK(CLOSE_TO(capyro_core_get_duration(core), 2.0, 0.25)); /* .aac: estimada por bitrate */
+        /* (el .aac suelto no trae duración: antes se estimaba por el bitrate;
+         * ahora se cuenta al abrir, y tiene que dar justa) */
+        CHECK(CLOSE_TO(capyro_core_get_duration(core), 2.0, 0.07));
         capyro_core_play(core);
         pump(core, 400);
         double p = capyro_core_get_position(core);
         printf("%s: posición tras 0.4 s: %.3f\n", extra[i], p);
         CHECK(p > 0.2 && p < 0.7);
+    }
+
+    /* --- bugs de la revisión de formatos --- */
+    char p2[1024];
+    /* el "title" de una pista de Matroska es su nombre, no el del archivo */
+    snprintf(p2, sizeof(p2), "%s/clip.mkv", dir);
+    if (exists(p2)) {
+        capyro_core_playlist_clear(core);
+        CHECK(capyro_core_open(core, p2) == CAPYRO_OK);
+        CHECK(strcmp(capyro_core_get_title(core), "") == 0);
+    }
+    /* video de celular: se ve derecho (girado), con su resolución "parada" */
+    snprintf(p2, sizeof(p2), "%s/rotado.mp4", dir);
+    if (exists(p2)) {
+        capyro_core_playlist_clear(core);
+        CHECK(capyro_core_open(core, p2) == CAPYRO_OK);
+        pump(core, 150);
+        CapyroVideoProps vp;
+        CHECK(capyro_core_get_video_props(core, &vp) && vp.width == 240 && vp.height == 320);
+        CapyroVideoFrame vf;
+        if (capyro_core_lock_video_frame(core, &vf)) {
+            CHECK(vf.width < vf.height && vf.aspect < 1.0f);
+            capyro_core_unlock_video_frame(core);
+        } else {
+            CHECK(!"rotado.mp4 sin cuadro");
+        }
+        CapyroImage im;
+        if (capyro_core_capture_frame(core, &im)) {
+            CHECK(im.width == 240 && im.height == 320);
+            capyro_core_free_image(&im);
+        }
+    }
+    /* carátula de 300 px y video vertical: swscale escribía de más */
+    const char *odd[] = { "tapa.flac", "vertical.mp4" };
+    for (int i = 0; i < 2; i++) {
+        snprintf(p2, sizeof(p2), "%s/%s", dir, odd[i]);
+        if (!exists(p2)) {
+            continue;
+        }
+        capyro_core_playlist_clear(core);
+        capyro_core_set_video_target(core, 300, 170); /* achica a anchos impares */
+        CHECK(capyro_core_open(core, p2) == CAPYRO_OK);
+        capyro_core_play(core);
+        pump(core, 300);
+        CapyroVideoFrame vf;
+        if (capyro_core_lock_video_frame(core, &vf)) {
+            printf("%s: cuadro %dx%d\n", odd[i], vf.width, vf.height);
+            capyro_core_unlock_video_frame(core);
+        } else {
+            CHECK(!"sin cuadro");
+        }
+        capyro_core_set_video_target(core, 0, 0);
+    }
+    /* al terminar uno, si el siguiente está roto se saltea (antes se cortaba) */
+    char a1[1024], a3[1024];
+    snprintf(a1, sizeof(a1), "%s/tono.wav", dir);
+    snprintf(a3, sizeof(a3), "%s/tono.ogg", dir);
+    if (exists(a1) && exists(a3)) {
+        touch("capyro_test_roto.flac");
+        capyro_core_playlist_clear(core);
+        CHECK(capyro_core_playlist_add(core, a1) == CAPYRO_OK);
+        CHECK(capyro_core_playlist_add(core, "capyro_test_roto.flac") == CAPYRO_OK);
+        CHECK(capyro_core_playlist_add(core, "capyro_test_no_existe.flac") == CAPYRO_OK);
+        CHECK(capyro_core_playlist_add(core, a3) == CAPYRO_OK);
+        CHECK(capyro_core_playlist_select(core, 0) == CAPYRO_OK);
+        capyro_core_seek(core, 1.8);
+        capyro_core_play(core);
+        pump(core, 900);
+        CHECK(capyro_core_playlist_current(core) == 3);
+        CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PLAYING);
+        /* y al terminar el último (sin siguiente) queda ese, en pausa al final */
+        capyro_core_seek(core, 1.8);
+        pump(core, 700);
+        CHECK(capyro_core_playlist_current(core) == 3);
+        CHECK(capyro_core_get_state(core) == CAPYRO_STATE_PAUSED);
+        remove("capyro_test_roto.flac");
     }
 
     /* --- tono: +12 semitonos = una octava arriba, misma velocidad --- */

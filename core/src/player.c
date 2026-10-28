@@ -22,6 +22,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/display.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
 #include <libavfilter/avfilter.h>
@@ -316,7 +317,78 @@ static int free_slot_locked(CapyroCore *core) {
     return -1;
 }
 
-/* Convierte `frame` a RGBA dentro de `slot`, achicando si no entra en max_w×max_h. */
+/* Buffer RGBA de w×h con margen al final: swscale escribe de a varios
+ * píxeles por vez (SIMD) y en anchos que no son múltiplo de 8 se pasa unos
+ * bytes del final de la última fila. Sin el margen pisaba la memoria de
+ * al lado (cuelgues con carátulas de 300 px o videos verticales). */
+#define RGBA_PAD 256
+static bool ensure_rgba(uint8_t **buf, size_t *cap, int w, int h) {
+    size_t need = (size_t)w * (size_t)h * 4 + RGBA_PAD;
+    if (*cap < need) {
+        uint8_t *grown = realloc(*buf, need);
+        if (!grown) {
+            return false;
+        }
+        *buf = grown;
+        *cap = need;
+    }
+    return true;
+}
+
+/* Gira una imagen RGBA (w×h) `rot` grados en el sentido del reloj. */
+static void rotate_rgba(const uint8_t *src, int w, int h, uint8_t *dst, int rot) {
+    const uint32_t *s = (const uint32_t *)src;
+    uint32_t       *d = (uint32_t *)dst;
+    for (int y = 0; y < h; y++) {
+        const uint32_t *row = s + (size_t)y * w;
+        for (int x = 0; x < w; x++) {
+            size_t i;
+            if (rot == 90) {
+                i = (size_t)x * h + (size_t)(h - 1 - y);       /* destino h×w */
+            } else if (rot == 270) {
+                i = (size_t)(w - 1 - x) * h + (size_t)y;
+            } else {
+                i = (size_t)(h - 1 - y) * w + (size_t)(w - 1 - x); /* 180 */
+            }
+            d[i] = row[x];
+        }
+    }
+}
+
+/* Cuánto hay que girar el video (0/90/180/270, sentido del reloj), según la
+ * matriz que anotan los celulares y las cámaras. Igual que ffplay. */
+static int stream_rotation(AVStream *st) {
+    const int32_t *m = NULL;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(60, 29, 100)
+    const AVPacketSideData *sd = av_packet_side_data_get(st->codecpar->coded_side_data,
+                                                         st->codecpar->nb_coded_side_data,
+                                                         AV_PKT_DATA_DISPLAYMATRIX);
+    if (sd && sd->size >= 9 * sizeof(int32_t)) {
+        m = (const int32_t *)sd->data;
+    }
+#else
+    size_t size = 0;
+    const uint8_t *d = av_stream_get_side_data(st, AV_PKT_DATA_DISPLAYMATRIX, &size);
+    if (d && size >= 9 * sizeof(int32_t)) {
+        m = (const int32_t *)d;
+    }
+#endif
+    if (!m) {
+        return 0;
+    }
+    double theta = -round(av_display_rotation_get(m));
+    if (isnan(theta)) {
+        return 0;
+    }
+    theta -= 360.0 * floor(theta / 360.0 + 0.9 / 360.0);
+    if (fabs(theta - 90.0) < 1.0) return 90;
+    if (fabs(theta - 180.0) < 1.0) return 180;
+    if (fabs(theta - 270.0) < 1.0) return 270;
+    return 0;
+}
+
+/* Convierte `frame` a RGBA dentro de `slot`, achicando si no entra en
+ * max_w×max_h (y girándolo si el video viene "acostado"). */
 static bool convert_frame(Player *p, AVFrame *frame, VideoSlot *slot, int max_w, int max_h) {
     int w = frame->width, h = frame->height;
     if (w <= 0 || h <= 0) {
@@ -329,33 +401,56 @@ static bool convert_frame(Player *p, AVFrame *frame, VideoSlot *slot, int max_w,
     if (dw < 1) dw = 1;
     if (dh < 1) dh = 1;
 
+    /* girado 90 o 270 grados: se convierte en su orientación original
+     * (cw×ch) y después se gira (dw×dh, que es lo que tiene que entrar) */
+    bool turn = p->rotation == 90 || p->rotation == 270;
+    int cw = dw, ch = dh; /* lo que sale de swscale */
+    if (turn) {
+        /* que el cuadro ya girado entre en max_w×max_h */
+        double s2 = 1.0;
+        if (h > max_w) s2 = (double)max_w / h;
+        if (w * s2 > max_h) s2 = (double)max_h / w;
+        cw = (int)(w * s2 + 0.5);
+        ch = (int)(h * s2 + 0.5);
+        if (cw < 1) cw = 1;
+        if (ch < 1) ch = 1;
+        dw = ch;
+        dh = cw;
+    }
     p->sws = sws_getCachedContext(p->sws, w, h, (enum AVPixelFormat)frame->format,
-                                  dw, dh, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+                                  cw, ch, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
     if (!p->sws) {
         return false;
     }
-    size_t need = (size_t)dw * (size_t)dh * 4;
-    if (slot->cap < need) {
-        uint8_t *grown = realloc(slot->data, need);
-        if (!grown) {
+    if (!ensure_rgba(&slot->data, &slot->cap, dw, dh)) {
+        return false;
+    }
+    uint8_t *out = slot->data;
+    if (p->rotation != 0) {
+        if (!ensure_rgba(&p->rot_buf, &p->rot_cap, cw, ch)) {
             return false;
         }
-        slot->data = grown;
-        slot->cap  = need;
+        out = p->rot_buf;
     }
-    uint8_t *dst[4]    = { slot->data, NULL, NULL, NULL };
-    int      stride[4] = { dw * 4, 0, 0, 0 };
+    uint8_t *dst[4]    = { out, NULL, NULL, NULL };
+    int      stride[4] = { cw * 4, 0, 0, 0 };
     sws_scale(p->sws, (const uint8_t *const *)frame->data, frame->linesize, 0, h, dst, stride);
+    if (p->rotation != 0) {
+        rotate_rgba(p->rot_buf, cw, ch, slot->data, p->rotation);
+    }
     slot->w = dw;
     slot->h = dh;
     return true;
 }
 
-static float display_aspect(AVFormatContext *fmt, AVStream *st, AVFrame *frame) {
+static float display_aspect(AVFormatContext *fmt, AVStream *st, AVFrame *frame, int rotation) {
     AVRational sar = av_guess_sample_aspect_ratio(fmt, st, frame);
     double a = (double)frame->width / (double)frame->height;
     if (sar.num > 0 && sar.den > 0) {
         a *= av_q2d(sar);
+    }
+    if (rotation == 90 || rotation == 270) {
+        a = 1.0 / a; /* girado: lo ancho pasa a ser alto */
     }
     return (float)a;
 }
@@ -415,7 +510,7 @@ static void decode_cover(CapyroCore *core, AVStream *st) {
         keep_source(slot, frame);
         if (convert_frame(p, frame, slot, MAX_COVER_SIDE, MAX_COVER_SIDE)) {
             slot->pts    = 0.0;
-            slot->aspect = display_aspect(p->fmt, st, frame);
+            slot->aspect = display_aspect(p->fmt, st, frame, 0);
             cp_mutex_lock(&core->lock);
             core->shown = 0;
             core->serial++;
@@ -444,7 +539,24 @@ static bool demux_one(CapyroCore *core) {
     int ret = av_read_frame(p->fmt, p->pkt);
     if (ret < 0) {
         p->demux_eof = true; /* EOF o error de lectura: lo tratamos igual */
+        /* el archivo no decía cuánto dura: ahora se sabe */
+        cp_mutex_lock(&core->lock);
+        if (core->duration_guess && !core->seek_req && p->max_pts > core->duration) {
+            core->duration = p->max_pts;
+        }
+        cp_mutex_unlock(&core->lock);
         return true;
+    }
+    if (p->pkt->stream_index == p->aidx || p->pkt->stream_index == p->vidx) {
+        AVStream *st = p->fmt->streams[p->pkt->stream_index];
+        int64_t ts = p->pkt->pts != AV_NOPTS_VALUE ? p->pkt->pts : p->pkt->dts;
+        if (ts != AV_NOPTS_VALUE) {
+            double end = (double)(ts + (p->pkt->duration > 0 ? p->pkt->duration : 0)) * av_q2d(st->time_base) -
+                         p->start_time;
+            if (end > p->max_pts) {
+                p->max_pts = end;
+            }
+        }
     }
     if (p->pkt->stream_index == p->aidx) {
         pq_push(&p->aq, p->pkt);
@@ -491,7 +603,7 @@ bool audio_graph_create(const AVFrame *f, double speed, double pitch, unsigned o
     *graph = NULL;
     *src = *sink = NULL;
 
-    AVChannelLayout layout;
+    AVChannelLayout layout = { 0 }; /* av_channel_layout_copy() lo limpia antes: no puede ser basura */
     if (f->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC || f->ch_layout.nb_channels == 0) {
         av_channel_layout_default(&layout, f->ch_layout.nb_channels > 0 ? f->ch_layout.nb_channels : 2);
     } else if (av_channel_layout_copy(&layout, &f->ch_layout) < 0) {
@@ -775,7 +887,7 @@ static bool video_step(CapyroCore *core) {
     keep_source(slot, pic);
     bool ok = convert_frame(p, pic, slot, max_w, max_h);
     slot->pts    = t < 0 ? 0.0 : t;
-    slot->aspect = display_aspect(p->fmt, st, f);
+    slot->aspect = display_aspect(p->fmt, st, f, p->rotation);
     av_frame_unref(f);
     if (pic != f) {
         av_frame_unref(pic);
@@ -898,12 +1010,73 @@ static void decode_thread(void *arg) {
 /* abrir / cerrar                                                     */
 /* ================================================================== */
 
-static void copy_tag(char *dst, size_t cap, AVDictionary *d1, AVDictionary *d2, const char *key) {
-    AVDictionaryEntry *e = av_dict_get(d1, key, NULL, 0);
-    if (!e && d2) {
-        e = av_dict_get(d2, key, NULL, 0);
+/* El primer metadato que haya de `keys` (en orden). Los del stream de
+ * audio solo cuentan en Ogg (.ogg/.opus), que guarda ahí los datos del tema;
+ * en Matroska/WebM el "title" de una pista es su nombre ("Stereo",
+ * "Comentarios"...) y no el de la canción. */
+static void copy_tag(char *dst, size_t cap, AVDictionary *global, AVDictionary *stream,
+                     const char *const *keys) {
+    AVDictionaryEntry *e = NULL;
+    for (int i = 0; keys[i] && !e; i++) {
+        e = av_dict_get(global, keys[i], NULL, 0);
+        if (!e && stream) {
+            e = av_dict_get(stream, keys[i], NULL, 0);
+        }
     }
-    snprintf(dst, cap, "%s", e ? e->value : "");
+    /* sin espacios de más (hay tags con relleno) */
+    const char *v = e ? e->value : "";
+    while (*v == ' ' || *v == '\t') {
+        v++;
+    }
+    snprintf(dst, cap, "%s", v);
+    size_t n = strlen(dst);
+    while (n > 0 && (dst[n - 1] == ' ' || dst[n - 1] == '\t' || dst[n - 1] == '\r' || dst[n - 1] == '\n')) {
+        dst[--n] = '\0';
+    }
+}
+
+/* Duración exacta de los archivos que no la dicen (o la estiman por el
+ * bitrate, como los mp3 VBR sin encabezado Xing y los .aac sueltos): se leen
+ * los paquetes de punta a punta (sin decodificar) y se vuelve al principio.
+ * Con un tope de tamaño y de tiempo para no trabar la apertura. 0 = no se pudo. */
+#define SCAN_MAX_BYTES (512LL * 1024 * 1024)
+#define SCAN_MAX_SEC   0.5
+static double scan_duration(AVFormatContext *fmt, double start_time) {
+    if (!fmt->pb || !(fmt->pb->seekable & AVIO_SEEKABLE_NORMAL)) {
+        return 0.0; /* tubería o red: no se puede volver al principio */
+    }
+    int64_t size = avio_size(fmt->pb);
+    if (size <= 0 || size > SCAN_MAX_BYTES) {
+        return 0.0;
+    }
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) {
+        return 0.0;
+    }
+    double last = 0.0;
+    double t0 = cp_now();
+    bool gave_up = false;
+    while (av_read_frame(fmt, pkt) >= 0) {
+        AVStream *st = fmt->streams[pkt->stream_index];
+        int64_t ts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : pkt->dts;
+        if (ts != AV_NOPTS_VALUE && !(st->disposition & AV_DISPOSITION_ATTACHED_PIC)) {
+            double end = (double)(ts + (pkt->duration > 0 ? pkt->duration : 0)) * av_q2d(st->time_base) - start_time;
+            if (end > last) {
+                last = end;
+            }
+        }
+        av_packet_unref(pkt);
+        if (cp_now() - t0 > SCAN_MAX_SEC) {
+            gave_up = true;
+            break;
+        }
+    }
+    av_packet_free(&pkt);
+    int64_t begin = fmt->start_time != AV_NOPTS_VALUE ? fmt->start_time : 0;
+    if (av_seek_frame(fmt, -1, begin, AVSEEK_FLAG_BACKWARD) < 0) {
+        avio_seek(fmt->pb, 0, SEEK_SET);
+    }
+    return gave_up ? 0.0 : last;
 }
 
 static AVCodecContext *open_decoder(AVStream *st, bool threads) {
@@ -938,6 +1111,9 @@ static void free_player(Player *p) {
     p->sws = NULL;
     av_frame_free(&p->frame);
     av_frame_free(&p->swframe);
+    free(p->rot_buf);
+    p->rot_buf = NULL;
+    p->rot_cap = 0;
     p->hw = false;
     av_packet_free(&p->pkt);
     avformat_close_input(&p->fmt);
@@ -965,6 +1141,8 @@ void player_close(CapyroCore *core) {
     core->duration    = 0.0;
     core->video_w     = core->video_h = 0;
     core->video_fps   = 0.0;
+    core->video_rotation = 0;
+    core->duration_guess = false;
     core->shown       = -1;
     core->force_frame = false;
     core->serial++;
@@ -1036,8 +1214,9 @@ int player_open(CapyroCore *core, const char *path) {
             cp_mutex_unlock(&core->lock);
             p->vctx = open_video(core, st, mode);
             if (p->vctx) {
-                p->vidx    = vidx;
-                real_video = true;
+                p->vidx     = vidx;
+                p->rotation = stream_rotation(st);
+                real_video  = true;
             } else {
                 fprintf(stderr, "capyro: %s: no se pudo abrir el video\n", path);
             }
@@ -1057,6 +1236,11 @@ int player_open(CapyroCore *core, const char *path) {
         AVStream *st = p->fmt->streams[p->vidx];
         vw = st->codecpar->width;
         vh = st->codecpar->height;
+        if (p->rotation == 90 || p->rotation == 270) {
+            int t = vw; /* la resolución como se ve (un video vertical es más alto que ancho) */
+            vw = vh;
+            vh = t;
+        }
         AVRational fr = st->avg_frame_rate.num > 0 && st->avg_frame_rate.den > 0 ? st->avg_frame_rate
                                                                                   : st->r_frame_rate;
         if (fr.num > 0 && fr.den > 0) {
@@ -1064,21 +1248,36 @@ int player_open(CapyroCore *core, const char *path) {
         }
     }
 
+    /* duración: la del archivo, salvo que no la diga o sea una estimación */
+    double duration = p->fmt->duration != AV_NOPTS_VALUE ? (double)p->fmt->duration / AV_TIME_BASE : 0.0;
+    bool guess = duration <= 0.0;
+    if (guess || p->fmt->duration_estimation_method == AVFMT_DURATION_FROM_BITRATE) {
+        double exact = scan_duration(p->fmt, p->start_time);
+        if (exact > 0.0) {
+            duration = exact;
+            guess = false;
+        }
+    }
+    bool ogg = p->fmt->iformat && strcmp(p->fmt->iformat->name, "ogg") == 0;
+    AVDictionary *stream_tags = ogg && aidx >= 0 ? p->fmt->streams[aidx]->metadata : NULL;
+    static const char *const TITLE_KEYS[]  = { "title", NULL };
+    static const char *const ARTIST_KEYS[] = { "artist", "album_artist", "author", "performer", NULL };
+
     cp_mutex_lock(&core->lock);
     core->video_w     = vw;
     core->video_h     = vh;
     core->video_fps   = vfps;
+    core->video_rotation = p->rotation;
     core->kind        = real_video ? CAPYRO_MEDIA_VIDEO : CAPYRO_MEDIA_AUDIO;
-    core->duration    = p->fmt->duration != AV_NOPTS_VALUE ? (double)p->fmt->duration / AV_TIME_BASE : 0.0;
+    core->duration    = duration;
+    core->duration_guess = guess;
     core->clock_audio = p->aidx >= 0;
     core->clock_base  = 0.0;
     core->audio_consumed = 0;
     core->wall_started   = cp_now();
     core->force_frame    = real_video; /* mostrar el primer frame aunque no esté sonando */
-    copy_tag(core->title, sizeof(core->title), p->fmt->metadata,
-             aidx >= 0 ? p->fmt->streams[aidx]->metadata : NULL, "title");
-    copy_tag(core->artist, sizeof(core->artist), p->fmt->metadata,
-             aidx >= 0 ? p->fmt->streams[aidx]->metadata : NULL, "artist");
+    copy_tag(core->title, sizeof(core->title), p->fmt->metadata, stream_tags, TITLE_KEYS);
+    copy_tag(core->artist, sizeof(core->artist), p->fmt->metadata, stream_tags, ARTIST_KEYS);
     cp_mutex_unlock(&core->lock);
 
     if (cp_thread_start(&p->thread, decode_thread, core) != 0) {
@@ -1208,6 +1407,7 @@ bool capyro_core_capture_frame(CapyroCore *core, CapyroImage *out) {
     advance_video_locked(core);
     bool have = core->shown >= 0 && core->slots[core->shown].src &&
                 av_frame_ref(f, core->slots[core->shown].src) == 0;
+    int rotation = core->kind == CAPYRO_MEDIA_VIDEO ? core->video_rotation : 0;
     cp_mutex_unlock(&core->lock);
     bool ok = false;
     if (have && f->width > 0 && f->height > 0) {
@@ -1218,11 +1418,26 @@ bool capyro_core_capture_frame(CapyroCore *core, CapyroImage *out) {
         int dw = (int)(w * scale + 0.5), dh = (int)(h * scale + 0.5);
         struct SwsContext *sws = sws_getContext(w, h, (enum AVPixelFormat)f->format, dw, dh, AV_PIX_FMT_RGBA,
                                                 SWS_BICUBIC, NULL, NULL, NULL);
-        uint8_t *rgba = sws ? malloc((size_t)dw * (size_t)dh * 4) : NULL;
+        /* (con margen al final: ver ensure_rgba) */
+        uint8_t *rgba = sws ? malloc((size_t)dw * (size_t)dh * 4 + RGBA_PAD) : NULL;
         if (rgba) {
             uint8_t *dst[4] = { rgba, NULL, NULL, NULL };
             int dst_stride[4] = { dw * 4, 0, 0, 0 };
             if (sws_scale(sws, (const uint8_t *const *)f->data, f->linesize, 0, h, dst, dst_stride) > 0) {
+                if (rotation != 0) {
+                    /* la captura sale derecha, como se ve en pantalla */
+                    uint8_t *turned = malloc((size_t)dw * (size_t)dh * 4 + RGBA_PAD);
+                    if (turned) {
+                        rotate_rgba(rgba, dw, dh, turned, rotation);
+                        free(rgba);
+                        rgba = turned;
+                        if (rotation != 180) {
+                            int t = dw;
+                            dw = dh;
+                            dh = t;
+                        }
+                    }
+                }
                 out->rgba = rgba;
                 out->width = dw;
                 out->height = dh;

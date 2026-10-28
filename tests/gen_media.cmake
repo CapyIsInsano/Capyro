@@ -72,7 +72,7 @@ endif()
 # mkv acepta lo que sea: mpeg4 + flac (los dos internos)
 run(clip.mkv -f lavfi -i testsrc=size=320x240:rate=25:duration=2
     -f lavfi -i sine=frequency=500:duration=2
-    -c:v mpeg4 -q:v 5 -c:a flac -shortest ${OUT}/clip.mkv)
+    -c:v mpeg4 -q:v 5 -c:a flac -shortest -metadata:s:a:0 title=Stereo ${OUT}/clip.mkv)
 # webm exige VP8/VP9/AV1: depende de libvpx o de algún AV1
 set(WEBM_V "")
 foreach(enc libvpx-vp9 libvpx libaom-av1 libsvtav1)
@@ -99,3 +99,13 @@ run(tono.opus -f lavfi -i sine=frequency=440:duration=2 ${OPUS_ENC}
 run(tono.m4a -f lavfi -i sine=frequency=440:duration=2 -c:a aac
     -metadata "title=Tono M4A" -metadata artist=Capyro ${OUT}/tono.m4a)
 run(tono.aiff -f lavfi -i sine=frequency=440:duration=2 -c:a pcm_s16be ${OUT}/tono.aiff)
+
+# --- casos que tenían bugs (revisión de formatos) ---
+# video de celular: grabado "acostado" con la marca de girarlo 90°
+run(rotado.mp4 -display_rotation 90 -i ${OUT}/clip.mp4 -c copy ${OUT}/rotado.mp4)
+# carátula de 300 px (un ancho que no es múltiplo de 8: pisaba memoria)
+run(tapa300.jpg -f lavfi -i color=c=0x3366ff:s=300x300 -frames:v 1 ${OUT}/tapa300.jpg)
+run(tapa.flac -f lavfi -i sine=frequency=440:duration=2 -i ${OUT}/tapa300.jpg -map 0:a -map 1:v
+    -c:a flac -c:v copy -disposition:v attached_pic ${OUT}/tapa.flac)
+# video vertical de ancho impar al achicarlo
+run(vertical.mp4 -f lavfi -i testsrc=size=180x320:rate=25:duration=2 -c:v mpeg4 -q:v 5 ${OUT}/vertical.mp4)
