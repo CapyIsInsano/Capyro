@@ -49,7 +49,7 @@ impl CapyroApp {
         let max_h = (anchor.y - ui.max_rect().top() - 70.0).max(200.0);
         let size = vec2(width, (header_h + content_h + 8.0 + footer_h).min(max_h));
         let full = Rect::from_min_size(pos2(anchor.x, anchor.y - size.y), size);
-        let grown = size * (0.85 + 0.15 * ease);
+        let grown = size * (0.85 + 0.15 * crate::alto::pop(t, ease));
         let panel = Rect::from_min_size(pos2(anchor.x, anchor.y - grown.y), grown);
         let interactive = self.show_changes && t > 0.6;
 
@@ -69,6 +69,7 @@ impl CapyroApp {
             ctx.request_repaint_after(super::FRAME_SMOOTH);
             return;
         }
+        crate::alto::reveal(&ctx, Id::unique("capyro-changes-anim"), panel, 12.0, self.show_changes, BG_PANEL, accent);
         let x0 = panel.left() + 16.0;
         let x1 = panel.right() - 16.0;
         let top = panel.top();

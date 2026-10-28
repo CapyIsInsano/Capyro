@@ -75,7 +75,7 @@ impl CapyroApp {
         let now = ctx.input(|i| i.time);
         let size = vec2(area.width().min(560.0), area.height());
         let full = Rect::from_center_size(area.center(), size);
-        let panel = Rect::from_center_size(area.center(), size * (0.96 + 0.04 * ease));
+        let panel = Rect::from_center_size(area.center(), size * (0.96 + 0.04 * crate::alto::pop(t, ease)));
         let interactive = self.show_keys && t > 0.6;
         let mut ops: Vec<Op> = Vec::new();
 
@@ -97,6 +97,7 @@ impl CapyroApp {
             ctx.request_repaint_after(super::FRAME_SMOOTH);
             return;
         }
+        crate::alto::reveal(&ctx, Id::unique("capyro-keys-anim"), panel, 14.0, self.show_keys, BG_PANEL, accent);
 
         let x0 = panel.left() + 18.0;
         let x1 = panel.right() - 18.0;

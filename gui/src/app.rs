@@ -228,6 +228,11 @@ pub struct CapyroApp {
     show_playlist: bool,
     toast: Option<Toast>,
     last_title: String,
+    /// Modo Alto: fondo animado (degradé, partículas, luz del mouse).
+    backdrop: crate::alto::Backdrop,
+    /// Archivo actual (para notar cuándo cambia) y cuándo cambió.
+    track_key: String,
+    track_at: Option<f64>,
     /// Textura del frame actual (video o carátula) y su número de serie.
     video_tex: Option<TextureHandle>,
     video_serial: u64,
@@ -412,6 +417,9 @@ impl CapyroApp {
             show_playlist: false,
             toast: None,
             last_title: String::new(),
+            backdrop: Default::default(),
+            track_key: String::new(),
+            track_at: None,
             video_tex: None,
             video_serial: 0,
             frame_buf: Vec::new(),
@@ -962,7 +970,7 @@ impl CapyroApp {
         let msg = match mode {
             crate::perf::Mode::Bajo => "Rendimiento bajo: sin animaciones ni extras",
             crate::perf::Mode::Medio => "Rendimiento medio",
-            crate::perf::Mode::Alto => "Rendimiento alto: iluminación cinematográfica",
+            crate::perf::Mode::Alto => "Rendimiento alto: iluminación, fondo animado y partículas",
         };
         self.save_config(ctx, msg.to_owned());
     }
@@ -1198,6 +1206,14 @@ impl CapyroApp {
             let alpha = (14.0 * a.hover + 16.0 * a.press) as u8;
             ui.painter().circle_filled(center, r, Color32::from_white_alpha(alpha));
         }
+        if crate::alto::on() {
+            // Alto: brillo del color de acento al pasar y una onda al tocar
+            let accent = ui.visuals().selection.bg_fill;
+            crate::alto::glow(ui.painter(), center, size * 1.1, accent, 0.20 * a.hover + 0.15 * a.press);
+            if a.resp.clicked() {
+                crate::alto::ripple(ui.ctx(), center, size * 0.5);
+            }
+        }
         a
     }
 
@@ -1293,10 +1309,28 @@ impl CapyroApp {
         // (las franjas negras y el fondo de la carátula)
         let lit = self.cfg.performance == crate::perf::Mode::Alto;
         if lit {
-            let reach = rect.width().max(rect.height()) * 0.45;
-            self.ambient.paint(&painter, rect.shrink(2.0), 0.30, reach, self.ambient.source);
+            let reach = rect.width().max(rect.height()) * 0.36;
+            self.ambient.paint(&painter, rect.shrink(2.0), 0.30, reach, self.ambient.source, None);
             self.ambient_under = Some(rect);
+            if self.core.media_kind() != MediaKind::Video {
+                // audio o nada cargado: el polvito y la luz del mouse también acá
+                let accent = self.cfg.accent;
+                let hide = self.ambient.source.filter(|_| self.video_tex.is_some());
+                self.backdrop.paint_particles(&painter, rect.shrink(2.0), accent, hide, 18);
+                self.backdrop.paint_cursor(&painter, rect.shrink(2.0), accent, None);
+            }
         }
+        // Alto: al cambiar de archivo, un destello cruza el área y el título entra
+        let enter = match self.track_at {
+            Some(t0) if lit => {
+                let k = ((ctx.input(|i| i.time) - t0) / 0.9) as f32;
+                if k >= 1.0 {
+                    self.track_at = None;
+                }
+                k.clamp(0.0, 1.0)
+            }
+            _ => 1.0,
+        };
         let mut source = None;
 
         // el núcleo convierte los cuadros al tamaño en que se ven, no más
@@ -1395,14 +1429,23 @@ impl CapyroApp {
                         painter.circle_filled(art_center, 30.0, accent.gamma_multiply(0.18));
                         icons::music_note(&painter, art_center, 28.0, accent);
                     }
-                    painter.text(pos2(c.x, text_y), Align2::CENTER_CENTER, ellipsize(&title, 52), bold(15.0), TEXT);
+                    // (en Alto, al cambiar de canción el título sube y aparece; el artista, detrás)
+                    let ke = |delay: f32| ease_out(((enter - delay) / (1.0 - delay)).clamp(0.0, 1.0));
+                    let (k1, k2) = (ke(0.15), ke(0.3));
+                    painter.text(
+                        pos2(c.x, text_y + 10.0 * (1.0 - k1)),
+                        Align2::CENTER_CENTER,
+                        ellipsize(&title, 52),
+                        bold(15.0),
+                        TEXT.gamma_multiply(k1),
+                    );
                     if !artist.is_empty() {
                         painter.text(
-                            pos2(c.x, text_y + 22.0),
+                            pos2(c.x, text_y + 22.0 + 10.0 * (1.0 - k2)),
                             Align2::CENTER_CENTER,
                             ellipsize(&artist, 60),
                             regular(12.5),
-                            TEXT_DIM,
+                            TEXT_DIM.gamma_multiply(k2),
                         );
                     }
                 }
@@ -1411,6 +1454,10 @@ impl CapyroApp {
 
         if lit && source.is_some() {
             self.ambient.source = source;
+        }
+        if enter < 1.0 {
+            crate::alto::sweep(&painter, rect, enter, self.cfg.accent);
+            ctx.request_repaint_after(FRAME_SMOOTH);
         }
         if !hovering_files && self.core.media_kind() != MediaKind::None {
             self.format_badge(ui, rect);
@@ -1648,6 +1695,11 @@ impl CapyroApp {
                 );
             }
         }
+        if crate::alto::on() && can_seek {
+            // Alto: la punta de la barra brilla (más con el mouse encima)
+            let playing = self.core.state() == State::Playing;
+            crate::alto::glow(&painter, pos2(fill_x, ty), 16.0 + 10.0 * grow, accent, 0.12 * playing as u8 as f32 + 0.35 * grow);
+        }
         painter.rect_filled(Rect::from_min_max(track.min, pos2(fill_x, track.max.y)), th / 2.0, accent);
         if grow > 0.001 {
             let pressed = ctx.animate_bool_with_time(Id::unique("capyro-seek-press"), seek.dragged(), crate::perf::t(0.08));
@@ -1736,6 +1788,14 @@ impl CapyroApp {
         let playing = self.core.state() == State::Playing;
         let morph = ctx.animate_bool_with_time(Id::unique("capyro-play-morph"), playing, crate::perf::t(0.16));
         let scale = 1.0 + 0.06 * play.hover - 0.1 * play.press;
+        if crate::alto::on() {
+            // Alto: halo que respira mientras suena y brilla más con el mouse
+            let breathe = if playing { 0.10 + 0.06 * (ctx.input(|i| i.time) * 2.2).sin() as f32 } else { 0.04 };
+            crate::alto::glow(&painter, play_c, 62.0 + 10.0 * play.hover, accent, breathe + 0.28 * play.hover);
+            if play.resp.clicked() {
+                crate::alto::ripple(&ctx, play_c, 26.0);
+            }
+        }
         if play.hover > 0.001 {
             painter.circle_filled(play_c, 23.0 * scale + 6.0 * play.hover, accent.gamma_multiply(0.18 * play.hover));
         }
@@ -1792,6 +1852,12 @@ impl CapyroApp {
         let add = animate_button(ui, Id::unique("capyro-add-files"), base_rect, !pending);
         let s = 1.0 + 0.03 * add.hover - 0.06 * add.press;
         let add_rect = Rect::from_center_size(base_rect.center(), base * s);
+        if crate::alto::on() {
+            crate::alto::glow_rect(&painter, add_rect, accent, add.hover);
+            if add.resp.clicked() {
+                crate::alto::ripple(&ctx, add_rect.center(), add_rect.height() * 0.8);
+            }
+        }
         if add.hover > 0.001 {
             painter.rect_filled(add_rect.expand(4.0 * add.hover), add_rect.height() / 2.0 + 4.0, accent.gamma_multiply(0.16 * add.hover));
         }
@@ -2058,7 +2124,7 @@ impl CapyroApp {
         let size = vec2(width, base_h + region_h);
         let anchor = pos2(self.info_rect.left() - 6.0, self.info_rect.top() - 10.0);
         let full = Rect::from_min_size(pos2(anchor.x, anchor.y - size.y), size);
-        let grown = size * (0.85 + 0.15 * ease);
+        let grown = size * (0.85 + 0.15 * crate::alto::pop(t, ease));
         let panel = Rect::from_min_size(pos2(anchor.x, anchor.y - grown.y), grown);
         let interactive = self.show_info && t > 0.6;
 
@@ -2078,6 +2144,7 @@ impl CapyroApp {
             ctx.request_repaint_after(FRAME_SMOOTH);
             return;
         }
+        crate::alto::reveal(&ctx, Id::unique("capyro-info-anim"), panel, 12.0, self.show_info, BG_PANEL, accent);
 
         let x0 = panel.left() + 14.0;
         let x1 = panel.right() - 14.0;
@@ -2189,7 +2256,7 @@ impl CapyroApp {
         anchor.y = anchor.y.max(ui.max_rect().top() + 8.0 + size.y);
         let full = Rect::from_min_size(anchor - size, size);
         // crece desde la esquina del engranaje
-        let panel = Rect::from_min_max(anchor - size * (0.85 + 0.15 * ease), anchor);
+        let panel = Rect::from_min_max(anchor - size * (0.85 + 0.15 * crate::alto::pop(t, ease)), anchor);
         let interactive = self.show_settings && t > 0.6;
 
         let mut painter = ui.painter().clone();
@@ -2210,6 +2277,7 @@ impl CapyroApp {
             ctx.request_repaint_after(FRAME_SMOOTH);
             return; // el contenido aparece cuando termina de abrirse
         }
+        crate::alto::reveal(&ctx, Id::unique("capyro-settings-anim"), panel, 12.0, self.show_settings, BG_PANEL, accent);
 
         let x0 = panel.left() + 14.0;
         let x1 = panel.right() - 14.0;
@@ -2317,7 +2385,7 @@ impl CapyroApp {
             chip.resp.on_hover_text(match m {
                 crate::perf::Mode::Bajo => "Sin animaciones, sin pantalla de carga, sin visualizador ni brillos. Todo sigue funcionando, gastando lo mínimo",
                 crate::perf::Mode::Medio => "Capyro como siempre",
-                crate::perf::Mode::Alto => "Suma la iluminación cinematográfica: los colores del video (o de la carátula) iluminan toda la ventana, como en YouTube",
+                crate::perf::Mode::Alto => "Suma la iluminación cinematográfica (los colores del video iluminan toda la ventana, como en YouTube), un fondo con degradé que se mueve, brillos que siguen al mouse, transiciones con más vida y partículas de luz",
             });
         }
         y += 22.0;
@@ -2925,6 +2993,14 @@ impl CapyroApp {
     }
 
     fn update_title(&mut self, ctx: &egui::Context) {
+        // cambió el archivo: transición de entrada (modo Alto)
+        let key = self.core.current_file();
+        if key != self.track_key {
+            if !key.is_empty() {
+                self.track_at = Some(ctx.input(|i| i.time));
+            }
+            self.track_key = key;
+        }
         let title = if self.core.current_file().is_empty() {
             "Capyro".to_owned()
         } else {
@@ -3050,10 +3126,27 @@ impl eframe::App for CapyroApp {
             if self.ambient.step(now) {
                 ctx.request_repaint_after(FRAME_AMBIENT);
             }
+            let accent = self.cfg.accent;
+            let (focused, pointer) = ctx.input(|i| (i.focused, i.pointer.hover_pos()));
+            let audio_playing = self.core.media_kind() == MediaKind::Audio && self.core.state() == State::Playing;
+            let energy = if audio_playing && self.cfg.visualizer { self.viz.energy() } else { 0.0 };
+            if let Some(d) = self.backdrop.step(now, focused, pointer, energy, accent, self.ambient.mean()) {
+                ctx.request_repaint_after(d);
+            }
+            let area = full.shrink(1.0);
+            // degradé que se mueve, la luz del video, el polvito y la luz del mouse
             let reach = full.width().max(full.height()) * 0.42;
             // (el área de video es opaca: ahí no hace falta, tiene su propia luz)
             let under = self.ambient_under.map(|r: Rect| r.shrink(4.0));
-            self.ambient.paint(ui.painter(), full.shrink(1.0), 0.42, reach, under);
+            let gradient = self.backdrop.gradient(area, accent);
+            if self.ambient.visible() {
+                // luz del video y degradé en una sola malla (una sola pasada)
+                self.ambient.paint(ui.painter(), area, 0.42, reach, under, Some(&gradient));
+            } else {
+                gradient.paint(ui.painter(), under);
+            }
+            self.backdrop.paint_particles(ui.painter(), area, accent, under, 28);
+            self.backdrop.paint_cursor(ui.painter(), area, accent, self.ambient_under);
         }
 
         let inner = full.shrink(PAD);
@@ -3116,6 +3209,8 @@ impl eframe::App for CapyroApp {
         if !square {
             Self::resize_handles(ui, full);
         }
+        // las ondas de los clics (Alto), arriba de los botones
+        crate::alto::paint_ripples(&ctx, ui.painter(), self.cfg.accent);
         // el tutorial va encima de todo y se queda con el mouse y el teclado
         self.tutorial_overlay(ui, full);
 

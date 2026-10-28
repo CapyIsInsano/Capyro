@@ -200,7 +200,7 @@ impl CapyroApp {
         // que no se salga de la ventana por la izquierda
         let anchor = pos2(anchor.x.max(ui.max_rect().left() + 12.0 + size.x), anchor.y);
         let full = Rect::from_min_size(anchor - size, size);
-        let panel = Rect::from_min_max(anchor - size * (0.85 + 0.15 * ease), anchor);
+        let panel = Rect::from_min_max(anchor - size * (0.85 + 0.15 * crate::alto::pop(t, ease)), anchor);
         let interactive = self.show_fx && t > 0.6;
 
         let mut painter = ui.painter().clone();
@@ -219,6 +219,7 @@ impl CapyroApp {
             ctx.request_repaint_after(super::FRAME_SMOOTH);
             return;
         }
+        crate::alto::reveal(&ctx, Id::unique("capyro-fx-anim"), panel, 12.0, self.show_fx, BG_PANEL, accent);
 
         let mut fx = self.core.fx();
         let mut pitch = self.fx_pitch_drag.unwrap_or(self.core.pitch() as f32);

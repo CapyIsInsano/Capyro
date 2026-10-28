@@ -5,7 +5,9 @@
 //!   chispitas ni brillos, y la interfaz se redibuja menos seguido.
 //! - **Medio**: Capyro como siempre.
 //! - **Alto**: suma la iluminación cinematográfica ([`Ambient`]): los colores
-//!   del video (o de la carátula) se derraman por toda la ventana.
+//!   del video (o de la carátula) se derraman por toda la ventana; y además
+//!   el fondo animado, los brillos, las transiciones y las partículas de
+//!   [`crate::alto`].
 //!
 //! El modo vive en un atómico global para que cualquier parte de la interfaz
 //! lo pueda consultar sin pasar la configuración de mano en mano.
@@ -58,7 +60,7 @@ impl Mode {
         match self {
             Mode::Bajo => "Sin animaciones ni extras. Para PCs justas",
             Mode::Medio => "Capyro como siempre",
-            Mode::Alto => "Con iluminación cinematográfica",
+            Mode::Alto => "Iluminación, fondo animado, brillos y partículas",
         }
     }
 }
@@ -235,6 +237,21 @@ impl Ambient {
         fading || moving && self.level > 0.0
     }
 
+    /// Color promedio de lo que se ve (si hay imagen): lo usa el degradé del
+    /// fondo de Alto.
+    pub fn mean(&self) -> Option<[f32; 3]> {
+        if !self.visible() {
+            return None;
+        }
+        let mut acc = [0.0f32; 3];
+        for c in &self.current {
+            for k in 0..3 {
+                acc[k] += c[k];
+            }
+        }
+        Some(acc.map(|v| v / self.current.len() as f32))
+    }
+
     pub fn visible(&self) -> bool {
         self.level > 0.003 && self.source.is_some()
     }
@@ -262,7 +279,17 @@ impl Ambient {
     /// No se dibuja lo que va a quedar tapado por `under` (algo opaco que se
     /// dibuja encima) ni lo que no tiene luz: menos píxeles que mezclar,
     /// que con una GPU por software (llvmpipe) es lo que más cuesta.
-    pub fn paint(&self, painter: &egui::Painter, area: Rect, strength: f32, reach: f32, under: Option<Rect>) {
+    /// Con `base` (el degradé de fondo de Alto) se dibujan las dos cosas en
+    /// una sola malla: la luz encima del degradé, una sola pasada.
+    pub fn paint(
+        &self,
+        painter: &egui::Painter,
+        area: Rect,
+        strength: f32,
+        reach: f32,
+        under: Option<Rect>,
+        base: Option<&crate::alto::Gradient>,
+    ) {
         let Some(src) = self.source else { return };
         if !self.visible() || area.width() < 4.0 || area.height() < 4.0 {
             return;
@@ -291,7 +318,16 @@ impl Ambient {
                 let near = (1.0 - d / reach).clamp(0.0, 1.0);
                 let fade = edge_fade(p, area, edge);
                 let alpha = strength * self.level * near * near.sqrt() * fade;
-                let col = premul(r, g, b, alpha);
+                let col = match base {
+                    None => premul(r, g, b, alpha),
+                    Some(g0) => {
+                        // la luz "sobre" el degradé (los dos premultiplicados)
+                        let a = alpha.clamp(0.0, 1.0);
+                        let light = [r / 255.0 * a, g / 255.0 * a, b / 255.0 * a, a];
+                        let under_c = g0.at(p);
+                        crate::alto::to_color(std::array::from_fn(|k| light[k] + under_c[k] * (1.0 - a)))
+                    }
+                };
                 flags.push((col.a() > 0, under.contains(p)));
                 mesh.colored_vertex(p, col);
             }

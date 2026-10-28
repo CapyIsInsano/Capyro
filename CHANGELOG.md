@@ -36,6 +36,12 @@
   - **Medio** (el de siempre, viene por defecto): Capyro como hasta ahora;
   - **Alto**: suma la **iluminación cinematográfica**, como la de YouTube pero en toda la ventana: los colores del video (o de la carátula de la canción) se derraman por el header, los controles y las franjas negras del video, y cambian despacio siguiendo la imagen. Para no comerse el procesador, de cada cuadro se promedian unos pocos píxeles (una grilla de 16×9) y la luz es una malla con colores por vértice que pinta la placa de video; lo que queda tapado por el video ni se dibuja, y con la imagen quieta deja de recalcular.
   - Se cambia al instante, sin reiniciar.
+- Extra: el modo **Alto** trae más cosas (en Bajo y Medio no cambia nada):
+  - **fondo con degradé dinámico**: tres manchas de color se mueven despacio por detrás de toda la interfaz: el color de acento, el de lo que estás viendo (sacado del video o de la carátula, y cambia cuando cambia la imagen) y uno que los acompaña;
+  - **resplandor interactivo**: una luz suave sigue al mouse por la ventana; los botones brillan con el color de acento al pasarles por encima y largan una onda al tocarlos; el botón de play tiene un halo que respira mientras suena algo; el botón "Agregar archivo(s)" y la punta de la barra de progreso también brillan;
+  - **transiciones más elaboradas**: los menús (⚙, ⓘ, efectos, novedades, lista y atajos) se abren con un rebotecito y su contenido se descubre de arriba abajo con una línea de luz; al cambiar de archivo un destello cruza el área de video y, en las canciones, el título y el artista entran subiendo;
+  - **partículas ambientales**: polvito de luz que sube flotando y titila, alrededor de la carátula y por el fondo (nunca encima del video); con música late con los graves;
+  - **sin comerse el procesador**: no guarda nada por partícula (sale del tiempo), el degradé y la luz del video van en una sola malla, lo tapado por el video no se dibuja, el fondo se mueve a 15 cuadros por segundo (va despacio) y con la ventana desenfocada se queda quieto y no gasta nada. Con placa de video, cada cuadro le cuesta al procesador unos 3 ms.
 
 ## v0.3.0-alpha · El salto a Windows
 

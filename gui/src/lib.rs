@@ -4,6 +4,7 @@
 //! `main.c` crea el núcleo y llama a `capyro_gui_run`, que corre el event
 //! loop de eframe/egui hasta que se cierra la ventana.
 
+mod alto;
 mod app;
 mod changes;
 mod config;

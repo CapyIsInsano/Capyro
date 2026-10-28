@@ -70,7 +70,7 @@ impl CapyroApp {
             return;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
-        let slide = (1.0 - ease) * 40.0;
+        let slide = (1.0 - crate::alto::pop(t, ease)) * 40.0;
         let panel = Rect::from_min_max(
             pos2((video.right() - 300.0).max(video.left() + 8.0) + slide, video.top() + 8.0),
             pos2(video.right() - 8.0 + slide, video.bottom() - 8.0),
@@ -87,6 +87,7 @@ impl CapyroApp {
         painter.rect_stroke(panel, 10.0, Stroke::new(1.0, Color32::from_white_alpha(12)), StrokeKind::Inside);
 
         let accent = self.cfg.accent;
+        crate::alto::reveal(&ctx, Id::unique("capyro-playlist-anim"), panel, 10.0, self.show_playlist, BG_PANEL, accent);
         let now = ctx.input(|i| i.time);
         // la pestaña puede apuntar a una playlist que ya no existe
         if self.list_tab.is_some_and(|i| i >= self.playlists.lists.len()) {

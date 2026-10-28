@@ -79,7 +79,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 🪟 **Linux y Windows** | El mismo Capyro en los dos: cada uno compila e instala solo lo suyo (`system = "Lin"` o `"Win"`). En Windows se instala con [CapyroInstaller](#windows). |
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
 | 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, instala la versión nueva (en Linux la compila; en Windows baja la ya compilada) y te muestra qué cambió. |
-| ⚡ **Rendimiento** | Tres modos en ⚙: **Bajo** (sin animaciones ni extras, para PCs con pocos recursos), **Medio** y **Alto** (con iluminación cinematográfica: los colores del video iluminan toda la ventana). |
+| ⚡ **Rendimiento** | Tres modos en ⚙: **Bajo** (sin animaciones ni extras, para PCs con pocos recursos), **Medio** y **Alto** (iluminación cinematográfica, fondo animado, brillos que siguen al mouse y partículas). |
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
 | 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
 | ⚙️ **Personalizable** | Los atajos se cambian **desde la app** (⚙ → Editar configuración) y todo queda en un archivo **Lua** que también podés editar a mano. |
@@ -437,11 +437,12 @@ En **⚙ → Rendimiento** (o `performance` en `capyro.lua`):
 |---|---|
 | **Bajo** | Todas las funciones, nada de más: sin animaciones (todo aparece y se va al toque), sin pantalla de carga, sin visualizador y sin los brillos del tutorial. Para PCs con pocos recursos. |
 | **Medio** | Capyro como siempre. Es el que viene. |
-| **Alto** | Suma la **iluminación cinematográfica**: como la de YouTube, pero en toda la ventana. Los colores del video (o de la carátula) iluminan el header, los controles y las franjas del video, y cambian despacio con la imagen. |
+| **Alto** | Suma la **iluminación cinematográfica**: como la de YouTube, pero en toda la ventana. Los colores del video (o de la carátula) iluminan el header, los controles y las franjas del video, y cambian despacio con la imagen. Además: **fondo con degradé** que se mueve, **resplandor** que sigue al mouse y hace brillar los botones, **transiciones** con más vida (menús con rebote, destello al cambiar de archivo) y **partículas** de luz que flotan (con música, laten con los graves). |
 
-Se aplica al instante. La iluminación casi no usa procesador (promedia unos pocos píxeles de
-cada cuadro y la luz la pinta la placa de video); en una PC sin aceleración gráfica (que
-dibuja por software) sí se nota, y ahí conviene Medio o Bajo.
+Se aplica al instante. Los extras de Alto casi no usan procesador: todo lo pinta la placa de
+video, el fondo se mueve a 15 cuadros por segundo y, con la ventana desenfocada, se queda
+quieto. En una PC sin aceleración gráfica (que dibuja por software) sí se nota, y ahí
+conviene Medio o Bajo.
 
 ### Cola y playlists
 

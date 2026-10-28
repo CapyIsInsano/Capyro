@@ -85,7 +85,9 @@ local options = {
     --             brillos): todo funciona igual, pero gasta lo mínimo.
     --   "medio" = Capyro como siempre.
     --   "alto"  = suma la iluminación cinematográfica: los colores del video
-    --             (o de la carátula) iluminan toda la ventana, como en YouTube.
+    --             (o de la carátula) iluminan toda la ventana, como en YouTube;
+    --             y además fondo con degradé animado, brillos que siguen al
+    --             mouse, transiciones con más vida y partículas de luz.
     performance      = "medio",
 
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),

@@ -71,6 +71,14 @@ impl Visualizer {
         }
     }
 
+    /// Qué tan fuerte vienen los graves ahora (0..1): las partículas de Alto
+    /// laten con esto.
+    pub fn energy(&self) -> f32 {
+        let lows = &self.levels[..8];
+        let mean = lows.iter().sum::<f32>() / lows.len() as f32;
+        (mean * mean * 1.6).min(1.0)
+    }
+
     pub fn is_silent(&self) -> bool {
         self.peaks.iter().all(|&p| p < 0.002)
     }
