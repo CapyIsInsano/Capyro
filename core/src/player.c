@@ -39,7 +39,7 @@
 
 #define MAX_VIDEO_W      1920
 #define MAX_VIDEO_H      1080
-#define MAX_COVER_SIDE   1024
+#define MAX_COVER_SIDE   720   /* la carátula se ve como mucho a ~340 puntos (x2 en pantallas HiDPI) */
 #define AUDIO_AHEAD_SEC  0.5    /* cuánto audio decodificado mantener listo */
 #define PKT_QUEUE_BYTES  (32u * 1024u * 1024u)
 #define PKT_QUEUE_MIN    8      /* paquetes por stream que intentamos tener */
@@ -937,9 +937,11 @@ static void decode_thread(void *arg) {
     CapyroCore *core = arg;
     Player *p = &core->player;
 
+    int idle = 0; /* vueltas seguidas sin nada que hacer */
     for (;;) {
         cp_mutex_lock(&core->lock);
         bool     quit    = core->quit;
+        bool     paused  = core->state != CAPYRO_STATE_PLAYING;
         bool     seek    = core->seek_req && core->seek_serial != p->seek_serial_done;
         bool     reinit  = core->hwdec_reinit;
         core->hwdec_reinit = false;
@@ -1001,7 +1003,18 @@ static void decode_thread(void *arg) {
                 }
                 cp_mutex_unlock(&core->lock);
             }
-            cp_sleep_ms(all_done ? 15 : 4);
+            /* Sin nada que hacer, cada vez duerme un poco más (antes eran
+             * siempre 4 ms: 250 despertares por segundo con todo quieto).
+             * Reproduciendo nunca más de 12 ms: hay 3 cuadros y medio
+             * segundo de audio de colchón. En pausa, 30 ms. */
+            idle++;
+            int ms = all_done ? 15 : idle < 4 ? 4 : idle < 12 ? 8 : 12;
+            if (paused && idle > 4) {
+                ms = 30;
+            }
+            cp_sleep_ms(ms);
+        } else {
+            idle = 0;
         }
     }
 }
@@ -1151,6 +1164,8 @@ void player_close(CapyroCore *core) {
     }
     core->title[0]  = '\0';
     core->artist[0] = '\0';
+    core->album[0]  = '\0';
+    core->change_serial++;
     core->hwdec_reinit = false;
     {
         uint64_t serial = core->decinfo.serial;
@@ -1278,6 +1293,9 @@ int player_open(CapyroCore *core, const char *path) {
     core->force_frame    = real_video; /* mostrar el primer frame aunque no esté sonando */
     copy_tag(core->title, sizeof(core->title), p->fmt->metadata, stream_tags, TITLE_KEYS);
     copy_tag(core->artist, sizeof(core->artist), p->fmt->metadata, stream_tags, ARTIST_KEYS);
+    static const char *const ALBUM_KEYS[] = { "album", NULL };
+    copy_tag(core->album, sizeof(core->album), p->fmt->metadata, stream_tags, ALBUM_KEYS);
+    core->change_serial++;
     cp_mutex_unlock(&core->lock);
 
     if (cp_thread_start(&p->thread, decode_thread, core) != 0) {

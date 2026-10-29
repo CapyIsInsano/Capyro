@@ -152,6 +152,13 @@ static double clamp_pos(const CapyroCore *core, double t) {
     return t;
 }
 
+/* La lista cambió (la GUI vuelve a pedirla). */
+static void bump_serial(CapyroCore *core) {
+    cp_mutex_lock(&core->lock);
+    core->change_serial++;
+    cp_mutex_unlock(&core->lock);
+}
+
 /* Deja el núcleo sin nada cargado (el hilo ya tiene que estar parado). */
 static void set_idle(CapyroCore *core) {
     cp_mutex_lock(&core->lock);
@@ -700,6 +707,20 @@ const char *capyro_core_get_artist(CapyroCore *core) {
     return core ? core->artist : "";
 }
 
+const char *capyro_core_get_album(CapyroCore *core) {
+    return core ? core->album : "";
+}
+
+uint64_t capyro_core_get_change_serial(CapyroCore *core) {
+    if (!core) {
+        return 0;
+    }
+    cp_mutex_lock(&core->lock);
+    uint64_t s = core->change_serial;
+    cp_mutex_unlock(&core->lock);
+    return s;
+}
+
 const char *capyro_core_get_current_file(CapyroCore *core) {
     if (!core || core->playlist_current < 0) {
         return "";
@@ -718,6 +739,7 @@ int capyro_core_playlist_add(CapyroCore *core, const char *path) {
     if (capyro_core_probe_extension(path) == CAPYRO_MEDIA_NONE) {
         return CAPYRO_ERR_UNSUPPORTED;
     }
+    bump_serial(core);
     if (core->playlist_len == core->playlist_cap) {
         size_t new_cap = core->playlist_cap * 2;
         char **grown   = realloc(core->playlist, new_cap * sizeof(char *));
@@ -810,6 +832,7 @@ void capyro_core_playlist_remove(CapyroCore *core, size_t index) {
     if (!core || index >= core->playlist_len) {
         return;
     }
+    bump_serial(core);
     bool removing_current = core->playlist_current == (long)index;
     bool was_playing      = removing_current && capyro_core_get_state(core) == CAPYRO_STATE_PLAYING;
     /* Qué viene después del que se borra (antes de tocar el orden). */
@@ -851,6 +874,7 @@ void capyro_core_playlist_clear(CapyroCore *core) {
     if (!core) {
         return;
     }
+    bump_serial(core);
     player_close(core);
     for (size_t i = 0; i < core->playlist_len; i++) {
         free(core->playlist[i]);

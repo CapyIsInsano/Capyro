@@ -93,7 +93,7 @@ fn native_options(cfg: &config::Config, renderer: eframe::Renderer) -> eframe::N
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Capyro")
         .with_app_id("Capyro") // lo que muestran la barra de tareas y el dock
-        .with_inner_size([768.0, 642.0])
+        .with_inner_size([900.0, 660.0]) // v0.3.2: lugar para las tres columnas de la vista de música
         .with_min_inner_size([520.0, 430.0])
         .with_decorations(false)
         // transparente (esquinas redondeadas) solo en Linux: en Windows

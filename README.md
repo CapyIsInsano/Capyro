@@ -4,7 +4,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.1--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.1-alpha">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.2--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.2-alpha">
 <img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Windows-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux y Windows">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
@@ -28,12 +28,12 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.3.1:** **más liviano**. Capyro usa menos de la mitad de procesador
-> (con música, un cuarto): dibuja solo lo que hace falta, los videos se convierten al tamaño
-> en que se ven y las animaciones siguen igual de suaves. Además aparece en **"Abrir con…"**
-> en Linux y en Windows para todos sus formatos. Y en ⚙ hay **modos de rendimiento**: Bajo
-> (sin animaciones ni extras, para PCs justas), Medio y Alto, con **iluminación cinematográfica**
-> en toda la ventana.
+> **Novedades de la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
+> **vista de música**: la carátula grande al medio con título, artista y álbum, los controles,
+> el volumen y los efectos; la lista a un costado y Ajustes, Info y Novedades al otro. Con un
+> video, la barra de abajo **se oculta con un clic** (o con la tecla B). Todo se apaga en ⚙ y
+> respeta los modos de rendimiento. Y está **más liviano**: un video usa ~12 % menos de
+> procesador, la música hasta la mitad.
 > [Ver el historial completo →](CHANGELOG.md)
 
 <br>
@@ -45,7 +45,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 <table>
 <tr>
 <td width="50%" align="center"><img src="docs/screenshot.png" alt="Reproduciendo un video"><br><sub><b>Video</b> sincronizado con el audio</sub></td>
-<td width="50%" align="center"><img src="docs/screenshot-audio.png" alt="Audio con carátula y visualizador"><br><sub><b>Audio</b> con carátula, título y visualizador</sub></td>
+<td width="50%" align="center"><img src="docs/screenshot-audio.png" alt="Vista de música"><br><sub><b>Vista de música</b>: carátula, lista y funciones a mano</sub></td>
 </tr>
 <tr>
 <td align="center"><img src="docs/screenshot-lista.png" alt="Lista de reproducción"><br><sub><b>Lista</b> con aleatorio, repetir y paso automático</sub></td>
@@ -80,6 +80,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
 | 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, instala la versión nueva (en Linux la compila; en Windows baja la ya compilada) y te muestra qué cambió. |
 | ⚡ **Rendimiento** | Tres modos en ⚙: **Bajo** (sin animaciones ni extras, para PCs con pocos recursos), **Medio** y **Alto** (iluminación cinematográfica, fondo animado, brillos que siguen al mouse y partículas). |
+| 🎚️ **Interfaz adaptativa** | Con un audio, la **vista de música** (carátula grande, título, artista y álbum, controles, volumen y efectos; la lista a un costado y Ajustes / Info / Novedades al otro). Con un video, la barra de abajo se **oculta con un clic**. Se adapta al tamaño de la ventana y se apaga en ⚙. |
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
 | 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
 | ⚙️ **Personalizable** | Los atajos se cambian **desde la app** (⚙ → Editar configuración) y todo queda en un archivo **Lua** que también podés editar a mano. |
@@ -412,6 +413,26 @@ capyro --help
 - **Área de video**: clic para play/pausa, doble clic para pantalla completa.
 - **Ventana**: se arrastra desde arriba, se maximiza con doble clic y se redimensiona desde los bordes.
 
+### Vista de música y barra oculta
+
+Capyro se acomoda a lo que abrís:
+
+- **Con un audio** aparece la **vista de música**. Al medio: la carátula (o una nota, si el
+  archivo no trae), el título, el artista y el álbum, la barra de progreso, los controles, el
+  **volumen** (arrastrá la barra o usá la rueda; clic en el parlante para silenciar) y los
+  **efectos**: el interruptor, los presets y "Efectos de audio ›" para el menú completo. A la
+  izquierda, la **lista** siempre abierta; a la derecha, **Ajustes**, **Info** (con los formatos
+  ya a la vista) y **Novedades**, en pestañas.
+- Si la ventana es chica (menos de unos 760 de ancho o 500 de alto) vuelve la vista clásica.
+  Agrandala y las columnas crecen con ella.
+- **Con un video**, al acercar el mouse abajo del video aparece un botoncito: un clic y **la
+  barra se esconde** (el video ocupa todo). Para que vuelva, mové el mouse y tocá el botón, o
+  usá la tecla <kbd>B</kbd>.
+- Las dos cosas se apagan en **⚙** ("Vista de música" y "Ocultar barra (videos)") o en
+  `capyro.lua` (`music_view` y `hide_bar_button`). En el modo de rendimiento **Bajo** los
+  cambios son instantáneos; en **Medio** y **Alto**, con transiciones (y en Alto la carátula
+  ilumina toda la ventana).
+
 ### Decodificación por GPU
 
 En **⚙ → Decodificación** elegís cómo se decodifican los videos:
@@ -471,6 +492,7 @@ siempre, y tus **playlists** (hasta 3).
 | Detener | <kbd>S</kbd> | Prender / apagar efectos | <kbd>Shift</kbd>+<kbd>E</kbd> |
 | Pantalla completa | <kbd>F</kbd> <kbd>F11</kbd> | Capturar fotograma | <kbd>Shift</kbd>+<kbd>S</kbd> |
 | Cerrar menú / pantalla completa | <kbd>Esc</kbd> | Salir | <kbd>Ctrl</kbd>+<kbd>Q</kbd> |
+| Ocultar / mostrar la barra (videos) | <kbd>B</kbd> | | |
 
 Todos se cambian desde **⚙ → Editar configuración** (ver [Configuración](#configuración)).
 
@@ -508,6 +530,8 @@ return {
         show_millis      = true,       -- y debajo, los milisegundos (000..999)
         show_video_info  = true,       -- abajo a la izquierda: resolución (1080p, 4K...) y fps
         performance      = "medio",    -- "bajo" (sin animaciones ni extras), "medio" o "alto" (iluminación)
+        music_view       = true,       -- con un audio: la vista de música (carátula, lista y funciones)
+        hide_bar_button  = true,       -- con un video: botón para ocultar la barra de abajo (tecla B)
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         system           = "Lin",      -- "Lin" o "Win": lo pone la instalación ("auto" = detectarlo)
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
@@ -579,6 +603,10 @@ Desde la v0.3.1 Capyro dibuja solo lo necesario: al ritmo del video, 30 cuadros 
 para lo que se mueve siempre (visualizador, milisegundos) y 60 para las animaciones. Para
 medir en tu PC: `CAPYRO_DEBUG_FPS=1 capyro` anota cada segundo cuántos cuadros dibuja y
 cuánto le cuesta cada uno (con `=2`, además, qué pidió cada redibujado).
+
+Con música, si apagás los milisegundos (**⚙ → Milisegundos**) y el visualizador
+(`visualizer = false`), Capyro redibuja solo cuando cambia algo que se ve: el procesador
+casi no se entera.
 
 Si el video va trabado, fijate en **⚙ → Decodificación** que diga GPU: en placas viejas
 (Intel HD 3000, por ejemplo) la GPU decodifica H.264 y el procesador queda libre.

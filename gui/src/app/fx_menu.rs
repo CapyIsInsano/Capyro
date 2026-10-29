@@ -212,7 +212,7 @@ impl CapyroApp {
             }
             ui.interact(full, Id::unique("capyro-fx-bg"), Sense::click());
         }
-        painter.rect_filled(panel.translate(vec2(0.0, 4.0)), 12.0, Color32::from_black_alpha(70));
+        crate::theme::soft_shadow(&painter, panel, 12.0, 8.0, 2.0, 70);
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
@@ -369,6 +369,81 @@ impl CapyroApp {
 
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.show_fx = false;
+        }
+    }
+
+    /// Efectos en chiquito, para la vista de música: el título (que abre el
+    /// menú completo), el interruptor general y los presets. Ocupa `rect`
+    /// (unos 54 puntos de alto).
+    pub(super) fn fx_compact(&mut self, ui: &mut Ui, painter: &Painter, rect: Rect) {
+        let ctx = ui.ctx().clone();
+        let accent = self.cfg.accent;
+        let mut fx = self.core.fx();
+        let mut fx_changed = false;
+        let (x0, x1) = (rect.left(), rect.right());
+        let y = rect.top() + 10.0;
+
+        // "Efectos de audio ›": abre el menú con todo (graves, tono, estéreo...)
+        let tg = painter.layout_no_wrap("Efectos de audio".to_owned(), bold(12.0), TEXT);
+        let head = Rect::from_min_size(pos2(x0 - 4.0, y - 11.0), vec2(tg.size().x + 44.0, 22.0));
+        let open = animate_button(ui, Id::unique("capyro-fx-compact-open"), head, true);
+        let on = ctx.animate_bool_with_time(Id::unique("capyro-fx-on"), self.show_fx, crate::perf::t(0.15));
+        if open.hover > 0.001 || on > 0.001 {
+            painter.rect_filled(head, 7.0, Color32::from_white_alpha((10.0 * open.hover.max(on)) as u8));
+        }
+        let col = open.tint(TEXT_DIM, TEXT).lerp_to_gamma(accent, on);
+        crate::icons::sliders(painter, pos2(x0 + 6.0, y), 13.0, col);
+        painter.galley(pos2(x0 + 16.0, y - tg.size().y / 2.0), tg, col);
+        let chev = pos2(head.right() - 9.0 + 2.0 * open.hover, y);
+        let st = Stroke::new(1.4, col);
+        painter.line_segment([chev + vec2(-3.0, -4.0), chev], st);
+        painter.line_segment([chev + vec2(-3.0, 4.0), chev], st);
+        // el menú completo se abre arriba de esta sección, alineado a la
+        // derecha de la columna (crece hacia arriba y a la izquierda)
+        self.fx_rect = Rect::from_min_max(pos2(x1 - 26.0, head.top()), pos2(x1 - 6.0, head.bottom()));
+        if open.resp.clicked() {
+            let was = self.show_fx;
+            self.close_menus();
+            self.show_fx = !was;
+        }
+        open.resp.on_hover_text("Todos los efectos: graves, medios, agudos, tono, estéreo y modo noche (Ctrl+E)");
+
+        // interruptor general
+        if switch(ui, painter, "master-compact", pos2(x1 - 17.0, y), fx.enabled, accent, true) {
+            fx.enabled = !fx.enabled;
+            fx_changed = true;
+        }
+
+        // presets
+        let cy = y + 30.0;
+        let gap = 4.0;
+        let n = PRESETS.len() as f32;
+        let chip_w = ((x1 - x0) - gap * (n - 1.0)) / n;
+        let fs = if chip_w < 46.0 { 10.5 } else { 11.0 };
+        let mut body = painter.clone();
+        if !fx.enabled {
+            body.multiply_opacity(0.45);
+        }
+        for (i, (name, preset)) in PRESETS.iter().enumerate() {
+            let r = Rect::from_min_size(pos2(x0 + i as f32 * (chip_w + gap), cy - 12.0), vec2(chip_w, 24.0));
+            let chip = animate_button(ui, Id::unique(("capyro-fx-compact-preset", i)), r, true);
+            let selected = fx.enabled && same_sound(&fx, preset);
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-fx-compact-sel", i)), selected, crate::perf::t(0.15));
+            let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
+            if crate::alto::on() {
+                crate::alto::glow_rect(&body, rr, accent, 0.6 * chip.hover);
+            }
+            let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
+            body.rect_filled(rr, 7.0, bg);
+            let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
+            body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(fs) } else { regular(fs) }, col);
+            if chip.resp.clicked() {
+                fx = AudioFx { enabled: true, ..*preset };
+                fx_changed = true;
+            }
+        }
+        if fx_changed {
+            self.core.set_fx(&fx);
         }
     }
 

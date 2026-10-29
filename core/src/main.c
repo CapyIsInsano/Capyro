@@ -8,6 +8,9 @@
 #include "capyro_core.h"
 
 #include <stdio.h>
+#ifdef __GLIBC__
+#  include <malloc.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -67,6 +70,13 @@ static void print_help(const char *argv0) {
 }
 
 int main(int argc, char **argv) {
+#ifdef __GLIBC__
+    /* Los cuadros de video (de 1 MB para arriba) van directo a memoria
+     * propia del sistema y se devuelven al soltarlos. Si no, glibc los deja
+     * en el montón y la memoria del proceso queda inflada mientras se ve un
+     * video (unos 15 MB menos con un 1080p). */
+    mallopt(M_MMAP_THRESHOLD, 256 * 1024);
+#endif
 #ifdef _WIN32
     char **wargv = utf8_argv(&argc);
     if (wargv) {

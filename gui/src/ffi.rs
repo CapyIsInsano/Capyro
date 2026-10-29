@@ -165,6 +165,8 @@ extern "C" {
     fn capyro_core_audio_backend(core: *mut CapyroCore) -> *const c_char;
     fn capyro_core_get_title(core: *mut CapyroCore) -> *const c_char;
     fn capyro_core_get_artist(core: *mut CapyroCore) -> *const c_char;
+    fn capyro_core_get_album(core: *mut CapyroCore) -> *const c_char;
+    fn capyro_core_get_change_serial(core: *mut CapyroCore) -> u64;
     fn capyro_core_lock_video_frame(core: *mut CapyroCore, out: *mut RawVideoFrame) -> bool;
     fn capyro_core_unlock_video_frame(core: *mut CapyroCore);
     fn capyro_core_set_video_target(core: *mut CapyroCore, width: c_int, height: c_int);
@@ -501,6 +503,15 @@ impl Core {
     pub fn title(&self) -> String {
         cstr_to_string(unsafe { capyro_core_get_title(self.ptr) })
     }
+    pub fn album(&self) -> String {
+        cstr_to_string(unsafe { capyro_core_get_album(self.ptr) })
+    }
+
+    /// Cambia cuando cambia el archivo cargado o la lista (ver [`NowPlaying`]).
+    pub fn change_serial(&self) -> u64 {
+        unsafe { capyro_core_get_change_serial(self.ptr) }
+    }
+
     pub fn artist(&self) -> String {
         cstr_to_string(unsafe { capyro_core_get_artist(self.ptr) })
     }

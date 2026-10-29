@@ -28,7 +28,7 @@
 --    volume_up, volume_down, mute,
 --    next_file, prev_file, toggle_playlist, fullscreen, open_files,
 --    toggle_shuffle, cycle_repeat, speed_up, speed_down, speed_reset,
---    screenshot, toggle_effects, effects_bypass, quit
+--    screenshot, toggle_effects, effects_bypass, toggle_bar, quit
 --
 --  Además, las teclas 0..9 (sin modificadores) saltan al 0 %..90 % del archivo.
 -- ------------------------------------------------------------
@@ -53,6 +53,7 @@ local keys = {
     screenshot      = "Shift+S",       -- guarda el fotograma actual como PNG
     toggle_effects  = "Ctrl+E",        -- abre/cierra el menú de efectos de audio
     effects_bypass  = "Shift+E",       -- prende/apaga todos los efectos (para comparar)
+    toggle_bar      = "B",             -- videos: oculta/muestra la barra de abajo
     quit            = "Ctrl+Q",
 }
 
@@ -79,6 +80,16 @@ local options = {
     show_format      = true,   -- formato del archivo arriba a la izquierda del video (MP4 · H.264)
     show_millis      = true,   -- debajo, los milisegundos del segundo actual (000..999)
     show_video_info  = true,   -- abajo a la izquierda del video: resolución (1080p, 4K...) y fps
+
+    -- Interfaz adaptativa: Capyro se acomoda a lo que abrís.
+    --   music_view:      con un audio, la "vista de música": la carátula grande
+    --                    al medio con título, artista y álbum, los controles, el
+    --                    volumen y los efectos; la lista a un costado y Ajustes /
+    --                    Info / Novedades al otro (si la ventana tiene lugar).
+    --   hide_bar_button: con un video, un botón para ocultar la barra de abajo
+    --                    con un clic (también con la tecla de toggle_bar).
+    music_view       = true,
+    hide_bar_button  = true,
 
     -- Modo de rendimiento (también en ⚙ → Rendimiento):
     --   "bajo"  = sin animaciones ni extras (pantalla de carga, visualizador,

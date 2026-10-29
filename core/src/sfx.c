@@ -17,6 +17,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -160,6 +161,27 @@ int capyro_core_sfx_load(CapyroCore *core, int slot, const uint8_t *data, size_t
     }
     if (pcm.len == 0) {
         goto out;
+    }
+    /* El silencio del final no se guarda (varios sonidos traen medio
+     * segundo o más), y el buffer queda justo: al decodificar crece al doble
+     * cada vez, así que podía quedar casi la mitad sin usar. */
+    {
+        const float quiet = 0.0005f; /* ~ -66 dB */
+        size_t keep = pcm.len;
+        while (keep > 0 && fabsf(pcm.buf[(keep - 1) * 2]) < quiet && fabsf(pcm.buf[(keep - 1) * 2 + 1]) < quiet) {
+            keep--;
+        }
+        size_t tail = core->out_rate / 50; /* 20 ms de cola, para que no corte en seco */
+        keep = keep + tail < pcm.len ? keep + tail : pcm.len;
+        if (keep == 0) {
+            goto out;
+        }
+        float *fit = realloc(pcm.buf, keep * 2 * sizeof(float));
+        if (fit) {
+            pcm.buf = fit;
+        }
+        pcm.len = keep;
+        pcm.cap = keep;
     }
 
     /* Cambiar el buffer del slot (si estaba sonando ese, se corta). */

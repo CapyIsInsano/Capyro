@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.3.1-alpha"
+#define CAPYRO_VERSION "0.3.2-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -225,6 +225,10 @@ double      capyro_core_get_duration(CapyroCore *core);   /* segundos, 0 = desco
 const char *capyro_core_get_current_file(CapyroCore *core); /* "" si nada */
 const char *capyro_core_get_title(CapyroCore *core);  /* metadato o "" */
 const char *capyro_core_get_artist(CapyroCore *core); /* metadato o "" */
+const char *capyro_core_get_album(CapyroCore *core);  /* metadato o "" */
+/* Cambia cada vez que cambia el archivo cargado o la lista de reproducción:
+ * la GUI guarda lo que pidió y solo lo vuelve a pedir cuando esto cambia. */
+uint64_t    capyro_core_get_change_serial(CapyroCore *core);
 
 /* ---------- video ----------
  * Si devuelve true, `out` apunta a memoria del núcleo y el núcleo queda

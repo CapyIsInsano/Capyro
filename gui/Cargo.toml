@@ -1,6 +1,6 @@
 [package]
 name = "capyro_gui"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.95"
 description = "Interfaz gráfica de Capyro (egui) — se compila como staticlib y se linkea al núcleo en C"
@@ -19,6 +19,8 @@ mlua = { version = "0.12", features = ["lua54", "vendored"] }
 # Diálogo nativo para abrir archivos (en Linux usa el portal de escritorio)
 rfd = "0.17"
 pollster = "0.4"
+# Ver los bytes RGBA de un cuadro como píxeles de egui sin copiarlos de a uno
+bytemuck = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 eframe = { version = "0.37", default-features = false, features = ["wayland", "x11"] }

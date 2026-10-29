@@ -31,6 +31,8 @@ pub enum Action {
     Screenshot,
     ToggleEffects,
     EffectsBypass,
+    /// Ocultar / mostrar la barra de abajo en los videos (v0.3.2).
+    ToggleBar,
     Quit,
 }
 
@@ -90,7 +92,7 @@ pub enum Backend {
 
 impl Action {
     /// Todas, en el orden en que aparecen en el editor y en capyro.lua.
-    pub const ALL: [Action; 21] = [
+    pub const ALL: [Action; 22] = [
         Action::PlayPause,
         Action::Stop,
         Action::SeekForward,
@@ -111,8 +113,14 @@ impl Action {
         Action::Screenshot,
         Action::ToggleEffects,
         Action::EffectsBypass,
+        Action::ToggleBar,
         Action::Quit,
     ];
+
+    /// Acciones que aparecieron después de que alguien guardó su capyro.lua:
+    /// si su archivo no las nombra, se les pone la tecla de siempre (si está
+    /// libre), así no hay que tocar nada para usarlas.
+    const ADDED_LATER: [(Action, &'static str); 1] = [(Action::ToggleBar, "B")];
 
     /// Nombre en capyro.lua.
     pub fn name(self) -> &'static str {
@@ -137,6 +145,7 @@ impl Action {
             Self::Screenshot => "screenshot",
             Self::ToggleEffects => "toggle_effects",
             Self::EffectsBypass => "effects_bypass",
+            Self::ToggleBar => "toggle_bar",
             Self::Quit => "quit",
         }
     }
@@ -164,6 +173,7 @@ impl Action {
             Self::Screenshot => "Capturar fotograma",
             Self::ToggleEffects => "Efectos de audio",
             Self::EffectsBypass => "Prender / apagar efectos",
+            Self::ToggleBar => "Ocultar / mostrar la barra",
             Self::Quit => "Salir",
         }
     }
@@ -190,6 +200,7 @@ impl Action {
             "screenshot" => Self::Screenshot,
             "toggle_effects" => Self::ToggleEffects,
             "effects_bypass" => Self::EffectsBypass,
+            "toggle_bar" => Self::ToggleBar,
             "quit" => Self::Quit,
             _ => return None,
         })
@@ -238,6 +249,11 @@ pub struct Config {
     pub show_millis: bool,
     /// Abajo a la izquierda del video: resolución (1080p, 4K...) y fps.
     pub show_video_info: bool,
+    /// Interfaz adaptativa (v0.3.2): con un audio, la "vista de música"
+    /// (carátula grande, lista y funciones a los costados).
+    pub music_view: bool,
+    /// En los videos, un botón para ocultar la barra de abajo.
+    pub hide_bar_button: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
     /// Con qué se dibuja la ventana en Windows (OpenGL / Direct3D / auto).
@@ -423,6 +439,8 @@ impl Config {
                 "show_format" => self.show_format.to_string(),
                 "show_millis" => self.show_millis.to_string(),
                 "show_video_info" => self.show_video_info.to_string(),
+                "music_view" => self.music_view.to_string(),
+                "hide_bar_button" => self.hide_bar_button.to_string(),
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
@@ -602,13 +620,17 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         show_format: true,
         show_millis: true,
         show_video_info: true,
+        music_view: true,
+        hide_bar_button: true,
         system_setting: None,
         source: name.to_owned(),
     };
 
     if let Some(keys) = root.get::<Option<Table>>("keys")? {
+        let mut named = Vec::new();
         for pair in keys.pairs::<String, Value>() {
             let (action_name, value) = pair?;
+            named.push(action_name.clone());
             let Some(action) = Action::from_name(&action_name) else {
                 eprintln!("capyro: {name}: acción desconocida '{action_name}'");
                 continue;
@@ -617,6 +639,16 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                 match parse_key_spec(&spec) {
                     Some((modifiers, key)) => cfg.bindings.push(Binding { modifiers, key, action }),
                     None => eprintln!("capyro: {name}: tecla inválida '{spec}' en {action_name}"),
+                }
+            }
+        }
+        for (action, spec) in Action::ADDED_LATER {
+            if named.iter().any(|n| n == action.name()) {
+                continue;
+            }
+            if let Some((modifiers, key)) = parse_key_spec(spec) {
+                if !cfg.bindings.iter().any(|b| b.key == key && b.modifiers == modifiers) {
+                    cfg.bindings.push(Binding { modifiers, key, action });
                 }
             }
         }
@@ -680,6 +712,12 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<bool>>("show_video_info")? {
             cfg.show_video_info = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("music_view")? {
+            cfg.music_view = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("hide_bar_button")? {
+            cfg.hide_bar_button = v;
         }
         if let Some(v) = opts.get::<Option<bool>>("show_millis")? {
             cfg.show_millis = v;
@@ -845,6 +883,8 @@ mod tests {
         cfg.show_millis = false;
         cfg.show_video_info = false;
         cfg.performance = crate::perf::Mode::Alto;
+        cfg.music_view = false;
+        cfg.hide_bar_button = false;
         let text = cfg.to_lua();
         let back = parse(&text, "prueba").unwrap();
         assert!(!back.bindings.iter().any(|b| b.action == Action::Stop));
@@ -862,6 +902,7 @@ mod tests {
         assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
         assert!(!back.show_format && !back.show_millis && !back.show_video_info);
         assert_eq!(back.performance, crate::perf::Mode::Alto);
+        assert!(!back.music_view && !back.hide_bar_button);
         assert!(text.contains("performance      = \"alto\","), "{text}");
         assert_eq!(back.splash, cfg.splash);
         // "auto" se guarda ya resuelto: Lin o Win según dónde corre
@@ -901,5 +942,22 @@ mod tests {
     fn hex() {
         assert_eq!(parse_hex_color("#ff7417"), Some(Color32::from_rgb(255, 116, 23)));
         assert_eq!(parse_hex_color("nope"), None);
+    }
+
+    #[test]
+    fn acciones_nuevas_con_config_vieja() {
+        // un capyro.lua de antes de toggle_bar: se le agrega la B
+        let cfg = parse("return { keys = { play_pause = \"Space\" } }", "vieja").unwrap();
+        assert!(cfg.bindings.iter().any(|b| b.action == Action::ToggleBar && b.key == Key::B));
+        // si la B ya la usa otra cosa, no se pisa
+        let cfg = parse("return { keys = { mute = \"B\" } }", "vieja").unwrap();
+        assert!(!cfg.bindings.iter().any(|b| b.action == Action::ToggleBar));
+        // y si la nombra (aunque sea vacía), se respeta
+        let cfg = parse("return { keys = { toggle_bar = {} } }", "vieja").unwrap();
+        assert!(!cfg.bindings.iter().any(|b| b.action == Action::ToggleBar));
+        // la de fábrica la trae
+        let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
+        assert!(cfg.bindings.iter().any(|b| b.action == Action::ToggleBar));
+        assert!(cfg.music_view && cfg.hide_bar_button);
     }
 }

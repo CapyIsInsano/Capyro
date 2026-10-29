@@ -90,7 +90,7 @@ impl CapyroApp {
         }
         // velo oscuro detrás, como un diálogo
         painter.rect_filled(ui.max_rect(), 0.0, Color32::from_black_alpha((90.0 * ease) as u8));
-        painter.rect_filled(panel.translate(vec2(0.0, 6.0)), 14.0, Color32::from_black_alpha(90));
+        crate::theme::soft_shadow(&painter, panel, 14.0, 12.0, 3.0, 90);
         painter.rect_filled(panel, 14.0, BG_PANEL);
         painter.rect_stroke(panel, 14.0, Stroke::new(1.0, Color32::from_white_alpha(16)), StrokeKind::Inside);
         if ease < 0.98 {
@@ -175,7 +175,7 @@ impl CapyroApp {
                     let a = animate_button(ui, Id::unique(("capyro-key-chip", action.name(), config::key_spec(b.modifiers, b.key))), r, true);
                     let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.05 * a.press));
                     // tecla "física": borde de abajo más grueso
-                    p.rect_filled(rr.translate(vec2(0.0, 2.0)), 6.0, Color32::from_black_alpha(70));
+                    crate::theme::soft_shadow(&p, rr, 6.0, 6.0, 1.0, 70);
                     p.rect_filled(rr, 6.0, BG_WINDOW.lerp_to_gamma(ERROR, 0.25 * a.hover));
                     p.rect_stroke(rr, 6.0, Stroke::new(1.0, Color32::from_white_alpha(22).lerp_to_gamma(ERROR, a.hover)), StrokeKind::Inside);
                     p.galley(rr.center() - g.size() / 2.0 - vec2(4.0 * a.hover, 0.0), g, TEXT.lerp_to_gamma(Color32::WHITE, a.hover));
@@ -298,7 +298,7 @@ impl CapyroApp {
             let max_h = add_rect.top() - panel.top() - 12.0;
             let pop = Rect::from_min_size(pos2(add_rect.left(), add_rect.top() - 8.0 - h.min(max_h)), vec2(w, h.min(max_h)));
             ui.interact(pop, Id::unique("capyro-keys-pop-bg"), Sense::click());
-            painter.rect_filled(pop.translate(vec2(0.0, 4.0)), 10.0, Color32::from_black_alpha(80));
+            crate::theme::soft_shadow(&painter, pop, 10.0, 8.0, 2.0, 80);
             painter.rect_filled(pop, 10.0, BG_WINDOW);
             painter.rect_stroke(pop, 10.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
             painter.text(pos2(pop.left() + 12.0, pop.top() + 18.0), Align2::LEFT_CENTER, "Funciones sin tecla", bold(12.0), TEXT);

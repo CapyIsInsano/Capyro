@@ -165,6 +165,10 @@ struct CapyroCore {
 
     char title[256];
     char artist[256];
+    char album[256];
+    /* cambia cada vez que cambia el archivo cargado o la lista (la GUI lo
+     * usa para no volver a pedir todo en cada cuadro) */
+    uint64_t change_serial;
 
     /* decodificación de video (hwdec.c) */
     int              hwdec_mode;    /* CapyroHwdec */

@@ -827,7 +827,7 @@ impl CapyroApp {
         let anim = perf::animations();
         let glow = if anim { 0.5 + 0.5 * ((since * 2.0).sin() as f32) } else { 0.5 };
         p.rect_filled(card.expand(6.0 + 4.0 * glow), 24.0, accent.gamma_multiply(0.06 + 0.05 * glow));
-        p.rect_filled(card.translate(vec2(0.0, 6.0)), 18.0, Color32::from_black_alpha(90));
+        crate::theme::soft_shadow(&p, card, 18.0, 12.0, 3.0, 90);
         p.rect_filled(card, 18.0, BG_PANEL);
         p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
         if let Some(logo) = &self.logo {
@@ -975,7 +975,7 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     let card = Rect::from_center_size(full.center(), size);
     let mut p = p.clone();
     p.multiply_opacity(k);
-    p.rect_filled(card.translate(vec2(0.0, 6.0)), 18.0, Color32::from_black_alpha(90));
+    crate::theme::soft_shadow(&p, card, 18.0, 12.0, 3.0, 90);
     p.rect_filled(card, 18.0, BG_PANEL);
     p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
     let cx = card.center().x;
@@ -1203,7 +1203,7 @@ fn draw_bubble(
 
     let mut p = p.clone();
     p.multiply_opacity(fade);
-    p.rect_filled(r.translate(vec2(0.0, 5.0)), 14.0, Color32::from_black_alpha(90));
+    crate::theme::soft_shadow(&p, r, 14.0, 10.0, 2.5, 90);
     p.rect_filled(r, 14.0, BG_PANEL);
     p.rect_stroke(r, 14.0, Stroke::new(1.0, accent.gamma_multiply(0.45)), StrokeKind::Inside);
 

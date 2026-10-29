@@ -16,15 +16,18 @@ pub(super) fn open_url(url: &str) -> std::io::Result<()> {
 }
 
 impl CapyroApp {
-    pub(super) fn changes_menu(&mut self, ui: &mut Ui) {
+    /// Con `dock`, ocupa ese lugar fijo (burbuja de funciones de la vista de
+    /// música); la lista tiene su propio scroll. Devuelve el alto.
+    pub(super) fn changes_menu(&mut self, ui: &mut Ui, dock: Option<Rect>) -> f32 {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-changes-anim"), self.show_changes, crate::perf::t(0.15));
+        let docked = dock.is_some();
+        let t = if docked { 1.0 } else { ctx.animate_bool_with_time(Id::unique("capyro-changes-anim"), self.show_changes, crate::perf::t(0.15)) };
         if t <= 0.001 {
-            return;
+            return 0.0;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let width = 344.0;
+        let width = dock.map_or(344.0, |d| d.width());
         let inner_w = width - 32.0;
 
         // contenido: cada punto con su viñeta, ya cortado en renglones
@@ -44,6 +47,10 @@ impl CapyroApp {
 
         let header_h = 70.0;
         let footer_h = 66.0;
+        let (panel, interactive, painter, size) = if let Some(d) = dock {
+            let size = vec2(width, d.height());
+            (Rect::from_min_size(d.min, size), true, ui.painter().clone(), size)
+        } else {
         let anchor = pos2(self.changes_rect.left() - 6.0, self.changes_rect.top() - 10.0);
         // no tapa el header de la ventana
         let max_h = (anchor.y - ui.max_rect().top() - 70.0).max(200.0);
@@ -62,14 +69,16 @@ impl CapyroApp {
             }
             ui.interact(full, Id::unique("capyro-changes-bg"), Sense::click());
         }
-        painter.rect_filled(panel.translate(vec2(0.0, 4.0)), 12.0, Color32::from_black_alpha(70));
+        crate::theme::soft_shadow(&painter, panel, 12.0, 8.0, 2.0, 70);
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
             ctx.request_repaint_after(super::FRAME_SMOOTH);
-            return;
+            return 0.0;
         }
         crate::alto::reveal(&ctx, Id::unique("capyro-changes-anim"), panel, 12.0, self.show_changes, BG_PANEL, accent);
+        (panel, interactive, painter, size)
+        };
         let x0 = panel.left() + 16.0;
         let x1 = panel.right() - 16.0;
         let top = panel.top();
@@ -128,15 +137,11 @@ impl CapyroApp {
         /* pie: las versiones anteriores están en el repo */
         let fy = panel.bottom() - footer_h;
         painter.line_segment([pos2(x0, fy), pos2(x1, fy)], Stroke::new(1.0, Color32::from_white_alpha(14)));
-        painter.text(
-            pos2(x0, fy + 20.0),
-            Align2::LEFT_CENTER,
-            "¿Las versiones anteriores? Están en el repositorio:",
-            regular(11.5),
-            TEXT_FAINT,
-        );
+        let older = super::fit_text(&painter, "¿Las versiones anteriores? Están en el repositorio:", regular(11.5), x1 - x0);
+        painter.text(pos2(x0, fy + 20.0), Align2::LEFT_CENTER, older, regular(11.5), TEXT_FAINT);
         let link = changes::REPO_URL.trim_start_matches("https://");
-        let g = painter.layout_no_wrap(link.to_owned(), bold(12.0), accent);
+        let link = super::fit_text(&painter, link, bold(12.0), x1 - x0 - 24.0);
+        let g = painter.layout_no_wrap(link, bold(12.0), accent);
         let lr = Rect::from_min_size(pos2(x0 - 4.0, fy + 32.0), g.size() + vec2(28.0, 8.0));
         let a = animate_button(ui, Id::unique("capyro-changes-link"), lr, interactive);
         if a.hover > 0.001 {
@@ -160,8 +165,9 @@ impl CapyroApp {
         }
         a.resp.on_hover_text(changes::CHANGELOG_URL);
 
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        if !docked && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.show_changes = false;
         }
+        size.y
     }
 }

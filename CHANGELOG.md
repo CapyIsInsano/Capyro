@@ -8,6 +8,31 @@
 
 ---
 
+## v0.3.2-alpha · Se adapta a lo que abrís
+
+- **Interfaz adaptativa**: Capyro se da cuenta de si abriste un audio o un video y se acomoda.
+- **Vista de música** (con un audio):
+  - al medio, la **carátula grande** (un poco arriba) y abajo el **título**, el **artista** y el **álbum** (si los trae; el álbum es nuevo, el núcleo ahora lo lee);
+  - más abajo, la barra de progreso, los **controles** (aleatorio, anterior, desde el principio, play, siguiente, repetir), el **volumen con una barra** para arrastrar (o la rueda) y los **efectos de audio**: el interruptor, los presets y "Efectos de audio ›" para el menú completo;
+  - a un costado, la **lista** (la Cola y las playlists) siempre abierta, con "+ Agregar archivo(s)" abajo;
+  - al otro, una **burbuja con todas las funciones**, en pestañas: **Ajustes**, **Info** (con los formatos ya abiertos, porque hay lugar) y **Novedades**. Con scroll si no entra;
+  - arriba, el formato y los milisegundos en una fila, y el botón de pantalla completa;
+  - se adapta a la ventana: las columnas se agrandan con ella y, si la ventana es chica (menos de unos 760 de ancho), queda la vista clásica. La ventana ahora arranca en 900×660 para que entre todo cómodo;
+  - al cambiar de canción la carátula entra con un saltito y el título sube (en Medio y Alto); en Alto, la luz de la carátula ilumina la ventana y la carátula late un poquito con los graves.
+- **Videos: ocultar la barra de abajo** con un clic. Al acercar el mouse abajo del video aparece un botoncito; con la barra escondida, el video ocupa todo y el botón para volverla vuelve a aparecer cuando movés el mouse (y se va solo). También con la tecla **B** (`toggle_bar`; si tu `capyro.lua` es de antes, la B se agrega sola si está libre).
+- **Todo se desactiva en ⚙** (o en `capyro.lua`): "Vista de música" (`music_view`) y "Ocultar barra (videos)" (`hide_bar_button`). Y respeta los **modos de rendimiento**: en Bajo los cambios de vista y de canción son instantáneos y sin visualizador; en Medio, con sus transiciones; en Alto, además, con la luz y las partículas.
+- Los textos de ⚙ ahora son más cortos (para que entren en la burbuja), y en los paneles angostos los chips achican la letra.
+- **Optimización general** (medido en la misma PC que dibuja por software, ventana de 768×642, modo Medio):
+  - un **video 1080p**: de 81 % a 71 % de procesador y unos **15 MB menos de memoria**;
+  - **música** en la vista clásica: de 38 % a 30 %; en la vista de música (que muestra mucho más), 39 %;
+  - **música sin milisegundos ni visualizador**: de 37 % a 18 %: ahora se redibuja solo cuando cambia algo que se ve (el reloj, una vez por segundo, o la barra cuando avanza un píxel), y no 30 veces por segundo;
+  - el fondo de la ventana ya no se pinta debajo del video ni de los paneles (antes esa parte se pintaba dos veces), y las sombras son un anillo y no un rectángulo entero debajo;
+  - los cuadros de video se pasan a la pantalla con una sola copia de memoria (antes, píxel por píxel);
+  - la lista ya no se le pide entera al núcleo en cada cuadro (se guarda y se vuelve a pedir solo cuando cambia), solo se arman las filas que se ven (antes, todas: con miles de canciones se notaba) y no se revisa en cada cuadro si los archivos de las playlists siguen en el disco;
+  - el título, el artista y el archivo actual se piden una vez, no varias veces por cuadro;
+  - el hilo que decodifica duerme más cuando no tiene nada que hacer (antes se despertaba 250 veces por segundo, también en pausa);
+  - en Linux, la memoria de los cuadros de video se devuelve al sistema al soltarla; los sonidos de la interfaz se guardan sin el silencio del final y sin espacio de sobra; las carátulas se guardan a 720 px como mucho (antes 1024).
+
 ## v0.3.1-alpha · Más liviano
 
 - **Capyro usa mucho menos procesador**, sin perder animaciones (medido en una PC que dibuja por software, como pasa con placas de video viejas):

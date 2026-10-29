@@ -25,6 +25,7 @@ mod changes_menu;
 mod fx_menu;
 mod keys_editor;
 mod lists;
+mod music;
 mod tutorial;
 use lists::PlPopup;
 use crate::changes::Release;
@@ -129,6 +130,22 @@ struct Toast {
     error: bool,
 }
 
+/// Lo que está cargado y la lista, pedidos al núcleo solo cuando cambian
+/// (antes se pedían varias veces por cuadro: textos copiados y, con la lista
+/// abierta, una llamada por cada archivo de la lista, 30 veces por segundo).
+#[derive(Default)]
+struct NowPlaying {
+    serial: Option<u64>,
+    /// Ruta del archivo cargado ("" = nada).
+    file: String,
+    /// Título del metadato o, si no tiene, el nombre del archivo.
+    title: String,
+    artist: String,
+    album: String,
+    /// La cola (compartida: no se copia en cada cuadro).
+    queue: std::rc::Rc<Vec<String>>,
+}
+
 /// Estado del arranque (pantalla de carga + entrada de la interfaz).
 struct Boot {
     enabled: bool,
@@ -205,6 +222,27 @@ pub(crate) fn apply_performance(ctx: &egui::Context, mode: crate::perf::Mode) {
     });
 }
 
+/// `text` recortado con "…" para que entre en `max_w` puntos.
+pub(crate) fn fit_text(painter: &egui::Painter, text: &str, font: FontId, max_w: f32) -> String {
+    let width = |s: &str| painter.layout_no_wrap(s.to_owned(), font.clone(), Color32::WHITE).size().x;
+    if width(text) <= max_w {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut lo, mut hi) = (0usize, chars.len());
+    // búsqueda binaria del largo que entra
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        let s: String = chars[..mid].iter().collect::<String>().trim_end().to_owned() + "…";
+        if width(&s) <= max_w {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    chars[..lo].iter().collect::<String>().trim_end().to_owned() + "…"
+}
+
 fn animate_button(ui: &Ui, id: Id, rect: Rect, enabled: bool) -> Anim {
     let resp = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
     let ctx = ui.ctx();
@@ -228,6 +266,21 @@ pub struct CapyroApp {
     show_playlist: bool,
     toast: Option<Toast>,
     last_title: String,
+    /// Archivo actual, metadatos y cola (ver [`NowPlaying`]).
+    np: NowPlaying,
+    /// ¿Siguen en el disco los archivos de las playlists? (y cuándo se miró)
+    exists_cache: std::collections::HashMap<String, (bool, f64)>,
+    /// Interfaz adaptativa: ¿se está mostrando la vista de música? y desde
+    /// cuándo (para la transición).
+    layout_music: bool,
+    layout_since: f64,
+    /// Pestaña y scroll de la burbuja de funciones de la vista de música.
+    dock_tab: music::DockTab,
+    dock_scroll: [f32; 3],
+    /// Videos: la barra de abajo escondida, y cuándo se movió el mouse por
+    /// última vez (el botón para volver a mostrarla aparece al moverlo).
+    bar_hidden: bool,
+    last_pointer_move: f64,
     /// Modo Alto: fondo animado (degradé, partículas, luz del mouse).
     backdrop: crate::alto::Backdrop,
     /// Archivo actual (para notar cuándo cambia) y cuándo cambió.
@@ -419,6 +472,14 @@ impl CapyroApp {
             show_playlist: false,
             toast: None,
             last_title: String::new(),
+            np: NowPlaying::default(),
+            exists_cache: Default::default(),
+            layout_music: false,
+            layout_since: 0.0,
+            dock_tab: Default::default(),
+            dock_scroll: [0.0; 3],
+            bar_hidden: false,
+            last_pointer_move: 0.0,
             backdrop: Default::default(),
             track_key: String::new(),
             track_at: None,
@@ -781,6 +842,15 @@ impl CapyroApp {
                 self.core.set_fx(&fx);
                 self.toast(ctx, if fx.enabled { "Efectos activados" } else { "Efectos apagados" }, false);
             }
+            Action::ToggleBar => {
+                if self.core.media_kind() == MediaKind::Video && self.cfg.hide_bar_button {
+                    self.set_bar_hidden(!self.bar_hidden);
+                } else if !self.cfg.hide_bar_button {
+                    self.toast(ctx, "Activá \"Ocultar barra (videos)\" en ⚙ para usarlo", false);
+                } else {
+                    self.toast(ctx, "La barra se oculta solo con videos", false);
+                }
+            }
             Action::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
         }
     }
@@ -791,6 +861,70 @@ impl CapyroApp {
         self.show_info = false;
         self.show_fx = false;
         self.show_changes = false;
+    }
+
+    /// Cada cuánto redibujar mientras suena un audio. Con los milisegundos
+    /// a la vista, a 30 cuadros (20 en Bajo); si no, solo cuando algo cambia
+    /// de verdad: el reloj (una vez por segundo) o la barra (cuando avanza un
+    /// píxel). Una canción de 3 minutos pasa de 30 redibujados por segundo a
+    /// unos 4. (El visualizador y el fondo de Alto piden los suyos aparte.)
+    fn audio_repaint_interval(&self, bar_w: f32) -> Duration {
+        if self.cfg.show_millis {
+            return crate::perf::ambient();
+        }
+        let speed = self.core.speed().max(0.25);
+        let pos = self.core.position().max(0.0);
+        let dur = self.core.duration();
+        let to_next_second = (1.0 - pos.fract()) / speed;
+        let per_pixel = if dur > 0.0 { dur / f64::from(bar_w.max(50.0)) / speed } else { 1.0 };
+        Duration::from_secs_f64(to_next_second.min(per_pixel).clamp(0.04, 0.5))
+    }
+
+    /// Esconde o muestra la barra de abajo (videos). Los menús que cuelgan
+    /// de la barra se cierran.
+    fn set_bar_hidden(&mut self, hidden: bool) {
+        self.bar_hidden = hidden;
+        self.close_menus();
+        self.show_playlist = self.show_playlist && !hidden;
+    }
+
+    /// Botón para ocultar / mostrar la barra (videos): abajo al medio del
+    /// video. Con la barra a la vista aparece al acercar el mouse; con la
+    /// barra escondida, al mover el mouse (y se va solo después de un rato).
+    fn bar_toggle(&mut self, ui: &mut Ui, video: Rect, now: f64) {
+        let ctx = ui.ctx().clone();
+        let pointer = ctx.input(|i| i.pointer.hover_pos());
+        let near = pointer.is_some_and(|p| video.contains(p) && p.y > video.bottom() - 90.0);
+        let since_move = now - self.last_pointer_move;
+        let want = if self.bar_hidden { near || since_move < 2.5 } else { near };
+        let r = Rect::from_center_size(pos2(video.center().x, video.bottom() - 14.0), vec2(46.0, 18.0));
+        let b = animate_button(ui, Id::unique("capyro-bar-toggle"), r.expand2(vec2(6.0, 4.0)), true);
+        let vis = ctx.animate_bool_with_time(Id::unique("capyro-bar-toggle-vis"), want || b.hover > 0.01, crate::perf::t(0.2));
+        if self.bar_hidden && since_move < 2.5 {
+            // para que se vaya solo cuando el mouse se queda quieto
+            ctx.request_repaint_after(Duration::from_secs_f64(2.5 - since_move + 0.05));
+        }
+        if vis <= 0.01 && !b.resp.clicked() {
+            return;
+        }
+        let mut p = ui.painter().clone();
+        p.multiply_opacity(vis);
+        let rr = Rect::from_center_size(r.center(), r.size() * (1.0 + 0.08 * b.hover - 0.08 * b.press));
+        if crate::alto::on() {
+            crate::alto::glow_rect(&p, rr, self.cfg.accent, b.hover);
+        }
+        p.rect_filled(rr, 9.0, Color32::from_black_alpha((150.0 + 50.0 * b.hover) as u8));
+        p.rect_stroke(rr, 9.0, Stroke::new(1.0, Color32::from_white_alpha(30)), StrokeKind::Inside);
+        // flechita: abajo = esconder, arriba = mostrar
+        let c = rr.center();
+        let dy = if self.bar_hidden { -2.5 } else { 2.5 };
+        let st = Stroke::new(1.6, Color32::WHITE.lerp_to_gamma(self.cfg.accent, b.hover));
+        p.line_segment([c + vec2(-5.0, -dy), c + vec2(0.0, dy)], st);
+        p.line_segment([c + vec2(5.0, -dy), c + vec2(0.0, dy)], st);
+        if b.resp.clicked() {
+            self.set_bar_hidden(!self.bar_hidden);
+        }
+        b.resp.on_hover_text(if self.bar_hidden { "Mostrar la barra (B)" } else { "Ocultar la barra (B)" });
     }
 
     fn set_speed(&mut self, ctx: &egui::Context, speed: f64) {
@@ -832,7 +966,7 @@ impl CapyroApp {
         };
         self.sfx(SFX_PHOTO); // "clic" de cámara
         let dir = self.cfg.screenshot_dir.clone().unwrap_or_else(default_screenshot_dir);
-        let stem = Path::new(&self.core.current_file())
+        let stem = Path::new(&self.np.file)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "capyro".to_owned());
@@ -901,7 +1035,7 @@ impl CapyroApp {
             shuffle: self.core.shuffle(),
             repeat: self.core.repeat(),
             show_remaining: self.show_remaining,
-            playlist: self.core.playlist(),
+            playlist: (*self.np.queue).clone(),
             current: self.core.playlist_current(),
             position: self.core.position(),
             fx: self.core.fx(),
@@ -1184,10 +1318,10 @@ impl CapyroApp {
                 if alto {
                     self.ambient.sample(&buf, size[0], size[1]);
                 }
-                let pixels: Vec<Color32> = buf
-                    .chunks_exact(4)
-                    .map(|p| Color32::from_rgba_premultiplied(p[0], p[1], p[2], p[3]))
-                    .collect();
+                // los cuadros son opacos (alfa 255): RGBA y "premultiplicado"
+                // son los mismos bytes, así que alcanza con una copia de
+                // memoria (antes se armaba píxel por píxel)
+                let pixels: Vec<Color32> = bytemuck::cast_slice::<u8, Color32>(&buf).to_vec();
                 (egui::ColorImage::new(size, pixels), serial, aspect)
             })
         });
@@ -1514,8 +1648,7 @@ impl CapyroApp {
 
         // formato
         if tf > 0.001 {
-            let file = self.core.current_file();
-            let ext = Path::new(&file)
+            let ext = Path::new(&self.np.file)
                 .extension()
                 .map(|e| e.to_string_lossy().to_uppercase())
                 .unwrap_or_default();
@@ -1644,13 +1777,27 @@ impl CapyroApp {
 
     /// Título del metadato (o nombre de archivo) y artista.
     fn track_labels(&self) -> (String, String) {
+        (self.np.title.clone(), self.np.artist.clone())
+    }
+
+    /// Vuelve a pedirle al núcleo el archivo, los metadatos y la cola, solo
+    /// si cambiaron (una llamada barata por cuadro).
+    fn refresh_now_playing(&mut self) {
+        let serial = self.core.change_serial();
+        if self.np.serial == Some(serial) {
+            return;
+        }
+        let file = self.core.current_file();
         let title = self.core.title();
-        let title = if title.trim().is_empty() {
-            file_name(&self.core.current_file())
-        } else {
-            title
+        let title = if title.trim().is_empty() { file_name(&file) } else { title };
+        self.np = NowPlaying {
+            serial: Some(serial),
+            title,
+            artist: self.core.artist(),
+            album: self.core.album(),
+            queue: std::rc::Rc::new(self.core.playlist()),
+            file,
         };
-        (title, self.core.artist())
     }
 
     fn draw_toast(&mut self, ui: &mut Ui, video: Rect) {
@@ -1684,16 +1831,42 @@ impl CapyroApp {
         }
     }
 
-    fn transport(&mut self, ui: &mut Ui, video_bottom: f32, inner: Rect) {
-        let ctx = ui.ctx().clone();
-        let painter = ui.painter().clone();
-        let accent = self.cfg.accent;
-        let (left, right) = (inner.left(), inner.right());
+    /// Rueda del mouse sobre el volumen: un paso por "muesca" (sin el
+    /// suavizado de egui, que repartía una muesca en muchos cuadros) y solo
+    /// en la primera pasada del cuadro (egui a veces repite la pasada).
+    fn wheel_volume(&mut self, ctx: &egui::Context, hovered: bool) {
+        if hovered && self.first_pass {
+            let notches: f32 = ctx.input(|i| {
+                i.events
+                    .iter()
+                    .map(|e| match e {
+                        egui::Event::MouseWheel { unit, delta, .. } => match unit {
+                            egui::MouseWheelUnit::Line => delta.y,
+                            egui::MouseWheelUnit::Point => delta.y / 50.0, // touchpad
+                            egui::MouseWheelUnit::Page => delta.y * 4.0,
+                        },
+                        _ => 0.0,
+                    })
+                    .sum()
+            });
+            self.wheel_acc += notches;
+            let steps = self.wheel_acc.trunc();
+            if steps != 0.0 {
+                self.wheel_acc -= steps;
+                self.change_volume(ctx, steps * self.cfg.wheel_step);
+            }
+        } else if !hovered {
+            self.wheel_acc = 0.0;
+        }
+    }
 
-        /* --- barra de progreso --- */
-        let ty = video_bottom + TRACK_Y;
+    /// Barra de progreso (con vista previa al pasar el mouse) y los tiempos
+    /// abajo. `ty` = altura de la barra, `tty` = la de los tiempos.
+    fn seek_bar(&mut self, ui: &mut Ui, painter: &egui::Painter, left: f32, right: f32, ty: f32, tty: f32) {
+        let ctx = ui.ctx().clone();
+        let accent = self.cfg.accent;
         let hit = Rect::from_min_max(pos2(left, ty - 8.0), pos2(right, ty + 8.0));
-        self.ui_rects.insert("seek", Rect::from_min_max(pos2(left, ty - 10.0), pos2(right, video_bottom + TIMES_Y + 10.0)));
+        self.ui_rects.insert("seek", Rect::from_min_max(pos2(left, ty - 10.0), pos2(right, tty + 10.0)));
         let seek = ui.interact(hit, Id::unique("capyro-seek"), Sense::click_and_drag());
         let duration = self.core.duration();
         let can_seek = duration > 0.0;
@@ -1745,7 +1918,6 @@ impl CapyroApp {
         }
 
         /* --- tiempos (+ velocidad si no es 1×) --- */
-        let tty = video_bottom + TIMES_Y;
         painter.text(pos2(left, tty), Align2::LEFT_CENTER, fmt_time(position), regular(12.0), TEXT_DIM);
         // Clic en el tiempo de la derecha: duración total ↔ tiempo que falta.
         let right_label = if self.show_remaining && duration > 0.0 {
@@ -1775,13 +1947,18 @@ impl CapyroApp {
             painter.galley(r.center() - g.size() / 2.0, g, accent);
         }
 
-        /* --- controles --- */
-        let cy = video_bottom + CONTROLS_Y;
-        let cx = inner.center().x;
+    }
+
+    /// Aleatorio, anterior, desde el principio, play, siguiente y repetir,
+    /// centrados en `cx` (`spread` < 1 los junta en espacios chicos).
+    /// Devuelve dónde quedó el botón de repetir.
+    fn control_row(&mut self, ui: &mut Ui, painter: &egui::Painter, cx: f32, cy: f32, spread: f32) -> Pos2 {
+        let ctx = ui.ctx().clone();
+        let accent = self.cfg.accent;
 
         // aleatorio (izquierda)
         let shuffle_on = self.core.shuffle();
-        let shuffle_c = pos2(cx - 105.0, cy);
+        let shuffle_c = pos2(cx - 105.0 * spread, cy);
         let sh = Self::icon_button(ui, "shuffle", shuffle_c, 30.0);
         let sh_on = ctx.animate_bool_with_time(Id::unique("capyro-shuffle-on"), shuffle_on, crate::perf::t(0.15));
         let sh_col = sh.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, sh_on);
@@ -1794,14 +1971,14 @@ impl CapyroApp {
         }
         sh.resp.on_hover_text(if shuffle_on { "Aleatorio: activado (Ctrl+S)" } else { "Aleatorio: desactivado (Ctrl+S)" });
 
-        let prev_c = pos2(cx - 69.0, cy);
+        let prev_c = pos2(cx - 69.0 * spread, cy);
         let prev = Self::icon_button(ui, "prev", prev_c, 30.0);
         icons::prev(&painter, prev_c - vec2(2.0 * prev.press, 0.0), 16.0 * prev.scale(), prev.tint(ICON, Color32::WHITE));
         if prev.resp.clicked() {
             self.run_action(&ctx, Action::PrevFile);
         }
 
-        let restart_c = pos2(cx - 33.0, cy);
+        let restart_c = pos2(cx - 33.0 * spread, cy);
         let restart = Self::icon_button(ui, "restart", restart_c, 30.0);
         icons::restart(&painter, restart_c, 16.0 * restart.scale(), restart.tint(ICON, Color32::WHITE));
         if restart.resp.clicked() {
@@ -1810,7 +1987,7 @@ impl CapyroApp {
         restart.resp.on_hover_text("Volver al inicio");
 
         // play / pausa: crece, brilla y el ícono se transforma
-        let play_c = pos2(cx + 17.0, cy);
+        let play_c = pos2(cx + 17.0 * spread, cy);
         let play = animate_button(ui, Id::unique("capyro-play"), Rect::from_center_size(play_c, Vec2::splat(46.0)), true);
         let playing = self.core.state() == State::Playing;
         let morph = ctx.animate_bool_with_time(Id::unique("capyro-play-morph"), playing, crate::perf::t(0.16));
@@ -1838,7 +2015,7 @@ impl CapyroApp {
             self.run_action(&ctx, Action::PlayPause);
         }
 
-        let next_c = pos2(cx + 69.0, cy);
+        let next_c = pos2(cx + 69.0 * spread, cy);
         let next = Self::icon_button(ui, "next", next_c, 30.0);
         icons::next(&painter, next_c + vec2(2.0 * next.press, 0.0), 16.0 * next.scale(), next.tint(ICON, Color32::WHITE));
         if next.resp.clicked() {
@@ -1847,8 +2024,8 @@ impl CapyroApp {
 
         // repetir (derecha): off → lista → uno
         let repeat = self.core.repeat();
-        let repeat_c = pos2(cx + 105.0, cy);
-        self.ui_rects.insert("controls", Rect::from_min_max(pos2(cx - 123.0, cy - 25.0), pos2(cx + 123.0, cy + 25.0)));
+        let repeat_c = pos2(cx + 105.0 * spread, cy);
+        self.ui_rects.insert("controls", Rect::from_min_max(pos2(cx - 123.0 * spread, cy - 25.0), pos2(cx + 123.0 * spread, cy + 25.0)));
         let rp = Self::icon_button(ui, "repeat", repeat_c, 30.0);
         let rp_on = ctx.animate_bool_with_time(Id::unique("capyro-repeat-on"), repeat != Repeat::Off, crate::perf::t(0.15));
         let rp_col = rp.tint(ICON_DIM, Color32::WHITE).lerp_to_gamma(accent, rp_on);
@@ -1865,20 +2042,20 @@ impl CapyroApp {
             Repeat::One => "Repetir: este archivo (Ctrl+R)",
         });
 
-        /* --- botón "+ Agregar archivo(s)" (sobre los íconos de la derecha) --- */
+        repeat_c
+    }
+
+    /// El botón naranja "+ Agregar archivo(s)" en `base_rect` (solo el "+"
+    /// si es `compact`).
+    fn add_files_button(&mut self, ui: &mut Ui, painter: &egui::Painter, base_rect: Rect, compact: bool) {
+        let ctx = ui.ctx().clone();
+        let accent = self.cfg.accent;
         let pending = self.dialog.is_some();
         let label = if pending { "Abriendo…" } else { "Agregar archivo(s)" };
         let galley = painter.layout_no_wrap(label.to_owned(), bold(13.0), Color32::WHITE);
-        let full_w = galley.size().x + 50.0;
-        let controls_right = repeat_c.x + 22.0;
-        // Si la ventana es angosta y no entra el texto, queda solo el "+".
-        let compact = right - full_w < controls_right;
-        let base = if compact { vec2(34.0, 34.0) } else { vec2(full_w, 34.0) };
-        let base_rect = Rect::from_min_size(pos2(right - base.x, cy - base.y / 2.0), base);
-        self.ui_rects.insert("add", base_rect);
         let add = animate_button(ui, Id::unique("capyro-add-files"), base_rect, !pending);
         let s = 1.0 + 0.03 * add.hover - 0.06 * add.press;
-        let add_rect = Rect::from_center_size(base_rect.center(), base * s);
+        let add_rect = Rect::from_center_size(base_rect.center(), base_rect.size() * s);
         if crate::alto::on() {
             crate::alto::glow_rect(&painter, add_rect, accent, add.hover);
             if add.resp.clicked() {
@@ -1899,7 +2076,10 @@ impl CapyroApp {
         if compact {
             icons::plus(&painter, add_rect.center(), 14.0, Color32::WHITE, angle, 2.0);
         } else {
-            let plus_c = pos2(add_rect.left() + 20.0, add_rect.center().y);
+            // el "+" y el texto, centrados (en la lista de la vista de música
+            // el botón ocupa todo el ancho)
+            let content_w = 12.0 + galley.size().x;
+            let plus_c = pos2(add_rect.center().x - content_w / 2.0 + 2.0, add_rect.center().y);
             icons::plus(&painter, plus_c, 11.0, Color32::WHITE, angle, 2.0);
             painter.galley(
                 pos2(plus_c.x + 12.0, add_rect.center().y - galley.size().y / 2.0),
@@ -1911,6 +2091,33 @@ impl CapyroApp {
             self.open_file_dialog(&ctx);
         }
         add.resp.on_hover_text(format!("Agregar archivos ({}) a la lista (Ctrl+O)", self.formats_label(", ")));
+    }
+
+    fn transport(&mut self, ui: &mut Ui, video_bottom: f32, inner: Rect) {
+        let ctx = ui.ctx().clone();
+        let painter = ui.painter().clone();
+        let accent = self.cfg.accent;
+        let (left, right) = (inner.left(), inner.right());
+
+        /* --- barra de progreso --- */
+        self.seek_bar(ui, &painter, left, right, video_bottom + TRACK_Y, video_bottom + TIMES_Y);
+
+        /* --- controles --- */
+        let cy = video_bottom + CONTROLS_Y;
+        let cx = inner.center().x;
+        let repeat_c = self.control_row(ui, &painter, cx, cy, 1.0);
+
+        /* --- botón "+ Agregar archivo(s)" (sobre los íconos de la derecha) --- */
+        let pending = self.dialog.is_some();
+        let label = if pending { "Abriendo…" } else { "Agregar archivo(s)" };
+        let full_w = painter.layout_no_wrap(label.to_owned(), bold(13.0), Color32::WHITE).size().x + 50.0;
+        let controls_right = repeat_c.x + 22.0;
+        // Si la ventana es angosta y no entra el texto, queda solo el "+".
+        let compact = right - full_w < controls_right;
+        let base = if compact { vec2(34.0, 34.0) } else { vec2(full_w, 34.0) };
+        let base_rect = Rect::from_min_size(pos2(right - base.x, cy - base.y / 2.0), base);
+        self.ui_rects.insert("add", base_rect);
+        self.add_files_button(ui, &painter, base_rect, compact);
 
         /* --- botón de información (arriba de "Lista", a la izquierda) --- */
         let info_c = pos2(left + 9.0, cy);
@@ -2003,29 +2210,7 @@ impl CapyroApp {
         // entero: una sola muesca se comía casi todo el volumen.
         // (Solo en la primera pasada del frame: egui a veces repite la pasada
         // con la misma entrada, p. ej. al mostrar un tooltip, y se contaba doble.)
-        if vol.resp.hovered() && self.first_pass {
-            let notches: f32 = ctx.input(|i| {
-                i.events
-                    .iter()
-                    .map(|e| match e {
-                        egui::Event::MouseWheel { unit, delta, .. } => match unit {
-                            egui::MouseWheelUnit::Line => delta.y,
-                            egui::MouseWheelUnit::Point => delta.y / 50.0, // touchpad
-                            egui::MouseWheelUnit::Page => delta.y * 4.0,
-                        },
-                        _ => 0.0,
-                    })
-                    .sum()
-            });
-            self.wheel_acc += notches;
-            let steps = self.wheel_acc.trunc();
-            if steps != 0.0 {
-                self.wheel_acc -= steps;
-                self.change_volume(&ctx, steps * self.cfg.wheel_step);
-            }
-        } else if !vol.resp.hovered() {
-            self.wheel_acc = 0.0;
-        }
+        self.wheel_volume(&ctx, vol.resp.hovered());
         if vol.hover > 0.001 {
             // porcentaje en una pastillita arriba del ícono
             let label = if muted {
@@ -2102,17 +2287,20 @@ impl CapyroApp {
 
     /// Menú de información: versión, formatos soportados y algunos datos.
     /// Crece desde el botón ⓘ (abajo a la izquierda), igual que el de ajustes.
-    fn info_menu(&mut self, ui: &mut Ui) {
+    /// Con `dock`, fijo en la burbuja de funciones de la vista de música
+    /// (con los formatos ya abiertos: ahí hay lugar). Devuelve el alto.
+    fn info_menu(&mut self, ui: &mut Ui, dock: Option<Rect>) -> f32 {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, crate::perf::t(0.15));
+        let docked = dock.is_some();
+        let t = if docked { 1.0 } else { ctx.animate_bool_with_time(Id::unique("capyro-info-anim"), self.show_info, crate::perf::t(0.15)) };
         if t <= 0.001 {
             self.info_format = None; // al volver a abrirlo arranca sin resumen abierto
             self.info_formats_open = false; // y con la lista de formatos cerrada
-            return;
+            return 0.0;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
         let accent = self.cfg.accent;
-        let width = 312.0;
+        let width = dock.map_or(312.0, |d| d.width());
         let inner_w = width - 28.0;
         // (encabezado 64 + botón de formatos 36 + actualizaciones y pie 88)
         let base_h = 188.0;
@@ -2153,7 +2341,11 @@ impl CapyroApp {
         // --- la lista de formatos (se despliega con el botón) ---
         // Los chips se acomodan en renglones: con 13 formatos ya no entran
         // en una sola fila por tipo.
-        let fopen = ctx.animate_bool_with_time(Id::unique("capyro-fmts-open"), self.info_formats_open, crate::perf::t(0.26));
+        let fopen = if docked {
+            1.0
+        } else {
+            ctx.animate_bool_with_time(Id::unique("capyro-fmts-open"), self.info_formats_open, crate::perf::t(0.26))
+        };
         let fk = 1.0 - (1.0 - fopen).powi(3);
         let mut chip_layout: Vec<(String, Rect)> = Vec::new();
         let mut group_labels: Vec<(&str, f32, bool, usize)> = Vec::new();
@@ -2178,6 +2370,9 @@ impl CapyroApp {
         let region_h = (chips_h + region_h) * fk;
 
         let size = vec2(width, base_h + region_h);
+        let (panel, interactive, painter) = if let Some(d) = dock {
+            (Rect::from_min_size(d.min, size), true, ui.painter().clone())
+        } else {
         let anchor = pos2(self.info_rect.left() - 6.0, self.info_rect.top() - 10.0);
         let full = Rect::from_min_size(pos2(anchor.x, anchor.y - size.y), size);
         let grown = size * (0.85 + 0.15 * crate::alto::pop(t, ease));
@@ -2193,14 +2388,16 @@ impl CapyroApp {
             }
             ui.interact(full, Id::unique("capyro-info-bg"), Sense::click());
         }
-        painter.rect_filled(panel.translate(vec2(0.0, 4.0)), 12.0, Color32::from_black_alpha(70));
+        crate::theme::soft_shadow(&painter, panel, 12.0, 8.0, 2.0, 70);
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
             ctx.request_repaint_after(FRAME_SMOOTH);
-            return;
+            return 0.0;
         }
         crate::alto::reveal(&ctx, Id::unique("capyro-info-anim"), panel, 12.0, self.show_info, BG_PANEL, accent);
+        (panel, interactive, painter)
+        };
 
         let x0 = panel.left() + 14.0;
         let x1 = panel.right() - 14.0;
@@ -2223,7 +2420,8 @@ impl CapyroApp {
         // estén siempre a la vista)
         painter.line_segment([pos2(x0, top + 64.0), pos2(x1, top + 64.0)], Stroke::new(1.0, Color32::from_white_alpha(14)));
         let row = Rect::from_min_max(pos2(x0 - 6.0, top + 67.0), pos2(x1 + 6.0, top + 97.0));
-        let fb = animate_button(ui, Id::unique("capyro-fmts-toggle"), row, interactive);
+        // (en la burbuja de la vista de música no es botón: la lista ya está abierta)
+        let fb = animate_button(ui, Id::unique("capyro-fmts-toggle"), row, interactive && !docked);
         if fb.hover > 0.001 || fb.press > 0.001 || fk > 0.001 {
             let a = 10.0 * fb.hover + 10.0 * fb.press + 6.0 * fk;
             painter.rect_filled(row, 8.0, Color32::from_white_alpha(a as u8));
@@ -2232,15 +2430,23 @@ impl CapyroApp {
         let icol = fb.tint(TEXT_DIM, TEXT).lerp_to_gamma(accent, fk);
         icons::film(&painter, pos2(x0 + 6.0, cy), 13.0, icol);
         icons::music_note(&painter, pos2(x0 + 21.0, cy), 13.0, icol);
-        let label = if self.info_formats_open { "Formatos soportados (cerrar)" } else { "Formatos soportados (abrir)" };
+        let label = if docked {
+            "Formatos soportados"
+        } else if self.info_formats_open {
+            "Formatos soportados (cerrar)"
+        } else {
+            "Formatos soportados (abrir)"
+        };
         let lr = painter.text(pos2(x0 + 34.0, cy), Align2::LEFT_CENTER, label, bold(12.5), TEXT);
         // a la derecha: cuántos son y una flechita que gira al abrir
         let total = formats.0.len() + formats.1.len();
         let chev = pos2(x1 - 4.0, cy);
         let st = Stroke::new(1.5, fb.tint(TEXT_FAINT, TEXT).lerp_to_gamma(accent, fk));
         let (dy, sx) = (3.0 * (1.0 - 2.0 * fk), 4.5);
-        painter.line_segment([chev + vec2(-sx, -dy), chev + vec2(0.0, dy)], st);
-        painter.line_segment([chev + vec2(sx, -dy), chev + vec2(0.0, dy)], st);
+        if !docked {
+            painter.line_segment([chev + vec2(-sx, -dy), chev + vec2(0.0, dy)], st);
+            painter.line_segment([chev + vec2(sx, -dy), chev + vec2(0.0, dy)], st);
+        }
         let ng = painter.layout_no_wrap(total.to_string(), bold(10.5), accent);
         // la cantidad, al lado del texto (si entra antes de la flechita)
         let nchip = Rect::from_min_size(pos2(lr.right() + 7.0, cy - 9.0), vec2(ng.size().x + 12.0, 18.0));
@@ -2251,7 +2457,7 @@ impl CapyroApp {
         if fb.hover > 0.5 {
             ctx.set_cursor_icon(CursorIcon::PointingHand);
         }
-        if fb.resp.clicked() {
+        if fb.resp.clicked() && !docked {
             self.info_formats_open = !self.info_formats_open;
             if !self.info_formats_open {
                 self.info_format = None;
@@ -2331,30 +2537,33 @@ impl CapyroApp {
         // pie: backend de audio y licencia
         let backend = self.core.audio_backend();
         let audio = if backend.is_empty() { "sin dispositivo".to_owned() } else { backend };
-        painter.text(
-            pos2(x0, panel.bottom() - 16.0),
-            Align2::LEFT_CENTER,
-            format!("Audio: {audio}  ·  GPL-3.0  ·  {} ({})", self.cfg.system().name(), self.build_info.system),
-            regular(10.5),
-            TEXT_FAINT,
-        );
+        let foot = format!("Audio: {audio}  ·  GPL-3.0  ·  {} ({})", self.cfg.system().name(), self.build_info.system);
+        let foot = fit_text(&painter, &foot, regular(10.5), x1 - x0);
+        painter.text(pos2(x0, panel.bottom() - 16.0), Align2::LEFT_CENTER, foot, regular(10.5), TEXT_FAINT);
 
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        if !docked && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.show_info = false;
         }
+        size.y
     }
 
     /// Menú del engranaje: velocidad y recargar configuración. Se abre
     /// creciendo desde el engranaje y se cierra al hacer clic afuera o con Esc.
-    fn settings_menu(&mut self, ui: &mut Ui) {
+    /// Con `dock`, se dibuja fijo ahí (la burbuja de funciones de la vista
+    /// de música: sin animación de apertura ni fondo propio). Devuelve el
+    /// alto del contenido (para el scroll de la burbuja).
+    fn settings_menu(&mut self, ui: &mut Ui, dock: Option<Rect>) -> f32 {
         let ctx = ui.ctx().clone();
+        let accent = self.cfg.accent;
+        let size = vec2(288.0, 556.0);
+        let (panel, interactive, painter) = if let Some(d) = dock {
+            (Rect::from_min_size(d.min, vec2(d.width(), size.y)), true, ui.painter().clone())
+        } else {
         let t = ctx.animate_bool_with_time(Id::unique("capyro-settings-anim"), self.show_settings, crate::perf::t(0.15));
         if t <= 0.001 {
-            return;
+            return 0.0;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
-        let accent = self.cfg.accent;
-        let size = vec2(288.0, 496.0);
         let mut anchor = pos2(self.gear_rect.right() + 6.0, self.gear_rect.top() - 10.0);
         // en ventanas bajitas no se sale por arriba (tapa el engranaje)
         anchor.y = anchor.y.max(ui.max_rect().top() + 8.0 + size.y);
@@ -2374,18 +2583,22 @@ impl CapyroApp {
             }
             ui.interact(full, Id::unique("capyro-settings-bg"), Sense::click());
         }
-        painter.rect_filled(panel.translate(vec2(0.0, 4.0)), 12.0, Color32::from_black_alpha(70));
+        crate::theme::soft_shadow(&painter, panel, 12.0, 8.0, 2.0, 70);
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
             ctx.request_repaint_after(FRAME_SMOOTH);
-            return; // el contenido aparece cuando termina de abrirse
+            return 0.0; // el contenido aparece cuando termina de abrirse
         }
         crate::alto::reveal(&ctx, Id::unique("capyro-settings-anim"), panel, 12.0, self.show_settings, BG_PANEL, accent);
+        (panel, interactive, painter)
+        };
 
         let x0 = panel.left() + 14.0;
         let x1 = panel.right() - 14.0;
         let mut y = panel.top() + 20.0;
+        // en la burbuja angosta de la vista de música, los chips con letra más chica
+        let chip_fs = if x1 - x0 < 240.0 { 10.5 } else { 11.5 };
         painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Ajustes", bold(13.5), TEXT);
 
         /* velocidad */
@@ -2405,7 +2618,7 @@ impl CapyroApp {
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             painter.rect_filled(rr, 7.0, bg);
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
-            painter.text(rr.center(), Align2::CENTER_CENTER, fmt_speed(v), if selected { bold(11.5) } else { regular(11.5) }, col);
+            painter.text(rr.center(), Align2::CENTER_CENTER, fmt_speed(v), if selected { bold(chip_fs) } else { regular(chip_fs) }, col);
             if chip.resp.clicked() && !selected {
                 self.set_speed(&ctx, v);
             }
@@ -2439,7 +2652,9 @@ impl CapyroApp {
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             painter.rect_filled(rr, 7.0, bg);
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
-            painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected { bold(11.5) } else { regular(11.5) }, col);
+            // (en la burbuja angosta, "Automático" no entra)
+            let label = if chip_w < 66.0 && m == ffi::Hwdec::Auto { "Auto" } else { m.label() };
+            painter.text(rr.center(), Align2::CENTER_CENTER, label, if selected { bold(chip_fs) } else { regular(chip_fs) }, col);
             if chip.resp.clicked() && !selected {
                 self.set_decoding(&ctx, m);
             }
@@ -2459,8 +2674,10 @@ impl CapyroApp {
         };
         let status_rect = Rect::from_min_max(pos2(x0, y - 8.0), pos2(x1, y + 8.0));
         let st = ui.interact(status_rect, Id::unique("capyro-hwdec-status"), Sense::hover());
-        painter.text(pos2(x0, y), Align2::LEFT_CENTER, ellipsize(&status, 46), regular(10.5), TEXT_FAINT);
-        if status.chars().count() > 46 {
+        let shown = fit_text(&painter, &status, regular(10.5), x1 - x0);
+        let cut = shown != status;
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, shown, regular(10.5), TEXT_FAINT);
+        if cut {
             st.on_hover_text(status);
         }
 
@@ -2482,7 +2699,7 @@ impl CapyroApp {
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             painter.rect_filled(rr, 7.0, bg);
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
-            painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected { bold(11.5) } else { regular(11.5) }, col);
+            painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected { bold(chip_fs) } else { regular(chip_fs) }, col);
             if chip.resp.clicked() && !selected {
                 self.set_performance(&ctx, m);
             }
@@ -2493,32 +2710,56 @@ impl CapyroApp {
             });
         }
         y += 22.0;
-        painter.text(pos2(x0, y), Align2::LEFT_CENTER, self.cfg.performance.blurb(), regular(10.5), TEXT_FAINT);
+        let blurb = fit_text(&painter, self.cfg.performance.blurb(), regular(10.5), x1 - x0);
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, blurb, regular(10.5), TEXT_FAINT);
 
         /* separador */
         y += 18.0;
         painter.line_segment([pos2(x0, y), pos2(x1, y)], Stroke::new(1.0, Color32::from_white_alpha(14)));
 
-        /* mostrar el formato arriba a la izquierda del video */
+        /* qué se muestra (textos cortos: también entran en la burbuja de
+         * funciones de la vista de música, que es más angosta) */
         y += 18.0;
-        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Mostrar el formato del archivo", regular(12.5), TEXT_DIM);
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Formato del archivo", regular(12.5), TEXT_DIM);
         if fx_menu::switch(ui, &painter, "show-format", pos2(x1 - 17.0, y), self.cfg.show_format, accent, interactive) {
             self.cfg.show_format = !self.cfg.show_format;
             let msg = if self.cfg.show_format { "Formato visible" } else { "Formato oculto" };
             self.save_config(&ctx, msg.to_owned());
         }
         y += 30.0;
-        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Mostrar los milisegundos", regular(12.5), TEXT_DIM);
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Milisegundos", regular(12.5), TEXT_DIM);
         if fx_menu::switch(ui, &painter, "show-millis", pos2(x1 - 17.0, y), self.cfg.show_millis, accent, interactive) {
             self.cfg.show_millis = !self.cfg.show_millis;
             let msg = if self.cfg.show_millis { "Milisegundos visibles" } else { "Milisegundos ocultos" };
             self.save_config(&ctx, msg.to_owned());
         }
         y += 30.0;
-        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Mostrar resolución y fps", regular(12.5), TEXT_DIM);
+        painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Resolución y fps", regular(12.5), TEXT_DIM);
         if fx_menu::switch(ui, &painter, "show-video-info", pos2(x1 - 17.0, y), self.cfg.show_video_info, accent, interactive) {
             self.cfg.show_video_info = !self.cfg.show_video_info;
             let msg = if self.cfg.show_video_info { "Resolución y fps visibles" } else { "Resolución y fps ocultos" };
+            self.save_config(&ctx, msg.to_owned());
+        }
+        // la interfaz adaptativa (v0.3.2)
+        y += 30.0;
+        let r = painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Vista de música", regular(12.5), TEXT_DIM);
+        ui.interact(r.expand(4.0), Id::unique("capyro-music-view-label"), Sense::hover())
+            .on_hover_text("Con un audio: la carátula grande al medio, la lista a un costado y las funciones al otro (si la ventana tiene lugar)");
+        if fx_menu::switch(ui, &painter, "music-view", pos2(x1 - 17.0, y), self.cfg.music_view, accent, interactive) {
+            self.cfg.music_view = !self.cfg.music_view;
+            let msg = if self.cfg.music_view { "Vista de música activada" } else { "Vista de música desactivada" };
+            self.save_config(&ctx, msg.to_owned());
+        }
+        y += 30.0;
+        let r = painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Ocultar barra (videos)", regular(12.5), TEXT_DIM);
+        ui.interact(r.expand(4.0), Id::unique("capyro-hide-bar-label"), Sense::hover())
+            .on_hover_text("Un botón abajo del video para esconder los controles con un clic (también con la tecla B)");
+        if fx_menu::switch(ui, &painter, "hide-bar", pos2(x1 - 17.0, y), self.cfg.hide_bar_button, accent, interactive) {
+            self.cfg.hide_bar_button = !self.cfg.hide_bar_button;
+            if !self.cfg.hide_bar_button {
+                self.bar_hidden = false; // sin el botón, la barra vuelve
+            }
+            let msg = if self.cfg.hide_bar_button { "Botón para ocultar la barra activado" } else { "Botón para ocultar la barra desactivado" };
             self.save_config(&ctx, msg.to_owned());
         }
         y += 16.0;
@@ -2592,16 +2833,17 @@ impl CapyroApp {
             painter.image(logo.id(), Rect::from_center_size(pos2(x0 + 8.0, y - 1.0), Vec2::splat(side)), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
         painter.text(pos2(x0 + 24.0, y - 7.0), Align2::LEFT_CENTER, "Ver el tutorial de nuevo", regular(12.5), TEXT);
-        painter.text(pos2(x0 + 24.0, y + 8.0), Align2::LEFT_CENTER, "La bienvenida y la explicación de todo", regular(10.5), TEXT_FAINT);
+        painter.text(pos2(x0 + 24.0, y + 8.0), Align2::LEFT_CENTER, "La bienvenida y el recorrido", regular(10.5), TEXT_FAINT);
         if tut.resp.clicked() {
             self.show_settings = false;
             self.start_tutorial(&ctx);
         }
 
         // Esc también lo cierra
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+        if dock.is_none() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.show_settings = false;
         }
+        size.y
     }
 
     /// "Versión actual: 1a2b3c4 · hace 2 días" (debajo de "Buscar actualizaciones").
@@ -2785,7 +3027,7 @@ impl CapyroApp {
         if interactive {
             ui.interact(rect, Id::unique("capyro-offer-bg"), Sense::click()); // que no pause el video
         }
-        p.rect_filled(rect.translate(vec2(0.0, 5.0)), 14.0, Color32::from_black_alpha(80));
+        crate::theme::soft_shadow(&p, rect, 14.0, 10.0, 2.5, 80);
         p.rect_filled(rect, 14.0, BG_PANEL);
         p.rect_stroke(rect, 14.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
 
@@ -2928,7 +3170,7 @@ impl CapyroApp {
         let mut p = ui.painter().clone();
         p.multiply_opacity(alpha);
         ui.interact(rect, Id::unique("capyro-update-banner"), Sense::click()); // que no pause el video
-        p.rect_filled(rect.translate(vec2(0.0, 5.0)), 14.0, Color32::from_black_alpha(80));
+        crate::theme::soft_shadow(&p, rect, 14.0, 10.0, 2.5, 80);
         p.rect_filled(rect, 14.0, BG_PANEL);
         p.rect_stroke(rect, 14.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
 
@@ -3098,14 +3340,14 @@ impl CapyroApp {
 
     fn update_title(&mut self, ctx: &egui::Context) {
         // cambió el archivo: transición de entrada (modo Alto)
-        let key = self.core.current_file();
-        if key != self.track_key {
+        let key = &self.np.file;
+        if *key != self.track_key {
             if !key.is_empty() {
                 self.track_at = Some(ctx.input(|i| i.time));
             }
-            self.track_key = key;
+            self.track_key = key.clone();
         }
-        let title = if self.core.current_file().is_empty() {
+        let title = if self.np.file.is_empty() {
             "Capyro".to_owned()
         } else {
             format!("{} — Capyro", self.track_labels().0)
@@ -3143,6 +3385,10 @@ impl eframe::App for CapyroApp {
         self.last_frame = frame;
         let now = ctx.input(|i| i.time);
 
+        if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {
+            self.last_pointer_move = now;
+        }
+
         /* --- arranque: primero se dibuja "Cargando", después se carga --- */
         if self.boot.start.is_none() {
             self.boot.start = Some(now);
@@ -3173,6 +3419,7 @@ impl eframe::App for CapyroApp {
         }
 
         self.core.update();
+        self.refresh_now_playing();
         if ready {
             self.handle_input(&ctx);
         }
@@ -3215,7 +3462,50 @@ impl eframe::App for CapyroApp {
 
         let full = ui.max_rect();
         let radius = if square { 0 } else { WINDOW_RADIUS };
-        ui.painter().rect_filled(full, radius, BG_WINDOW);
+        let inner = full.shrink(PAD);
+        let header = Rect::from_min_size(inner.min, vec2(inner.width(), 46.0));
+        let content = Rect::from_min_max(pos2(inner.left(), header.bottom() + 12.0), inner.max);
+
+        /* --- interfaz adaptativa: ¿audio o video? --- */
+        // audio + opción activada + lugar en la ventana = vista de música
+        // (nunca durante el tutorial: explica la vista clásica)
+        let music = if self.cfg.music_view && self.tutorial.is_none() && self.core.media_kind() == MediaKind::Audio {
+            music::layout_for(content)
+        } else {
+            None
+        };
+        if music.is_some() != self.layout_music {
+            self.layout_music = music.is_some();
+            self.layout_since = now;
+            self.close_menus();
+            self.show_playlist = false;
+        }
+        // entrada de la vista nueva (Medio y Alto; en Bajo, directa)
+        let appear = ease_out(crate::perf::k(((now - self.layout_since) / 0.32) as f32));
+        if appear < 1.0 {
+            ctx.request_repaint_after(FRAME_SMOOTH);
+        }
+        // videos: la barra de abajo se puede esconder
+        let bar_ok = music.is_none() && self.cfg.hide_bar_button && self.tutorial.is_none() && self.core.media_kind() == MediaKind::Video;
+        let bar_k = ctx.animate_bool_with_time(Id::unique("capyro-bar-hidden"), self.bar_hidden && bar_ok, crate::perf::t(0.28));
+        let bar_e = 1.0 - (1.0 - bar_k).powi(3);
+        if (0.001..0.999).contains(&bar_k) {
+            ctx.request_repaint_after(FRAME_SMOOTH);
+        }
+        let video_bottom = (inner.bottom() - BELOW_VIDEO * (1.0 - bar_e)).max(header.bottom() + 60.0);
+        let video = Rect::from_min_max(pos2(inner.left(), header.bottom() + 12.0), pos2(inner.right(), video_bottom));
+        let logo_dest = Rect::from_min_size(header.min, vec2(46.0, 46.0));
+
+        // el fondo de la ventana, sin pintar lo que después tapa algo opaco
+        // (el video o los paneles): menos trabajo para la placa de video
+        let intro_t = self.boot.ready_at.map_or(INTRO_TIME, |r| (now - r) as f32);
+        let settled = ready && !(self.boot.enabled && intro_t < INTRO_TIME) && appear >= 1.0;
+        let holes: Vec<(Rect, f32)> = match (&music, settled) {
+            (Some(l), true) => vec![(l.left, 12.0), (l.right, 12.0)],
+            (None, true) => vec![(video, 10.0)],
+            _ => Vec::new(),
+        };
+        theme::fill_window(ui.painter(), full, radius, &holes);
         if !square {
             ui.painter().rect_stroke(
                 full,
@@ -3245,7 +3535,10 @@ impl eframe::App for CapyroApp {
             let gradient = self.backdrop.gradient(area, accent);
             if self.ambient.visible() {
                 // luz del video y degradé en una sola malla (una sola pasada)
-                self.ambient.paint(ui.painter(), area, 0.42, reach, under, Some(&gradient));
+                // (en la vista de música la carátula está a la vista y sin
+                // un área de video alrededor: un poco menos de luz)
+                let strength = if self.layout_music { 0.30 } else { 0.42 };
+                self.ambient.paint(ui.painter(), area, strength, reach, under, Some(&gradient));
             } else {
                 gradient.paint(ui.painter(), under);
             }
@@ -3253,11 +3546,6 @@ impl eframe::App for CapyroApp {
             self.backdrop.paint_cursor(ui.painter(), area, accent, self.ambient_under);
         }
 
-        let inner = full.shrink(PAD);
-        let header = Rect::from_min_size(inner.min, vec2(inner.width(), 46.0));
-        let video_bottom = (inner.bottom() - BELOW_VIDEO).max(header.bottom() + 60.0);
-        let video = Rect::from_min_max(pos2(inner.left(), header.bottom() + 12.0), pos2(inner.right(), video_bottom));
-        let logo_dest = Rect::from_min_size(header.min, vec2(46.0, 46.0));
 
         if !ready {
             // pantalla de carga (se puede arrastrar la ventana igual)
@@ -3279,13 +3567,20 @@ impl eframe::App for CapyroApp {
             let mut child = ui.new_child(UiBuilder::new().max_rect(full));
             child.multiply_opacity(e1);
             self.header(&mut child, header.translate(vec2(0.0, -12.0 * (1.0 - e1))), maximized);
-            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
-            child.multiply_opacity(e2);
-            self.video_area(&mut child, Rect::from_center_size(video.center(), video.size() * (0.96 + 0.04 * e2)));
-            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
-            child.multiply_opacity(e3);
-            self.transport(&mut child, video_bottom + 18.0 * (1.0 - e3), inner);
-            self.draw_toast(&mut child, video);
+            if let Some(l) = &music {
+                let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+                child.multiply_opacity(e2);
+                self.music_view(&mut child, l, e3);
+                self.layout_since = now - 1.0; // ya entró con la intro
+            } else {
+                let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+                child.multiply_opacity(e2);
+                self.video_area(&mut child, Rect::from_center_size(video.center(), video.size() * (0.96 + 0.04 * e2)));
+                let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+                child.multiply_opacity(e3);
+                self.transport(&mut child, video_bottom + 18.0 * (1.0 - e3), inner);
+                self.draw_toast(&mut child, video);
+            }
             self.splash(ui, full, now, Some(intro), logo_dest);
             self.play_click_if_needed(&ctx);
             ctx.request_repaint_after(FRAME_SMOOTH);
@@ -3296,20 +3591,57 @@ impl eframe::App for CapyroApp {
             self.tutorial_pending = false;
             self.start_tutorial(&ctx);
         }
-        self.ui_rects.insert("video", video);
-
         self.header(ui, header, maximized);
-        self.video_area(ui, video);
-        self.transport(ui, video_bottom, inner);
-        self.settings_menu(ui);
-        self.info_menu(ui);
-        self.fx_menu(ui);
-        self.changes_menu(ui);
-        self.keys_editor(ui, video.expand2(vec2(0.0, 30.0)));
+        // dónde van los avisos y el editor de atajos
+        let notice_area;
+        if let Some(l) = &music {
+            /* --- vista de música --- */
+            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+            if appear < 1.0 {
+                child.multiply_opacity(appear);
+            }
+            self.music_view(&mut child, l, appear);
+            // de los menús que se abren, en esta vista queda el de efectos
+            // (los demás están fijos en la burbuja de la derecha)
+            self.fx_menu(ui);
+            notice_area = l.center;
+            self.keys_editor(ui, content);
+        } else {
+            /* --- vista clásica --- */
+            self.ui_rects.insert("video", video);
+            let mut child = ui.new_child(UiBuilder::new().max_rect(full));
+            if appear < 1.0 {
+                child.multiply_opacity(appear);
+            }
+            self.video_area(&mut child, video);
+            if bar_e < 0.999 {
+                // la barra baja y se esconde (recortada debajo del video)
+                let mut bar = ui.new_child(UiBuilder::new().max_rect(full));
+                bar.set_clip_rect(Rect::from_min_max(pos2(full.left(), video_bottom), full.max).intersect(ui.clip_rect()));
+                if bar_e > 0.001 || appear < 1.0 {
+                    bar.multiply_opacity((1.0 - bar_e) * appear);
+                }
+                self.transport(&mut bar, video_bottom, inner);
+            }
+            if bar_ok && !self.show_playlist {
+                self.bar_toggle(ui, video, now);
+            }
+            self.settings_menu(ui, None);
+            self.info_menu(ui, None);
+            self.fx_menu(ui);
+            self.changes_menu(ui, None);
+            notice_area = video;
+            self.keys_editor(ui, video.expand2(vec2(0.0, 30.0)));
+        }
         // avisos arriba de todo (también de los menús abiertos)
-        self.draw_toast(ui, video);
-        self.draw_update_banner(ui, video);
-        self.draw_update_offer(ui, video);
+        let toast_area = if music.is_some() {
+            Rect::from_min_max(notice_area.min, pos2(notice_area.right(), notice_area.top() + 80.0))
+        } else {
+            notice_area
+        };
+        self.draw_toast(ui, toast_area);
+        self.draw_update_banner(ui, notice_area);
+        self.draw_update_offer(ui, notice_area);
         if !square {
             Self::resize_handles(ui, full);
         }
@@ -3328,7 +3660,11 @@ impl eframe::App for CapyroApp {
                     None => ctx.request_repaint_after(Duration::from_millis(8)), // el decodificador viene atrás
                 }
             } else {
-                ctx.request_repaint_after(crate::perf::ambient());
+                let bar_w = match &music {
+                    Some(l) => l.center.width(),
+                    None => inner.width(),
+                };
+                ctx.request_repaint_after(self.audio_repaint_interval(bar_w));
             }
         }
     }
