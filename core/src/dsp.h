@@ -26,6 +26,7 @@ typedef struct {
     bool          active;    /* false = no se toca la señal */
     float         preamp;    /* lineal: deja margen cuando hay realce */
     Biquad        bass, mid, treble;
+    Biquad        eq15[CAPYRO_EQ15_BANDS];
     float         comp_env;  /* envolvente del compresor (modo noche) */
 } Dsp;
 

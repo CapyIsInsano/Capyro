@@ -8,6 +8,16 @@
 
 ---
 
+## v0.3.3-alpha · Capyro Studio
+
+- **Capyro Studio**: un botón grande al lado de Novedades e Información (en la burbuja de funciones) abre una **ventana aparte**. Cerrada, no queda nada cargado en memoria: Capyro no se vuelve un traga RAM.
+- **Etiquetas**: editá el **nombre de la canción**, el **artista o intérprete**, el **álbum**, el **artista principal del álbum**, el **género**, el **año**, el **número de pista**, el **número de disco**, el **compositor** y los **comentarios**.
+  - Al guardar, el archivo se reescribe **copiando el audio tal cual** (sin recodificar, sin pérdida de calidad) y con la carátula intacta. El original queda como `.bak`; si guardás de nuevo, la versión anterior va a `.bak2`, `.bak3`… y nunca se pisa un respaldo.
+  - Si el archivo es el que está sonando, Capyro lo vuelve a abrir en el mismo punto y sigue sonando (o en pausa, como estaba).
+  - Por ahora, audio: MP3, FLAC, OGG, M4A, WAV, Opus. **En WAV** no se guardan el artista principal del álbum, el número de disco ni el compositor (el formato no tiene dónde ponerlos), y la ventana lo avisa.
+- **Ecualizador avanzado de 15 bandas** (de 25 Hz a 16 kHz), con deslizadores verticales y un interruptor de activado. Perfiles listos: **Plano**, **Graves**, **Voces**, **Brillante**, **Rock**, **Pop**, **Jazz**, **Clásica**, **Electrónica** y **Cine**. Los demás efectos (velocidad, modo noche, ancho) siguen igual.
+- **Vista previa del tramo**: elegí el **inicio** y el **fin** con deslizadores, o tomá la posición actual con un botón (también "tramo completo"). **Reproducir tramo** toca solo ese pedazo y se pausa al llegar al fin, o repite si marcás "Repetir tramo". El archivo no cambia.
+
 ## v0.3.2-alpha · Se adapta a lo que abrís
 
 - **Interfaz adaptativa**: Capyro se da cuenta de si abriste un audio o un video y se acomoda.

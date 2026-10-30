@@ -13,11 +13,11 @@ use crate::theme::*;
 
 /// Presets: solo tocan el ecualizador, el estéreo y el modo noche (no el tono).
 const PRESETS: [(&str, AudioFx); 5] = [
-    ("Normal", AudioFx { enabled: true, bass_db: 0.0, mid_db: 0.0, treble_db: 0.0, width: 1.0, night: false }),
-    ("Bajos", AudioFx { enabled: true, bass_db: 8.0, mid_db: 0.0, treble_db: 2.0, width: 1.1, night: false }),
-    ("Voces", AudioFx { enabled: true, bass_db: -4.0, mid_db: 6.0, treble_db: 2.0, width: 0.9, night: false }),
-    ("Lo-fi", AudioFx { enabled: true, bass_db: 3.0, mid_db: -3.0, treble_db: -10.0, width: 0.6, night: false }),
-    ("Noche", AudioFx { enabled: true, bass_db: -3.0, mid_db: 3.0, treble_db: 0.0, width: 1.0, night: true }),
+    ("Normal", AudioFx { enabled: true, bass_db: 0.0, mid_db: 0.0, treble_db: 0.0, width: 1.0, night: false, eq15_on: false, eq15: [0.0; 15] }),
+    ("Bajos", AudioFx { enabled: true, bass_db: 8.0, mid_db: 0.0, treble_db: 2.0, width: 1.1, night: false, eq15_on: false, eq15: [0.0; 15] }),
+    ("Voces", AudioFx { enabled: true, bass_db: -4.0, mid_db: 6.0, treble_db: 2.0, width: 0.9, night: false, eq15_on: false, eq15: [0.0; 15] }),
+    ("Lo-fi", AudioFx { enabled: true, bass_db: 3.0, mid_db: -3.0, treble_db: -10.0, width: 0.6, night: false, eq15_on: false, eq15: [0.0; 15] }),
+    ("Noche", AudioFx { enabled: true, bass_db: -3.0, mid_db: 3.0, treble_db: 0.0, width: 1.0, night: true, eq15_on: false, eq15: [0.0; 15] }),
 ];
 
 fn same_sound(a: &AudioFx, b: &AudioFx) -> bool {
@@ -258,7 +258,8 @@ impl CapyroApp {
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(11.0) } else { regular(11.0) }, col);
             if chip.resp.clicked() {
-                fx = AudioFx { enabled: true, ..*preset };
+                // los presets no tocan el ecualizador de 15 bandas (eso es de Capyro Studio)
+                fx = AudioFx { enabled: true, eq15_on: fx.eq15_on, eq15: fx.eq15, ..*preset };
                 fx_changed = true;
             }
         }
@@ -438,7 +439,8 @@ impl CapyroApp {
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(fs) } else { regular(fs) }, col);
             if chip.resp.clicked() {
-                fx = AudioFx { enabled: true, ..*preset };
+                // los presets no tocan el ecualizador de 15 bandas (eso es de Capyro Studio)
+                fx = AudioFx { enabled: true, eq15_on: fx.eq15_on, eq15: fx.eq15, ..*preset };
                 fx_changed = true;
             }
         }

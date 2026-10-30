@@ -333,6 +333,11 @@ impl CapyroApp {
         let unseen = self.changes_seen != crate::ffi::version();
         let updating = self.updater.is_running() || matches!(self.updater.last, Some(crate::updater::Outcome::Installed { .. }));
         let tabs = Rect::from_min_max(rect.min + vec2(8.0, 8.0), pos2(rect.right() - 8.0, rect.top() + 52.0));
+        // debajo de las pestañas, a todo el ancho: el botón de Capyro Studio
+        let studio_r = Rect::from_min_size(pos2(tabs.left(), tabs.bottom() + 6.0), vec2(tabs.width(), 32.0));
+        if super::studio::studio_button(ui, "capyro-studio-btn", studio_r, accent, self.studio.is_some()) {
+            self.open_studio(&ctx);
+        }
         let tw = tabs.width() / DockTab::ALL.len() as f32;
         for (i, tab) in DockTab::ALL.into_iter().enumerate() {
             let r = Rect::from_min_size(pos2(tabs.left() + i as f32 * tw, tabs.top()), vec2(tw, tabs.height())).shrink2(vec2(2.0, 0.0));
@@ -366,13 +371,14 @@ impl CapyroApp {
                 }
             }
         }
+        let sep_y = studio_r.bottom() + 6.0;
         painter.line_segment(
-            [pos2(rect.left() + 10.0, tabs.bottom() + 6.0), pos2(rect.right() - 10.0, tabs.bottom() + 6.0)],
+            [pos2(rect.left() + 10.0, sep_y), pos2(rect.right() - 10.0, sep_y)],
             Stroke::new(1.0, Color32::from_white_alpha(12)),
         );
 
         /* --- contenido (recortado, con scroll) --- */
-        let content = Rect::from_min_max(pos2(rect.left(), tabs.bottom() + 8.0), pos2(rect.right(), rect.bottom() - 6.0));
+        let content = Rect::from_min_max(pos2(rect.left(), sep_y + 2.0), pos2(rect.right(), rect.bottom() - 6.0));
         let mut child = ui.new_child(UiBuilder::new().max_rect(content));
         child.set_clip_rect(content.intersect(ui.clip_rect()));
         let idx = self.dock_tab as usize;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 project(capyro
-    VERSION 0.3.2
+    VERSION 0.3.3
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 

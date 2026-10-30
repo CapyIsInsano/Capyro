@@ -275,6 +275,7 @@ const char *capyro_core_error_string(int err) {
     case CAPYRO_ERR_DECODE:       return "no se pudo leer el archivo (¿está dañado?)";
     case CAPYRO_ERR_NO_STREAMS:   return "el archivo no tiene audio ni video";
     case CAPYRO_ERR_THREAD:       return "no se pudo iniciar la decodificación";
+    case CAPYRO_ERR_WRITE:        return "no se pudo guardar las etiquetas (¿el archivo está en uso?)";
     default:                      return "error desconocido";
     }
 }
@@ -786,6 +787,20 @@ const char *capyro_core_playlist_get(CapyroCore *core, size_t index) {
 
 long capyro_core_playlist_current(CapyroCore *core) {
     return core ? core->playlist_current : -1;
+}
+
+/* Suelta el archivo abierto para poder reescribirlo (las etiquetas). La lista
+ * no cambia: capyro_core_playlist_select(...) lo vuelve a abrir. */
+void capyro_core_release_file(CapyroCore *core) {
+    if (!core) {
+        return;
+    }
+    player_close(core);
+    cp_mutex_lock(&core->lock);
+    core->state = CAPYRO_STATE_IDLE;
+    core->title[0] = core->artist[0] = core->album[0] = '\0';
+    core->change_serial++;
+    cp_mutex_unlock(&core->lock);
 }
 
 int capyro_core_playlist_select(CapyroCore *core, size_t index) {

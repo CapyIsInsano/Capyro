@@ -26,6 +26,7 @@ mod fx_menu;
 mod keys_editor;
 mod lists;
 mod music;
+mod studio;
 mod tutorial;
 use lists::PlPopup;
 use crate::changes::Release;
@@ -276,6 +277,8 @@ pub struct CapyroApp {
     layout_since: f64,
     /// Pestaña y scroll de la burbuja de funciones de la vista de música.
     dock_tab: music::DockTab,
+    /// Capyro Studio: solo existe mientras la ventana está abierta.
+    studio: Option<studio::Studio>,
     dock_scroll: [f32; 3],
     /// Videos: la barra de abajo escondida, y cuándo se movió el mouse por
     /// última vez (el botón para volver a mostrarla aparece al moverlo).
@@ -479,6 +482,7 @@ impl CapyroApp {
             layout_music: false,
             layout_since: 0.0,
             dock_tab: Default::default(),
+            studio: None,
             dock_scroll: [0.0; 3],
             bar_hidden: false,
             last_pointer_move: 0.0,
@@ -3702,6 +3706,8 @@ impl eframe::App for CapyroApp {
         crate::alto::paint_ripples(&ctx, ui.painter(), self.cfg.accent);
         // el tutorial va encima de todo y se queda con el mouse y el teclado
         self.tutorial_overlay(ui, full);
+        // Capyro Studio: su propia ventana (si está abierta)
+        self.studio_window(&ctx);
 
         self.play_click_if_needed(&ctx);
 

@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.3.2-alpha"
+#define CAPYRO_VERSION "0.3.3-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -46,7 +46,8 @@ typedef enum {
     CAPYRO_ERR_OUT_OF_RANGE = 5, /* índice de lista inválido / fin de lista */
     CAPYRO_ERR_DECODE       = 6, /* FFmpeg no pudo leer el archivo */
     CAPYRO_ERR_NO_STREAMS   = 7, /* el archivo no tiene audio ni video */
-    CAPYRO_ERR_THREAD       = 8  /* no se pudo crear el hilo de decodificación */
+    CAPYRO_ERR_THREAD       = 8, /* no se pudo crear el hilo de decodificación */
+    CAPYRO_ERR_WRITE        = 9  /* no se pudo escribir las etiquetas (¿archivo en uso?) */
 } CapyroError;
 
 typedef enum {
@@ -63,6 +64,7 @@ typedef enum {
 #define CAPYRO_EQ_MIN_DB  (-12.0f)
 #define CAPYRO_EQ_MAX_DB  ( 12.0f)
 #define CAPYRO_WIDTH_MAX  ( 2.0f)
+#define CAPYRO_EQ15_BANDS 15
 #define CAPYRO_PITCH_MIN  (-12.0)   /* semitonos */
 #define CAPYRO_PITCH_MAX  ( 12.0)
 
@@ -73,6 +75,10 @@ typedef struct {
     float treble_db;  /* agudos  (high shelf 6 kHz),  -12 .. +12 dB */
     float width;      /* estéreo: 0 = mono, 1 = normal, 2 = muy abierto */
     bool  night;      /* modo noche: compresor (lo fuerte baja, lo bajito sube) */
+    /* ecualizador avanzado de 15 bandas (25 Hz a 16 kHz), aparte de los tres
+     * controles de arriba. Ganancia de cada banda en dB, -12 .. +12. */
+    bool  eq15_on;
+    float eq15[CAPYRO_EQ15_BANDS];
 } CapyroAudioFx;
 
 /* Último frame de video listo para mostrar (RGBA8, sin premultiplicar). */
@@ -291,5 +297,31 @@ bool capyro_core_get_shuffle(CapyroCore *core);
 #ifdef __cplusplus
 }
 #endif
+
+/* ---- etiquetas (Capyro Studio) -----------------------------------------
+ * Leer y escribir los metadatos de un archivo de audio. Escribir reescribe
+ * el archivo SIN recodificar el audio (copia los paquetes) y deja el
+ * original como "<archivo>.bak". Hay que tenerlo cerrado: no se puede
+ * reemplazar un archivo que Capyro está reproduciendo (en Windows sobre
+ * todo). Los campos vacíos se borran. */
+typedef struct {
+    char title[256];
+    char artist[256];
+    char album[256];
+    char album_artist[256];
+    char genre[128];
+    char year[16];
+    char track[32];    /* "3" o "3/12" */
+    char disc[32];     /* "1" o "1/2" */
+    char composer[256];
+    char comment[1024];
+} CapyroTags;
+
+/* Suelta el archivo que está abierto (sin quitarlo de la lista), para que
+ * se pueda reescribir. Después, capyro_core_playlist_select lo vuelve a abrir. */
+void capyro_core_release_file(CapyroCore *core);
+
+int capyro_tags_read(const char *path, CapyroTags *out);
+int capyro_tags_write(const char *path, const CapyroTags *tags);
 
 #endif /* CAPYRO_CORE_H */

@@ -4,7 +4,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.2--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.2-alpha">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.3--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.3-alpha">
 <img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Windows-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux y Windows">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
@@ -28,7 +28,11 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
+> **Novedades de la v0.3.3:** **Capyro Studio**, una ventana aparte (botón grande en ⓘ) para
+> **editar las etiquetas** de un audio, con un **ecualizador de 15 bandas** y 10 perfiles, y
+> una **vista previa** de un tramo con inicio y fin editables. Cerrada, no ocupa memoria.
+>
+> **De la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
 > **vista de música**: la carátula grande al medio con título, artista y álbum, los controles,
 > el volumen y los efectos; la lista a un costado y Ajustes, Info y Novedades al otro. Con un
 > video, la barra de abajo **se oculta con un clic** (o con la tecla B). Todo se apaga en ⚙ y

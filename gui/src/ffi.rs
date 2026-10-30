@@ -21,11 +21,26 @@ pub struct AudioFx {
     pub treble_db: f32,
     pub width: f32,
     pub night: bool,
+    /// Ecualizador de 15 bandas (Capyro Studio): aparte de graves/medios/agudos.
+    pub eq15_on: bool,
+    pub eq15: [f32; EQ15_BANDS],
 }
+
+/// Cantidad de bandas del ecualizador avanzado (= CAPYRO_EQ15_BANDS).
+pub const EQ15_BANDS: usize = 15;
 
 impl Default for AudioFx {
     fn default() -> Self {
-        Self { enabled: true, bass_db: 0.0, mid_db: 0.0, treble_db: 0.0, width: 1.0, night: false }
+        Self {
+            enabled: true,
+            bass_db: 0.0,
+            mid_db: 0.0,
+            treble_db: 0.0,
+            width: 1.0,
+            night: false,
+            eq15_on: false,
+            eq15: [0.0; EQ15_BANDS],
+        }
     }
 }
 
@@ -37,6 +52,7 @@ impl AudioFx {
             && self.treble_db.abs() < 0.05
             && (self.width - 1.0).abs() < 0.005
             && !self.night
+            && !(self.eq15_on && self.eq15.iter().any(|g| g.abs() >= 0.05))
     }
 }
 
@@ -200,6 +216,9 @@ extern "C" {
     fn capyro_core_playlist_prev(core: *mut CapyroCore) -> c_int;
     fn capyro_core_playlist_remove(core: *mut CapyroCore, index: usize);
     fn capyro_core_playlist_clear(core: *mut CapyroCore);
+    fn capyro_core_release_file(core: *mut CapyroCore);
+    fn capyro_tags_read(path: *const c_char, out: *mut RawTags) -> c_int;
+    fn capyro_tags_write(path: *const c_char, tags: *const RawTags) -> c_int;
 }
 
 const CAPYRO_OK: c_int = 0;
@@ -296,6 +315,98 @@ pub struct DecodeInfo {
     /// Por qué no se usa la GPU ("" si se usa).
     pub note: String,
     pub serial: u64,
+}
+
+/// Debe coincidir con `CapyroTags` de capyro_core.h.
+#[repr(C)]
+struct RawTags {
+    title: [c_char; 256],
+    artist: [c_char; 256],
+    album: [c_char; 256],
+    album_artist: [c_char; 256],
+    genre: [c_char; 128],
+    year: [c_char; 16],
+    track: [c_char; 32],
+    disc: [c_char; 32],
+    composer: [c_char; 256],
+    comment: [c_char; 1024],
+}
+
+/// Etiquetas de un archivo, para Capyro Studio.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Tags {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artist: String,
+    pub genre: String,
+    pub year: String,
+    pub track: String,
+    pub disc: String,
+    pub composer: String,
+    pub comment: String,
+}
+
+/// Copia `s` al arreglo de C (cortado para que entre, con el cero final).
+fn put_cstr(dst: &mut [c_char], s: &str) {
+    dst.iter_mut().for_each(|c| *c = 0);
+    let max = dst.len() - 1;
+    let mut n = 0;
+    for ch in s.chars() {
+        let len = ch.len_utf8();
+        if n + len > max {
+            break;
+        }
+        let mut buf = [0u8; 4];
+        for &b in ch.encode_utf8(&mut buf).as_bytes() {
+            dst[n] = b as c_char;
+            n += 1;
+        }
+    }
+}
+
+impl RawTags {
+    fn empty() -> Self {
+        // SAFETY: todo ceros es un RawTags válido (son solo arreglos de bytes).
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+/// Lee las etiquetas de un archivo de audio.
+pub fn read_tags(path: &Path) -> Result<Tags, CoreError> {
+    let c = path_to_cstring(path).ok_or_else(|| CoreError("ruta inválida".to_owned()))?;
+    let mut raw = RawTags::empty();
+    check(unsafe { capyro_tags_read(c.as_ptr(), &mut raw) })?;
+    Ok(Tags {
+        title: carray_to_string(&raw.title),
+        artist: carray_to_string(&raw.artist),
+        album: carray_to_string(&raw.album),
+        album_artist: carray_to_string(&raw.album_artist),
+        genre: carray_to_string(&raw.genre),
+        year: carray_to_string(&raw.year),
+        track: carray_to_string(&raw.track),
+        disc: carray_to_string(&raw.disc),
+        composer: carray_to_string(&raw.composer),
+        comment: carray_to_string(&raw.comment),
+    })
+}
+
+/// Escribe las etiquetas (reescribe el archivo; el original queda como .bak).
+/// El archivo tiene que estar cerrado: ver `Core::release_file`.
+pub fn write_tags(path: &Path, tags: &Tags) -> Result<(), CoreError> {
+    let c = path_to_cstring(path).ok_or_else(|| CoreError("ruta inválida".to_owned()))?;
+    let mut raw = RawTags::empty();
+    put_cstr(&mut raw.title, &tags.title);
+    put_cstr(&mut raw.artist, &tags.artist);
+    put_cstr(&mut raw.album, &tags.album);
+    put_cstr(&mut raw.album_artist, &tags.album_artist);
+    put_cstr(&mut raw.genre, &tags.genre);
+    put_cstr(&mut raw.year, &tags.year);
+    put_cstr(&mut raw.track, &tags.track);
+    put_cstr(&mut raw.disc, &tags.disc);
+    put_cstr(&mut raw.composer, &tags.composer);
+    put_cstr(&mut raw.comment, &tags.comment);
+    check(unsafe { capyro_tags_write(c.as_ptr(), &raw) })
 }
 
 fn carray_to_string(a: &[c_char]) -> String {
@@ -655,6 +766,10 @@ impl Core {
     pub fn playlist_current(&self) -> Option<usize> {
         let c = unsafe { capyro_core_playlist_current(self.ptr) };
         usize::try_from(c).ok()
+    }
+    /// Suelta el archivo abierto (para reescribir sus etiquetas). La lista no cambia.
+    pub fn release_file(&self) {
+        unsafe { capyro_core_release_file(self.ptr) }
     }
     pub fn playlist_select(&self, index: usize) -> Result<(), CoreError> {
         check(unsafe { capyro_core_playlist_select(self.ptr, index) })

@@ -34,7 +34,29 @@ static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+/* Frecuencias centrales del ecualizador de 15 bandas (de graves a agudos). */
+static const double EQ15_HZ[CAPYRO_EQ15_BANDS] = {
+    25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000
+};
+#define EQ15_Q 1.6
+
+/* Hay alguna banda del de 15 que no esté en cero. */
+static bool eq15_used(const CapyroAudioFx *fx) {
+    if (!fx->eq15_on) {
+        return false;
+    }
+    for (int i = 0; i < CAPYRO_EQ15_BANDS; i++) {
+        if (fabsf(fx->eq15[i]) >= 0.05f) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void dsp_clamp(CapyroAudioFx *fx) {
+    for (int i = 0; i < CAPYRO_EQ15_BANDS; i++) {
+        fx->eq15[i] = isnan(fx->eq15[i]) ? 0.0f : clampf(fx->eq15[i], CAPYRO_EQ_MIN_DB, CAPYRO_EQ_MAX_DB);
+    }
     fx->bass_db   = clampf(fx->bass_db,   CAPYRO_EQ_MIN_DB, CAPYRO_EQ_MAX_DB);
     fx->mid_db    = clampf(fx->mid_db,    CAPYRO_EQ_MIN_DB, CAPYRO_EQ_MAX_DB);
     fx->treble_db = clampf(fx->treble_db, CAPYRO_EQ_MIN_DB, CAPYRO_EQ_MAX_DB);
@@ -47,7 +69,8 @@ void dsp_clamp(CapyroAudioFx *fx) {
 
 bool dsp_is_neutral(const CapyroAudioFx *fx) {
     return fabsf(fx->bass_db) < 0.05f && fabsf(fx->mid_db) < 0.05f &&
-           fabsf(fx->treble_db) < 0.05f && fabsf(fx->width - 1.0f) < 0.005f && !fx->night;
+           fabsf(fx->treble_db) < 0.05f && fabsf(fx->width - 1.0f) < 0.005f && !fx->night &&
+           !eq15_used(fx);
 }
 
 /* --- coeficientes ---------------------------------------------------- */
@@ -122,11 +145,18 @@ void dsp_set(Dsp *d, const CapyroAudioFx *fx) {
         memset(d->bass.z1, 0, sizeof(d->bass.z1));     memset(d->bass.z2, 0, sizeof(d->bass.z2));
         memset(d->mid.z1, 0, sizeof(d->mid.z1));       memset(d->mid.z2, 0, sizeof(d->mid.z2));
         memset(d->treble.z1, 0, sizeof(d->treble.z1)); memset(d->treble.z2, 0, sizeof(d->treble.z2));
+        for (int i = 0; i < CAPYRO_EQ15_BANDS; i++) {
+            memset(d->eq15[i].z1, 0, sizeof(d->eq15[i].z1));
+            memset(d->eq15[i].z2, 0, sizeof(d->eq15[i].z2));
+        }
         d->comp_env = 0.0f;
     }
     low_shelf(&d->bass, d->rate, BASS_HZ, d->fx.bass_db);
     peaking(&d->mid, d->rate, MID_HZ, MID_Q, d->fx.mid_db);
     high_shelf(&d->treble, d->rate, TREBLE_HZ, d->fx.treble_db);
+    for (int i = 0; i < CAPYRO_EQ15_BANDS; i++) {
+        peaking(&d->eq15[i], d->rate, EQ15_HZ[i], EQ15_Q, d->fx.eq15[i]);
+    }
 
     /* Margen: si alguna banda sube, se baja todo un poco antes de filtrar
      * para que no sature (el resto lo absorbe el limitador suave). */
@@ -134,6 +164,11 @@ void dsp_set(Dsp *d, const CapyroAudioFx *fx) {
     if (d->fx.bass_db > boost)   boost = d->fx.bass_db;
     if (d->fx.mid_db > boost)    boost = d->fx.mid_db;
     if (d->fx.treble_db > boost) boost = d->fx.treble_db;
+    if (eq15_used(&d->fx)) {
+        for (int i = 0; i < CAPYRO_EQ15_BANDS; i++) {
+            if (d->fx.eq15[i] > boost) boost = d->fx.eq15[i];
+        }
+    }
     d->preamp = powf(10.0f, -0.6f * boost / 20.0f);
 }
 
@@ -153,6 +188,7 @@ void dsp_process(Dsp *d, float *buf, size_t frames) {
     }
     const bool eq    = fabsf(d->fx.bass_db) >= 0.05f || fabsf(d->fx.mid_db) >= 0.05f ||
                        fabsf(d->fx.treble_db) >= 0.05f;
+    const bool eq15  = eq15_used(&d->fx);
     const bool width = fabsf(d->fx.width - 1.0f) >= 0.005f;
     const float w    = d->fx.width;
 
@@ -169,6 +205,18 @@ void dsp_process(Dsp *d, float *buf, size_t frames) {
             dl = biquad_run(&d->bass, 0, dl);   dr = biquad_run(&d->bass, 1, dr);
             dl = biquad_run(&d->mid, 0, dl);    dr = biquad_run(&d->mid, 1, dr);
             dl = biquad_run(&d->treble, 0, dl); dr = biquad_run(&d->treble, 1, dr);
+            l = (float)dl;
+            r = (float)dr;
+        }
+
+        if (eq15) {
+            /* el preamp ya lo aplicó el bloque de arriba si estaba activo */
+            double k = eq ? 1.0 : d->preamp;
+            double dl = l * k, dr = r * k;
+            for (int b = 0; b < CAPYRO_EQ15_BANDS; b++) {
+                dl = biquad_run(&d->eq15[b], 0, dl);
+                dr = biquad_run(&d->eq15[b], 1, dr);
+            }
             l = (float)dl;
             r = (float)dr;
         }

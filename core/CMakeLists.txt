@@ -59,6 +59,7 @@ add_library(capyro_core STATIC
     src/buildinfo.c
     src/platform.c
     src/miniaudio_impl.c
+    src/tags.c
 )
 # capyro_buildinfo.h lo genera el target capyro_buildinfo (CMakeLists raíz).
 add_dependencies(capyro_core capyro_buildinfo)

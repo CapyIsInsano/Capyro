@@ -77,6 +77,8 @@ impl Session {
             "    fx = {{ enabled = {}, bass = {:.1}, mid = {:.1}, treble = {:.1}, width = {:.2}, night = {}, pitch = {:.0} }},\n",
             f.enabled, f.bass_db, f.mid_db, f.treble_db, f.width, f.night, self.pitch
         );
+        let bands: Vec<String> = f.eq15.iter().map(|g| format!("{g:.1}")).collect();
+        s += &format!("    eq15 = {{ on = {}, bands = {{ {} }} }},\n", f.eq15_on, bands.join(", "));
         s += &format!("    seen_changes = {},\n", lua_quote(&self.seen_changes));
         s += "    playlist = {\n";
         for p in &self.playlist {
@@ -107,6 +109,17 @@ impl Session {
             fx.width = t.get::<Option<f32>>("width")?.unwrap_or(1.0).clamp(0.0, 2.0);
             fx.night = t.get::<Option<bool>>("night")?.unwrap_or(false);
             pitch = t.get::<Option<f64>>("pitch")?.unwrap_or(0.0).clamp(-12.0, 12.0).round();
+        }
+        // ecualizador de 15 bandas (Capyro Studio); las sesiones viejas no lo tienen
+        if let Some(e) = t.get::<Option<Table>>("eq15")? {
+            fx.eq15_on = e.get::<Option<bool>>("on")?.unwrap_or(false);
+            if let Some(b) = e.get::<Option<Table>>("bands")? {
+                for (i, slot) in fx.eq15.iter_mut().enumerate() {
+                    if let Some(g) = b.get::<Option<f32>>((i + 1) as i64)? {
+                        *slot = g.clamp(-12.0, 12.0);
+                    }
+                }
+            }
         }
         Ok(Self {
             fx,
@@ -170,7 +183,17 @@ mod tests {
             ],
             current: Some(1),
             position: 83.5,
-            fx: AudioFx { enabled: false, bass_db: 6.5, mid_db: -3.0, treble_db: 2.0, width: 0.4, night: true },
+            fx: AudioFx {
+                enabled: false,
+                bass_db: 6.5,
+                mid_db: -3.0,
+                treble_db: 2.0,
+                width: 0.4,
+                night: true,
+                eq15_on: true,
+                eq15: [1.5, 0.0, -2.0, 0.0, 0.0, 3.0, 0.0, 0.0, -1.0, 0.0, 0.0, 2.5, 0.0, 0.0, -4.0],
+                ..AudioFx::default()
+            },
             pitch: -3.0,
             seen_changes: "v0.2.8-alpha".to_owned(),
         };
