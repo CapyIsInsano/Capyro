@@ -2910,7 +2910,11 @@ impl CapyroApp {
             if armed {
                 self.uninstall_armed = None;
                 match crate::uninstall::launch() {
-                    Ok(()) => ctx.send_viewport_cmd(ViewportCommand::Close),
+                    Ok(crate::uninstall::Outcome::Done) => ctx.send_viewport_cmd(ViewportCommand::Close),
+                    Ok(crate::uninstall::Outcome::NeedsRoot(cmd)) => {
+                        ctx.copy_text(cmd.clone());
+                        self.toast_for(&ctx, format!("Copié, pegalo en una terminal: {cmd}"), false, 10.0);
+                    }
                     Err(e) => self.toast(&ctx, e, true),
                 }
             } else {
