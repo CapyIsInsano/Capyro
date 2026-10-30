@@ -10,13 +10,19 @@
 
 ## v0.3.3-alpha · Capyro Studio
 
-- **Capyro Studio**: un botón grande al lado de Novedades e Información (en la burbuja de funciones) abre una **ventana aparte**. Cerrada, no queda nada cargado en memoria: Capyro no se vuelve un traga RAM.
+- **Capyro Studio**: un botón grande al lado de Novedades e Información (en la burbuja de funciones) abre un **panel encima de la ventana** (no otra ventana). Arriba, la **portada** a la izquierda y el **nombre de la canción** en grande, con el artista y el resto de los datos al lado; abajo, la vista previa y el ecualizador. Se cierra con ✕, con Esc o tocando afuera. Cerrado, no queda nada cargado en memoria (ni las imágenes): Capyro no se vuelve un traga RAM.
+- **Respeta el modo de rendimiento**: en **Bajo** aparece y se va al toque, sin sombras, brillos ni curva; en **Medio**, con su animación, la sombra de la portada y la curva del ecualizador; en **Alto**, además, la luz del color de la portada, el brillo de la curva y del tramo, y el panel que se descubre con una línea de luz.
+- **Portada**: tocá la imagen y se abre el selector de archivos para elegir otra (jpg, png, webp, bmp). Se ve al toque, pero se guarda recién al tocar **Guardar cambios**. También se puede **quitar** o **volver a la original**. Un JPG o PNG de hasta 1600 px va tal cual; lo demás (WebP, BMP, fotos enormes) se guarda como JPEG de 1200 px. Anda en MP3, FLAC, M4A, OGG y Opus (en Ogg va como la etiqueta estándar `METADATA_BLOCK_PICTURE`); WAV no guarda portada.
 - **Etiquetas**: editá el **nombre de la canción**, el **artista o intérprete**, el **álbum**, el **artista principal del álbum**, el **género**, el **año**, el **número de pista**, el **número de disco**, el **compositor** y los **comentarios**.
-  - Al guardar, el archivo se reescribe **copiando el audio tal cual** (sin recodificar, sin pérdida de calidad) y con la carátula intacta. El original queda como `.bak`; si guardás de nuevo, la versión anterior va a `.bak2`, `.bak3`… y nunca se pisa un respaldo.
-  - Si el archivo es el que está sonando, Capyro lo vuelve a abrir en el mismo punto y sigue sonando (o en pausa, como estaba).
-  - Por ahora, audio: MP3, FLAC, OGG, M4A, WAV, Opus. **En WAV** no se guardan el artista principal del álbum, el número de disco ni el compositor (el formato no tiene dónde ponerlos), y la ventana lo avisa.
-- **Ecualizador avanzado de 15 bandas** (de 25 Hz a 16 kHz), con deslizadores verticales y un interruptor de activado. Perfiles listos: **Plano**, **Graves**, **Voces**, **Brillante**, **Rock**, **Pop**, **Jazz**, **Clásica**, **Electrónica** y **Cine**. Los demás efectos (velocidad, modo noche, ancho) siguen igual.
-- **Vista previa del tramo**: elegí el **inicio** y el **fin** con deslizadores, o tomá la posición actual con un botón (también "tramo completo"). **Reproducir tramo** toca solo ese pedazo y se pausa al llegar al fin, o repite si marcás "Repetir tramo". El archivo no cambia.
+  - Al guardar, el archivo se reescribe **copiando el audio tal cual** (sin recodificar, sin pérdida de calidad). El original queda como `.bak`; si guardás de nuevo, la versión anterior va a `.bak2`, `.bak3`… y nunca se pisa un respaldo.
+  - Si el archivo es el que está sonando, Capyro lo vuelve a abrir en el mismo punto y sigue sonando (o en pausa, como estaba), ya con la portada y los datos nuevos.
+  - Si cerrás con cambios sin guardar, avisa: el segundo intento cierra y los descarta. **Ctrl+S** guarda.
+  - En Windows, los archivos con acentos o ñ en el nombre ("Canción.mp3") se guardan bien.
+  - Por ahora, audio: MP3, FLAC, OGG, M4A, WAV, Opus. **En WAV** no se guardan el artista principal del álbum, el número de disco, el compositor ni la portada (el formato no tiene dónde ponerlos), y el panel lo avisa.
+- **Ecualizador avanzado de 15 bandas** (de 25 Hz a 16 kHz): arrastrá cada banda para arriba o abajo (doble clic: 0 dB), con una curva que las une. Perfiles listos: **Plano**, **Graves**, **Voces**, **Brillante**, **Rock**, **Pop**, **Jazz**, **Clásica**, **Electrónica** y **Cine**. Se guarda con la sesión.
+  - **Es uno u otro**: con el avanzado activado, el **ecualizador normal** (graves, medios y agudos) se apaga; en Efectos de audio sus barras quedan grises con un aviso y un botón "Usar el normal". Elegir un preset del menú de efectos también vuelve al normal.
+- **Vista previa del tramo**: una barra con dos manijas para elegir el **inicio** y el **fin** (doble clic: todo el tema), o "Inicio aquí" / "Fin aquí" con la posición actual. El botón ▶ toca solo ese pedazo y se pausa al llegar al fin, o repite si activás "Repetir". El archivo no cambia.
+- Con Capyro Studio abierto, los atajos que abren otros menús o cambian de canción no hacen nada, y un archivo que arrastrás se agrega a la lista sin cambiar lo que suena.
 
 ## v0.3.2-alpha · Se adapta a lo que abrís
 

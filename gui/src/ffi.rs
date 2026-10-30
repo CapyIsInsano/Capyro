@@ -4,7 +4,7 @@
 //! GUI nunca toca `unsafe`.
 
 use std::ffi::{c_char, c_int, c_long, CStr, CString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[repr(C)]
 pub struct CapyroCore {
@@ -47,12 +47,17 @@ impl Default for AudioFx {
 impl AudioFx {
     /// Todo en su valor neutro (aunque el interruptor esté prendido).
     pub fn is_neutral(&self) -> bool {
-        self.bass_db.abs() < 0.05
-            && self.mid_db.abs() < 0.05
-            && self.treble_db.abs() < 0.05
-            && (self.width - 1.0).abs() < 0.005
-            && !self.night
-            && !(self.eq15_on && self.eq15.iter().any(|g| g.abs() >= 0.05))
+        !self.eq3_used() && (self.width - 1.0).abs() < 0.005 && !self.night && !self.eq15_used()
+    }
+
+    /// El ecualizador de 3 bandas suena (con el de 15 activado, no: es uno u otro).
+    pub fn eq3_used(&self) -> bool {
+        !self.eq15_on && (self.bass_db.abs() >= 0.05 || self.mid_db.abs() >= 0.05 || self.treble_db.abs() >= 0.05)
+    }
+
+    /// El ecualizador de 15 bandas está activado y alguna banda no está en 0.
+    pub fn eq15_used(&self) -> bool {
+        self.eq15_on && self.eq15.iter().any(|g| g.abs() >= 0.05)
     }
 }
 
@@ -218,7 +223,10 @@ extern "C" {
     fn capyro_core_playlist_clear(core: *mut CapyroCore);
     fn capyro_core_release_file(core: *mut CapyroCore);
     fn capyro_tags_read(path: *const c_char, out: *mut RawTags) -> c_int;
-    fn capyro_tags_write(path: *const c_char, tags: *const RawTags) -> c_int;
+    fn capyro_tags_write_ex(path: *const c_char, tags: *const RawTags, cover_mode: c_int, cover_image: *const c_char) -> c_int;
+    fn capyro_cover_supported(path: *const c_char) -> bool;
+    fn capyro_cover_read(path: *const c_char, max_side: c_int, out: *mut RawImage) -> c_int;
+    fn capyro_image_read(path: *const c_char, max_side: c_int, out: *mut RawImage) -> c_int;
 }
 
 const CAPYRO_OK: c_int = 0;
@@ -391,10 +399,8 @@ pub fn read_tags(path: &Path) -> Result<Tags, CoreError> {
     })
 }
 
-/// Escribe las etiquetas (reescribe el archivo; el original queda como .bak).
-/// El archivo tiene que estar cerrado: ver `Core::release_file`.
-pub fn write_tags(path: &Path, tags: &Tags) -> Result<(), CoreError> {
-    let c = path_to_cstring(path).ok_or_else(|| CoreError("ruta inválida".to_owned()))?;
+/// Etiquetas → la estructura de C.
+fn raw_tags(tags: &Tags) -> RawTags {
     let mut raw = RawTags::empty();
     put_cstr(&mut raw.title, &tags.title);
     put_cstr(&mut raw.artist, &tags.artist);
@@ -406,7 +412,70 @@ pub fn write_tags(path: &Path, tags: &Tags) -> Result<(), CoreError> {
     put_cstr(&mut raw.disc, &tags.disc);
     put_cstr(&mut raw.composer, &tags.composer);
     put_cstr(&mut raw.comment, &tags.comment);
-    check(unsafe { capyro_tags_write(c.as_ptr(), &raw) })
+    raw
+}
+
+/// Qué hacer con la portada al guardar las etiquetas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoverEdit {
+    /// Dejarla como está.
+    Keep,
+    /// Cambiarla por esta imagen (jpg, png, webp, bmp...).
+    Set(PathBuf),
+    /// Quitarla.
+    Remove,
+}
+
+/// Escribe las etiquetas y la portada (reescribe el archivo; el original
+/// queda como .bak). El archivo tiene que estar cerrado: ver `Core::release_file`.
+pub fn write_tags_cover(path: &Path, tags: &Tags, cover: &CoverEdit) -> Result<(), CoreError> {
+    let c = path_to_cstring(path).ok_or_else(|| CoreError("ruta inválida".to_owned()))?;
+    let raw = raw_tags(tags);
+    let (mode, image) = match cover {
+        CoverEdit::Keep => (0, None),
+        CoverEdit::Set(p) => (1, Some(path_to_cstring(p).ok_or_else(|| CoreError("ruta inválida".to_owned()))?)),
+        CoverEdit::Remove => (2, None),
+    };
+    let image_ptr = image.as_ref().map_or(std::ptr::null(), |i| i.as_ptr());
+    check(unsafe { capyro_tags_write_ex(c.as_ptr(), &raw, mode, image_ptr) })
+}
+
+/// ¿El formato de este archivo puede guardar portada? (WAV no)
+pub fn cover_supported(path: &Path) -> bool {
+    path_to_cstring(path).is_some_and(|c| unsafe { capyro_cover_supported(c.as_ptr()) })
+}
+
+/// Imagen RGBA suelta: (ancho, alto, píxeles).
+pub type Rgba = (u32, u32, Vec<u8>);
+
+fn take_image(img: &mut RawImage) -> Option<Rgba> {
+    if img.rgba.is_null() || img.width <= 0 || img.height <= 0 {
+        unsafe { capyro_core_free_image(img) };
+        return None;
+    }
+    let (w, h) = (img.width as usize, img.height as usize);
+    // SAFETY: el núcleo dejó width*height*4 bytes en `rgba` (hasta free_image).
+    let data = unsafe { std::slice::from_raw_parts(img.rgba, w * h * 4) }.to_vec();
+    unsafe { capyro_core_free_image(img) };
+    Some((w as u32, h as u32, data))
+}
+
+/// La portada del archivo (achicada a `max_side`), o None si no tiene.
+pub fn read_cover(path: &Path, max_side: i32) -> Option<Rgba> {
+    let c = path_to_cstring(path)?;
+    let mut img = RawImage { rgba: std::ptr::null_mut(), width: 0, height: 0 };
+    if unsafe { capyro_cover_read(c.as_ptr(), max_side, &mut img) } != 0 {
+        return None;
+    }
+    take_image(&mut img)
+}
+
+/// Una imagen cualquiera (achicada a `max_side`). Se puede llamar desde otro hilo.
+pub fn read_image(path: &Path, max_side: i32) -> Result<Rgba, CoreError> {
+    let c = path_to_cstring(path).ok_or_else(|| CoreError("ruta inválida".to_owned()))?;
+    let mut img = RawImage { rgba: std::ptr::null_mut(), width: 0, height: 0 };
+    check(unsafe { capyro_image_read(c.as_ptr(), max_side, &mut img) })?;
+    take_image(&mut img).ok_or_else(|| CoreError("la imagen está vacía".to_owned()))
 }
 
 fn carray_to_string(a: &[c_char]) -> String {

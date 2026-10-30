@@ -335,7 +335,7 @@ impl CapyroApp {
         let tabs = Rect::from_min_max(rect.min + vec2(8.0, 8.0), pos2(rect.right() - 8.0, rect.top() + 52.0));
         // debajo de las pestañas, a todo el ancho: el botón de Capyro Studio
         let studio_r = Rect::from_min_size(pos2(tabs.left(), tabs.bottom() + 6.0), vec2(tabs.width(), 32.0));
-        if super::studio::studio_button(ui, "capyro-studio-btn", studio_r, accent, self.studio.is_some()) {
+        if super::studio::studio_button(ui, "capyro-studio-btn", studio_r, accent, self.studio_open()) {
             self.open_studio(&ctx);
         }
         let tw = tabs.width() / DockTab::ALL.len() as f32;

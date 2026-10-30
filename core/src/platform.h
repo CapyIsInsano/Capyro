@@ -37,6 +37,9 @@ void   cp_sleep_ms(int ms);
 
 /* fopen con la ruta en UTF-8 (en Windows, fopen a secas no entiende acentos). */
 FILE  *cp_fopen(const char *utf8_path, const char *mode);
+/* rename y remove con rutas UTF-8 (mismo motivo). 0 = ok. */
+int    cp_rename(const char *from, const char *to);
+int    cp_remove(const char *utf8_path);
 
 /* Sistema operativo en el que corre Capyro (ver CapyroOsInfo). */
 struct CapyroOsInfo;

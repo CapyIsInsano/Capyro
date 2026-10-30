@@ -67,10 +67,15 @@ void dsp_clamp(CapyroAudioFx *fx) {
     if (isnan(fx->width))     fx->width = 1.0f;
 }
 
+/* Graves/medios/agudos en uso. Con el ecualizador de 15 bandas activado,
+ * el de 3 bandas no suena (uno u otro, no los dos). */
+static bool eq3_used(const CapyroAudioFx *fx) {
+    return !fx->eq15_on &&
+           (fabsf(fx->bass_db) >= 0.05f || fabsf(fx->mid_db) >= 0.05f || fabsf(fx->treble_db) >= 0.05f);
+}
+
 bool dsp_is_neutral(const CapyroAudioFx *fx) {
-    return fabsf(fx->bass_db) < 0.05f && fabsf(fx->mid_db) < 0.05f &&
-           fabsf(fx->treble_db) < 0.05f && fabsf(fx->width - 1.0f) < 0.005f && !fx->night &&
-           !eq15_used(fx);
+    return !eq3_used(fx) && fabsf(fx->width - 1.0f) < 0.005f && !fx->night && !eq15_used(fx);
 }
 
 /* --- coeficientes ---------------------------------------------------- */
@@ -161,9 +166,11 @@ void dsp_set(Dsp *d, const CapyroAudioFx *fx) {
     /* Margen: si alguna banda sube, se baja todo un poco antes de filtrar
      * para que no sature (el resto lo absorbe el limitador suave). */
     float boost = 0.0f;
-    if (d->fx.bass_db > boost)   boost = d->fx.bass_db;
-    if (d->fx.mid_db > boost)    boost = d->fx.mid_db;
-    if (d->fx.treble_db > boost) boost = d->fx.treble_db;
+    if (eq3_used(&d->fx)) {
+        if (d->fx.bass_db > boost)   boost = d->fx.bass_db;
+        if (d->fx.mid_db > boost)    boost = d->fx.mid_db;
+        if (d->fx.treble_db > boost) boost = d->fx.treble_db;
+    }
     if (eq15_used(&d->fx)) {
         for (int i = 0; i < CAPYRO_EQ15_BANDS; i++) {
             if (d->fx.eq15[i] > boost) boost = d->fx.eq15[i];
@@ -186,8 +193,7 @@ void dsp_process(Dsp *d, float *buf, size_t frames) {
     if (!d->active) {
         return;
     }
-    const bool eq    = fabsf(d->fx.bass_db) >= 0.05f || fabsf(d->fx.mid_db) >= 0.05f ||
-                       fabsf(d->fx.treble_db) >= 0.05f;
+    const bool eq    = eq3_used(&d->fx);
     const bool eq15  = eq15_used(&d->fx);
     const bool width = fabsf(d->fx.width - 1.0f) >= 0.005f;
     const float w    = d->fx.width;

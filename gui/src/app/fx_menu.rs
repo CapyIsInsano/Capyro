@@ -21,7 +21,9 @@ const PRESETS: [(&str, AudioFx); 5] = [
 ];
 
 fn same_sound(a: &AudioFx, b: &AudioFx) -> bool {
-    (a.bass_db - b.bass_db).abs() < 0.05
+    // con el ecualizador avanzado activado, el normal no suena: ningún preset "está puesto"
+    !a.eq15_on
+        && (a.bass_db - b.bass_db).abs() < 0.05
         && (a.mid_db - b.mid_db).abs() < 0.05
         && (a.treble_db - b.treble_db).abs() < 0.05
         && (a.width - b.width).abs() < 0.005
@@ -258,8 +260,9 @@ impl CapyroApp {
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(11.0) } else { regular(11.0) }, col);
             if chip.resp.clicked() {
-                // los presets no tocan el ecualizador de 15 bandas (eso es de Capyro Studio)
-                fx = AudioFx { enabled: true, eq15_on: fx.eq15_on, eq15: fx.eq15, ..*preset };
+                // un preset es del ecualizador normal: vuelve a él (las 15 bandas
+                // de Capyro Studio quedan guardadas, apagadas)
+                fx = AudioFx { enabled: true, eq15_on: false, eq15: fx.eq15, ..*preset };
                 fx_changed = true;
             }
         }
@@ -274,17 +277,25 @@ impl CapyroApp {
             ("treble", "Agudos", fx.treble_db, -12.0, 12.0, 0.0, 0.5, true),
             ("width", "Estéreo", fx.width, 0.0, 2.0, 1.0, 0.05, true),
         ];
+        // con el ecualizador avanzado (Capyro Studio) activado, el normal se apaga
+        let eq15 = fx.eq15_on;
+        let mut eq_body = body.clone();
+        if eq15 {
+            eq_body.multiply_opacity(0.3);
+        }
+        let eq_top = y;
         for (id, label, value, min, max, default, step, from_default) in specs {
             let text = match id {
                 "width" => fmt_width(value),
                 _ => fmt_db(value),
             };
+            let is_eq = id != "width";
             let out = self.fx_slider(
                 ui,
-                &body,
+                if is_eq { &eq_body } else { &body },
                 row(y),
                 SliderSpec { id, label, value, min, max, default, step, from_default, text },
-                interactive,
+                interactive && !(is_eq && eq15),
             );
             if out.changed {
                 match id {
@@ -296,6 +307,41 @@ impl CapyroApp {
                 fx_changed = true;
             }
             y += row_h;
+        }
+
+        if eq15 {
+            // aviso encima de graves/medios/agudos, con un botón para volver al normal
+            let area = Rect::from_min_max(pos2(x0, eq_top), pos2(x1, eq_top + 3.0 * row_h - 4.0));
+            let card = Rect::from_center_size(area.center(), vec2(area.width(), 58.0));
+            body.rect_filled(card, 10.0, BG_PANEL);
+            body.rect_stroke(card, 10.0, Stroke::new(1.0, accent.gamma_multiply(0.45)), StrokeKind::Inside);
+            body.text(
+                pos2(card.left() + 12.0, card.top() + 17.0),
+                Align2::LEFT_CENTER,
+                "Ecualizador avanzado activado",
+                bold(12.0),
+                TEXT,
+            );
+            body.text(
+                pos2(card.left() + 12.0, card.top() + 36.0),
+                Align2::LEFT_CENTER,
+                "Se ajusta en Capyro Studio",
+                regular(10.5),
+                TEXT_FAINT,
+            );
+            let g = painter.layout_no_wrap("Usar el normal".to_owned(), regular(11.0), TEXT);
+            let br = Rect::from_min_size(
+                pos2(card.right() - 12.0 - g.size().x - 18.0, card.center().y - 12.0),
+                vec2(g.size().x + 18.0, 24.0),
+            );
+            let b = animate_button(ui, Id::unique("capyro-fx-eq-normal"), br, interactive);
+            let brr = Rect::from_center_size(br.center(), br.size() * (1.0 - 0.06 * b.press));
+            body.rect_filled(brr, 12.0, Color32::from_white_alpha((10.0 + 16.0 * b.hover) as u8));
+            body.galley(brr.center() - g.size() / 2.0, g, b.tint(TEXT_DIM, TEXT));
+            if b.resp.clicked() {
+                fx.eq15_on = false;
+                fx_changed = true;
+            }
         }
 
         // tono: se aplica al soltar (cambiarlo vuelve a decodificar el audio)
@@ -439,8 +485,8 @@ impl CapyroApp {
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(fs) } else { regular(fs) }, col);
             if chip.resp.clicked() {
-                // los presets no tocan el ecualizador de 15 bandas (eso es de Capyro Studio)
-                fx = AudioFx { enabled: true, eq15_on: fx.eq15_on, eq15: fx.eq15, ..*preset };
+                // un preset es del ecualizador normal: vuelve a él
+                fx = AudioFx { enabled: true, eq15_on: false, eq15: fx.eq15, ..*preset };
                 fx_changed = true;
             }
         }

@@ -202,6 +202,19 @@ static void test_dsp(void) {
     double m_c = fx_gain_db(&mid, 1500.0, 0.05f), m_far = fx_gain_db(&mid, 60.0, 0.05f);
     CHECK(m_c - m_far > 7.5);
 
+    /* ecualizador de 15 bandas activado: el de 3 bandas no suena (uno u otro) */
+    CapyroAudioFx adv = bass;
+    adv.eq15_on = true;
+    dsp_set(&d, &adv);
+    sine(buf, FX_N, 50.0, 0.5f);
+    memcpy(copy, buf, sizeof(buf));
+    dsp_process(&d, buf, FX_N);
+    CHECK(memcmp(buf, copy, sizeof(buf)) == 0); /* graves +12 ignorados, 15 bandas planas */
+    adv.eq15[2] = 12.0f;                        /* banda de 63 Hz */
+    double a_low = fx_gain_db(&adv, 63.0, 0.05f), a_high = fx_gain_db(&adv, 5000.0, 0.05f);
+    printf("dsp 15 bandas (63 Hz +12, graves +12 ignorados): 63 Hz %+.1f dB, 5 kHz %+.1f dB\n", a_low, a_high);
+    CHECK(a_low - a_high > 10.0 && a_low - a_high < 13.0);
+
     /* estéreo 0 = mono: izquierda == derecha */
     CapyroAudioFx mono = neutral;
     mono.width = 0.0f;

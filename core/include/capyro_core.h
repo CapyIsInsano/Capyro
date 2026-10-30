@@ -324,4 +324,30 @@ void capyro_core_release_file(CapyroCore *core);
 int capyro_tags_read(const char *path, CapyroTags *out);
 int capyro_tags_write(const char *path, const CapyroTags *tags);
 
+/* ---- portada (Capyro Studio) --------------------------------------------
+ * Al guardar las etiquetas la portada se deja como está, se cambia por una
+ * imagen (jpg, png, webp, bmp...) o se quita. La imagen nueva se guarda
+ * como JPEG de 1200 px como mucho (si ya es un JPG o PNG chico, tal cual).
+ * Se puede en MP3, FLAC, M4A/MP4 y OGG/Opus; en WAV no. */
+typedef enum {
+    CAPYRO_COVER_KEEP = 0,
+    CAPYRO_COVER_SET = 1,
+    CAPYRO_COVER_REMOVE = 2,
+} CapyroCoverMode;
+
+/* Como capyro_tags_write, y además la portada (`cover_image` solo se usa con
+ * CAPYRO_COVER_SET). */
+int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mode, const char *cover_image);
+
+/* ¿El formato de este archivo puede guardar una portada? */
+bool capyro_cover_supported(const char *path);
+
+/* La portada del archivo en RGBA (CapyroImage, se libera con
+ * capyro_core_free_image), achicada para que su lado más largo no pase de
+ * `max_side` (nunca se agranda). CAPYRO_ERR_NOT_FOUND si no tiene. */
+int capyro_cover_read(const char *path, int max_side, CapyroImage *out);
+
+/* Una imagen cualquiera (para mostrar la portada nueva antes de guardar). */
+int capyro_image_read(const char *path, int max_side, CapyroImage *out);
+
 #endif /* CAPYRO_CORE_H */

@@ -277,7 +277,7 @@ pub struct CapyroApp {
     layout_since: f64,
     /// Pestaña y scroll de la burbuja de funciones de la vista de música.
     dock_tab: music::DockTab,
-    /// Capyro Studio: solo existe mientras la ventana está abierta.
+    /// Capyro Studio: solo existe mientras está abierto (al cerrarlo se suelta todo).
     studio: Option<studio::Studio>,
     dock_scroll: [f32; 3],
     /// Videos: la barra de abajo escondida, y cuándo se movió el mouse por
@@ -667,6 +667,7 @@ impl CapyroApp {
             self.show_playlist,
             self.show_offer,
             fullscreen,
+            self.studio_open(),
         ]
         .iter()
         .enumerate()
@@ -1253,7 +1254,9 @@ impl CapyroApp {
             ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect())
         };
         if !dropped.is_empty() {
-            self.add_paths(ctx, dropped, true);
+            // con Capyro Studio abierto se agregan a la lista sin cambiar de canción
+            let play_now = !self.studio_open();
+            self.add_paths(ctx, dropped, play_now);
         }
 
         // Editor de atajos esperando una tecla: se la lleva toda.
@@ -1280,6 +1283,19 @@ impl CapyroApp {
             ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
         }
         for action in fired {
+            // con Capyro Studio abierto, nada que abra otro menú o cambie de archivo
+            let blocked = matches!(
+                action,
+                Action::TogglePlaylist
+                    | Action::OpenFiles
+                    | Action::ToggleEffects
+                    | Action::NextFile
+                    | Action::PrevFile
+                    | Action::ToggleBar
+            );
+            if blocked && self.studio_open() {
+                continue;
+            }
             self.run_action(ctx, action);
         }
 
@@ -3699,6 +3715,8 @@ impl eframe::App for CapyroApp {
         self.draw_toast(ui, toast_area);
         self.draw_update_banner(ui, notice_area);
         self.draw_update_offer(ui, notice_area);
+        // Capyro Studio: un panel encima de todo (si está abierto)
+        self.studio_overlay(ui, full);
         if !square {
             Self::resize_handles(ui, full);
         }
@@ -3706,8 +3724,6 @@ impl eframe::App for CapyroApp {
         crate::alto::paint_ripples(&ctx, ui.painter(), self.cfg.accent);
         // el tutorial va encima de todo y se queda con el mouse y el teclado
         self.tutorial_overlay(ui, full);
-        // Capyro Studio: su propia ventana (si está abierta)
-        self.studio_window(&ctx);
 
         self.play_click_if_needed(&ctx);
 

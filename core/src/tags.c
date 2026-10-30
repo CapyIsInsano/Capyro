@@ -6,11 +6,19 @@
  * recodificación, así que no pierde calidad y es rápido) con las etiquetas
  * nuevas. El original queda como "<archivo>.bak" (y los anteriores como .bak2,
  * .bak3...) y el nuevo toma su nombre.
+ *
+ * Portada: se deja, se cambia o se quita (ver cover.c). En MP3, FLAC y M4A es
+ * una pista de imagen ("attached pic"); en Ogg, la etiqueta
+ * METADATA_BLOCK_PICTURE del stream de audio.
  */
 #include "capyro_core.h"
+#include "cover.h"
+#include "platform.h"
 
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/dict.h>
+#include <libavutil/mem.h>
 
 #include <stddef.h>
 #include <stdio.h>
@@ -127,11 +135,11 @@ static void apply_tags(AVDictionary **d, const CapyroTags *t) {
 }
 
 static void remove_if_exists(const char *path) {
-    remove(path);
+    cp_remove(path);
 }
 
 static bool file_exists(const char *path) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = cp_fopen(path, "rb");
     if (!f) {
         return false;
     }
@@ -148,13 +156,54 @@ static bool free_backup_name(const char *path, char *out, size_t size) {
     return !file_exists(out);
 }
 
+/* Saca todas las etiquetas METADATA_BLOCK_PICTURE del diccionario. */
+static void drop_ogg_pictures(AVDictionary **d) {
+    while (*d && av_dict_get(*d, "METADATA_BLOCK_PICTURE", NULL, 0)) {
+        av_dict_set(d, "METADATA_BLOCK_PICTURE", NULL, 0);
+    }
+}
+
+static bool is_attached_pic(const AVStream *st) {
+    return st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && (st->disposition & AV_DISPOSITION_ATTACHED_PIC);
+}
+
 int capyro_tags_write(const char *path, const CapyroTags *tags) {
+    return capyro_tags_write_ex(path, tags, CAPYRO_COVER_KEEP, NULL);
+}
+
+int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mode, const char *cover_image) {
     if (!path || !path[0] || !tags) {
         return CAPYRO_ERR_INVALID_ARG;
     }
+    if (cover_mode != CAPYRO_COVER_KEEP && cover_mode != CAPYRO_COVER_SET && cover_mode != CAPYRO_COVER_REMOVE) {
+        return CAPYRO_ERR_INVALID_ARG;
+    }
+    if (cover_mode == CAPYRO_COVER_SET && (!cover_image || !cover_image[0])) {
+        return CAPYRO_ERR_INVALID_ARG;
+    }
+    const AVOutputFormat *fmt = av_guess_format(NULL, path, NULL);
+    if (!fmt) {
+        return CAPYRO_ERR_UNSUPPORTED;
+    }
+    if (cover_mode != CAPYRO_COVER_KEEP && !cover_muxer_ok(fmt)) {
+        return CAPYRO_ERR_UNSUPPORTED; /* WAV y compañía: no guardan portada */
+    }
+    const bool ogg = cover_muxer_is_ogg(fmt);
+
+    /* la imagen nueva se prepara antes de tocar nada */
+    CoverData cover;
+    memset(&cover, 0, sizeof(cover));
+    if (cover_mode == CAPYRO_COVER_SET) {
+        int e = cover_prepare(cover_image, &cover);
+        if (e != CAPYRO_OK) {
+            return e;
+        }
+    }
+
     AVFormatContext *in = NULL;
     int err = open_input(path, &in);
     if (err != CAPYRO_OK) {
+        cover_data_free(&cover);
         return err;
     }
 
@@ -163,6 +212,10 @@ int capyro_tags_write(const char *path, const CapyroTags *tags) {
     {
         const char *dot = strrchr(path, '.');
         const char *slash = strrchr(path, '/');
+        const char *bslash = strrchr(path, '\\');
+        if (bslash && (!slash || bslash > slash)) {
+            slash = bslash;
+        }
         if (dot && (!slash || dot > slash)) {
             snprintf(tmp, sizeof(tmp), "%.*s.capyro-tmp%s", (int)(dot - path), path, dot);
         } else {
@@ -170,16 +223,14 @@ int capyro_tags_write(const char *path, const CapyroTags *tags) {
         }
     }
 
-    const AVOutputFormat *fmt = av_guess_format(NULL, path, NULL);
     AVFormatContext *out = NULL;
     AVPacket *pkt = NULL;
     int *map = NULL;
     int ret = CAPYRO_ERR_WRITE;
+    int cover_index = -1;          /* pista nueva de la portada (no Ogg) */
+    AVStream *ogg_audio = NULL;    /* Ogg: el stream que lleva la etiqueta de la portada */
+    const AVStream *old_pic = NULL; /* Ogg: la portada que ya tenía (si se deja) */
 
-    if (!fmt) {
-        ret = CAPYRO_ERR_UNSUPPORTED;
-        goto done;
-    }
     /* la ruta de salida va también: algunos muxers miran la extensión */
     if (avformat_alloc_output_context2(&out, (AVOutputFormat *)fmt, NULL, tmp) < 0) {
         ret = CAPYRO_ERR_UNSUPPORTED;
@@ -200,6 +251,18 @@ int capyro_tags_write(const char *path, const CapyroTags *tags) {
             si->codecpar->codec_type != AVMEDIA_TYPE_ATTACHMENT) {
             continue;
         }
+        if (is_attached_pic(si)) {
+            /* la portada vieja: se copia solo si se deja (y en Ogg va como etiqueta) */
+            if (cover_mode != CAPYRO_COVER_KEEP) {
+                continue;
+            }
+            if (ogg) {
+                if (!old_pic && si->attached_pic.size > 0) {
+                    old_pic = si;
+                }
+                continue;
+            }
+        }
         AVStream *so = avformat_new_stream(out, NULL);
         if (!so || avcodec_parameters_copy(so->codecpar, si->codecpar) < 0) {
             ret = CAPYRO_ERR_NO_MEMORY;
@@ -212,11 +275,72 @@ int capyro_tags_write(const char *path, const CapyroTags *tags) {
         if (si->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
             /* en Ogg/WebM las etiquetas viven en el stream de audio */
             apply_tags(&so->metadata, tags);
+            if (!ogg_audio) {
+                ogg_audio = so;
+            }
         }
         map[i] = (int)so->index;
     }
     av_dict_copy(&out->metadata, in->metadata, 0);
     apply_tags(&out->metadata, tags);
+
+    if (ogg) {
+        /* la portada de Ogg es una etiqueta: se arma de nuevo (o no). Si
+         * FFmpeg no la mostró como imagen, se conserva la etiqueta tal cual. */
+        char *keep_raw = NULL;
+        if (cover_mode == CAPYRO_COVER_KEEP && !old_pic) {
+            const char *v = dict_value(in->metadata, "METADATA_BLOCK_PICTURE");
+            for (unsigned i = 0; !v && i < in->nb_streams; i++) {
+                v = dict_value(in->streams[i]->metadata, "METADATA_BLOCK_PICTURE");
+            }
+            keep_raw = v ? av_strdup(v) : NULL;
+        }
+        drop_ogg_pictures(&out->metadata);
+        for (unsigned i = 0; i < out->nb_streams; i++) {
+            drop_ogg_pictures(&out->streams[i]->metadata);
+        }
+        char *b64 = NULL;
+        if (cover_mode == CAPYRO_COVER_SET) {
+            b64 = cover_ogg_picture(cover.data, cover.size, cover.mime, cover.width, cover.height);
+            if (!b64) {
+                ret = CAPYRO_ERR_NO_MEMORY;
+                goto done;
+            }
+        } else if (old_pic) {
+            const char *mime = cover_mime(old_pic->codecpar->codec_id);
+            if (mime) {
+                b64 = cover_ogg_picture(old_pic->attached_pic.data, (size_t)old_pic->attached_pic.size, mime,
+                                        old_pic->codecpar->width, old_pic->codecpar->height);
+            }
+        } else if (keep_raw) {
+            b64 = keep_raw;
+            keep_raw = NULL;
+        }
+        av_free(keep_raw);
+        if (b64) {
+            if (ogg_audio) {
+                av_dict_set(&ogg_audio->metadata, "METADATA_BLOCK_PICTURE", b64, AV_DICT_DONT_STRDUP_VAL);
+            } else {
+                av_free(b64);
+            }
+        }
+    } else if (cover_mode == CAPYRO_COVER_SET) {
+        /* pista de imagen nueva, marcada como portada */
+        AVStream *so = avformat_new_stream(out, NULL);
+        if (!so) {
+            ret = CAPYRO_ERR_NO_MEMORY;
+            goto done;
+        }
+        so->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+        so->codecpar->codec_id = (enum AVCodecID)cover.codec_id;
+        so->codecpar->width = cover.width;
+        so->codecpar->height = cover.height;
+        so->time_base = (AVRational){ 1, 90000 };
+        so->disposition = AV_DISPOSITION_ATTACHED_PIC;
+        /* el muxer de MP3 saca de acá el tipo de imagen (APIC) */
+        av_dict_set(&so->metadata, "comment", "Cover (front)", 0);
+        cover_index = so->index;
+    }
 
     if (avio_open(&out->pb, tmp, AVIO_FLAG_WRITE) < 0) {
         ret = CAPYRO_ERR_WRITE;
@@ -225,6 +349,20 @@ int capyro_tags_write(const char *path, const CapyroTags *tags) {
     if (avformat_write_header(out, NULL) < 0) {
         ret = CAPYRO_ERR_WRITE;
         goto done;
+    }
+    if (cover_index >= 0) {
+        if (av_new_packet(pkt, (int)cover.size) < 0) {
+            ret = CAPYRO_ERR_NO_MEMORY;
+            goto done;
+        }
+        memcpy(pkt->data, cover.data, cover.size);
+        pkt->stream_index = cover_index;
+        pkt->pts = pkt->dts = 0;
+        pkt->flags |= AV_PKT_FLAG_KEY;
+        if (av_interleaved_write_frame(out, pkt) < 0) {
+            ret = CAPYRO_ERR_WRITE;
+            goto done;
+        }
     }
     while (av_read_frame(in, pkt) >= 0) {
         int idx = pkt->stream_index;
@@ -257,6 +395,7 @@ done:
     av_packet_free(&pkt);
     free(map);
     avformat_close_input(&in);
+    cover_data_free(&cover);
 
     if (ret != CAPYRO_OK) {
         remove_if_exists(tmp);
@@ -270,12 +409,12 @@ done:
         remove_if_exists(tmp);
         return CAPYRO_ERR_WRITE;
     }
-    if (rename(path, bak) != 0) {
+    if (cp_rename(path, bak) != 0) {
         remove_if_exists(tmp);
         return CAPYRO_ERR_WRITE;
     }
-    if (rename(tmp, path) != 0) {
-        rename(bak, path);
+    if (cp_rename(tmp, path) != 0) {
+        cp_rename(bak, path);
         remove_if_exists(tmp);
         return CAPYRO_ERR_WRITE;
     }

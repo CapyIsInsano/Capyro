@@ -28,9 +28,10 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.3.3:** **Capyro Studio**, una ventana aparte (botón grande en ⓘ) para
-> **editar las etiquetas** de un audio, con un **ecualizador de 15 bandas** y 10 perfiles, y
-> una **vista previa** de un tramo con inicio y fin editables. Cerrada, no ocupa memoria.
+> **Novedades de la v0.3.3:** **Capyro Studio**, un panel encima de la ventana (botón grande en
+> la burbuja de funciones) para **cambiar la portada** y **editar las etiquetas** de un audio,
+> con un **ecualizador de 15 bandas** y 10 perfiles, y una **vista previa** de un tramo.
+> Respeta los modos de rendimiento y, cerrado, no ocupa memoria.
 >
 > **De la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
 > **vista de música**: la carátula grande al medio con título, artista y álbum, los controles,

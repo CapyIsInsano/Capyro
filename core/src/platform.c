@@ -91,6 +91,22 @@ FILE *cp_fopen(const char *utf8_path, const char *mode) {
     return f;
 }
 
+int cp_rename(const char *from, const char *to) {
+    wchar_t *wf = utf8_to_wide(from);
+    wchar_t *wt = utf8_to_wide(to);
+    int r = (wf && wt) ? _wrename(wf, wt) : -1;
+    free(wf);
+    free(wt);
+    return r;
+}
+
+int cp_remove(const char *utf8_path) {
+    wchar_t *wp = utf8_to_wide(utf8_path);
+    int r = wp ? _wremove(wp) : -1;
+    free(wp);
+    return r;
+}
+
 typedef LONG(WINAPI *RtlGetVersionFn)(OSVERSIONINFOW *);
 
 void cp_os_info(CapyroOsInfo *out) {
@@ -180,6 +196,14 @@ void cp_sleep_ms(int ms) {
 
 FILE *cp_fopen(const char *utf8_path, const char *mode) {
     return fopen(utf8_path, mode); /* en Linux las rutas ya son bytes UTF-8 */
+}
+
+int cp_rename(const char *from, const char *to) {
+    return rename(from, to);
+}
+
+int cp_remove(const char *utf8_path) {
+    return remove(utf8_path);
 }
 
 void cp_os_info(CapyroOsInfo *out) {
