@@ -251,6 +251,8 @@ if(WIN32)
 else()
     # Linux: binario, config de ejemplo, .desktop e íconos. Nada de Windows.
     install(TARGETS capyro RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # El desinstalador (el botón "Desinstalar Capyro" de ⓘ lo corre): junto al binario
+    install(PROGRAMS packaging/capyro-uninstall DESTINATION ${CMAKE_INSTALL_BINDIR})
     install(FILES ${CAPYRO_INSTALLED_CONFIG} DESTINATION ${CMAKE_INSTALL_DATADIR}/capyro)
     # El lanzador con la ruta completa del ejecutable: así "Abrir con…" anda
     # aunque la carpeta no esté en el PATH de la sesión gráfica.

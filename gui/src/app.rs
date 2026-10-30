@@ -373,6 +373,8 @@ pub struct CapyroApp {
     pl_rename: Option<(usize, String, bool)>,
     /// Tacho tocado una vez: (playlist, cuándo). El segundo toque borra.
     pl_delete_armed: Option<(usize, f64)>,
+    /// "Desinstalar Capyro": primer clic (armado) y cuándo; el segundo confirma.
+    uninstall_armed: Option<f64>,
     /// Editor de atajos (⚙ → Editar configuración).
     show_keys: bool,
     keys_capture: Option<Action>,
@@ -530,6 +532,7 @@ impl CapyroApp {
             pl_popup: None,
             pl_rename: None,
             pl_delete_armed: None,
+            uninstall_armed: None,
             show_keys: false,
             keys_capture: None,
             keys_adding: false,
@@ -2302,8 +2305,8 @@ impl CapyroApp {
         let accent = self.cfg.accent;
         let width = dock.map_or(312.0, |d| d.width());
         let inner_w = width - 28.0;
-        // (encabezado 64 + botón de formatos 36 + actualizaciones y pie 88)
-        let base_h = 188.0;
+        // (encabezado 64 + botón de formatos 36 + actualizaciones 54 + desinstalar 36 + pie 34)
+        let base_h = 224.0;
 
         // --- resúmenes (acordeón): se calcula antes para saber el alto total ---
         // Cada formato tiene su propia animación; como solo uno puede estar
@@ -2533,6 +2536,9 @@ impl CapyroApp {
         let upd_top = region.bottom() + 2.0;
         painter.line_segment([pos2(x0, upd_top), pos2(x1, upd_top)], Stroke::new(1.0, Color32::from_white_alpha(14)));
         self.update_row(ui, &painter, Rect::from_min_max(pos2(x0 - 6.0, upd_top + 6.0), pos2(x1 + 6.0, upd_top + 48.0)), interactive);
+        // desinstalar (abajo de actualizaciones, arriba del pie)
+        let un_row = Rect::from_min_max(pos2(x0 - 6.0, upd_top + 50.0), pos2(x1 + 6.0, upd_top + 84.0));
+        self.uninstall_row(ui, &painter, un_row, interactive);
 
         // pie: backend de audio y licencia
         let backend = self.core.audio_backend();
@@ -2870,6 +2876,49 @@ impl CapyroApp {
     }
 
     /// Fila "Buscar actualizaciones" del menú ⓘ, con su progreso y resultado.
+    /// Botón "Desinstalar Capyro" del menú ⓘ. El primer clic lo arma (dice
+    /// "Tocá otra vez"); el segundo, dentro de 4 s, abre el desinstalador
+    /// de este sistema y cierra Capyro.
+    fn uninstall_row(&mut self, ui: &mut Ui, painter: &egui::Painter, row: Rect, interactive: bool) {
+        let ctx = ui.ctx().clone();
+        let now = ctx.input(|i| i.time);
+        let armed = self.uninstall_armed.is_some_and(|t0| now - t0 < 4.0);
+        let btn = animate_button(ui, Id::unique("capyro-uninstall-row"), row, interactive);
+        let tint = if armed { theme::ERROR } else { TEXT_DIM };
+        if armed {
+            painter.rect_filled(row, 8.0, theme::ERROR.gamma_multiply(0.14));
+        } else if btn.hover > 0.001 || btn.press > 0.001 {
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * btn.hover + 10.0 * btn.press) as u8));
+        }
+        let cy = row.center().y;
+        let x0 = row.left() + 6.0;
+        icons::trash(painter, pos2(x0 + 8.0, cy), 13.0, tint);
+        let label = if armed { "Tocá otra vez para desinstalar" } else { "Desinstalar Capyro" };
+        painter.text(pos2(x0 + 26.0, cy), Align2::LEFT_CENTER, label, bold(12.5), if armed { theme::ERROR } else { TEXT });
+        if btn.hover > 0.5 {
+            ctx.set_cursor_icon(CursorIcon::PointingHand);
+        }
+        if armed {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        let btn_resp = btn.resp.on_hover_text(if cfg!(windows) {
+            "Abre el desinstalador de Windows (el mismo de Aplicaciones instaladas)"
+        } else {
+            "Abre el desinstalador de Capyro (capyro-uninstall, junto al programa)"
+        });
+        if btn_resp.clicked() {
+            if armed {
+                self.uninstall_armed = None;
+                match crate::uninstall::launch() {
+                    Ok(()) => ctx.send_viewport_cmd(ViewportCommand::Close),
+                    Err(e) => self.toast(&ctx, e, true),
+                }
+            } else {
+                self.uninstall_armed = Some(now);
+            }
+        }
+    }
+
     fn update_row(&mut self, ui: &mut Ui, painter: &egui::Painter, row: Rect, interactive: bool) {
         let ctx = ui.ctx().clone();
         let accent = self.cfg.accent;

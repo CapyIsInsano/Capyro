@@ -15,6 +15,7 @@ mod playlists;
 mod render;
 mod formats;
 mod session;
+mod uninstall;
 mod updater;
 mod perf;
 mod videoinfo;
