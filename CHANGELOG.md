@@ -23,6 +23,13 @@
   - **Es uno u otro**: con el avanzado activado, el **ecualizador normal** (graves, medios y agudos) se apaga; en Efectos de audio sus barras quedan grises con un aviso y un botón "Usar el normal". Elegir un preset del menú de efectos también vuelve al normal.
 - **Vista previa del tramo**: una barra con dos manijas para elegir el **inicio** y el **fin** (doble clic: todo el tema), o "Inicio aquí" / "Fin aquí" con la posición actual. El botón ▶ toca solo ese pedazo y se pausa al llegar al fin, o repite si activás "Repetir". El archivo no cambia.
 - Con Capyro Studio abierto, los atajos que abren otros menús o cambian de canción no hacen nada, y un archivo que arrastrás se agrega a la lista sin cambiar lo que suena.
+- **Mucho menos procesador en Wine** (la versión de Windows corriendo en Linux): sin hacer nada se comía casi un núcleo entero. Era un error de Wine: winit (lo que maneja la ventana) pide cada redibujo de una forma que el servidor de Wine cuenta pero nunca descuenta, así que el bucle de eventos quedaba girando en vacío miles de veces por segundo. Ahora, solo en Wine, Capyro pide esos redibujos de otra forma que Wine sí descuenta. Además, en Wine dibuja con **OpenGL primero** (va directo a la placa de video de Linux; Direct3D 12 necesita Vulkan, que las placas viejas como la de una ThinkPad X220 no tienen). Medido en Wine, en una PC de 2 núcleos que dibuja con el procesador:
+  - sin nada abierto: de 86 % a **0 %**;
+  - con música: de 122 % a **34 %**;
+  - con un video 1080p: de 147 % a **96 %**.
+- **Sin placa de video** (cuando la ventana se dibuja con el procesador: llvmpipe, "Basic Render Driver"...), lo que se mueve solo (los milisegundos, el visualizador, la barra) se redibuja a la mitad: 15 veces por segundo (10 en Bajo). Con música, de 60 % a **30 %** (19 % en Bajo). Y los cuadros de video se pintan con un filtro más barato, que se ve igual porque ya vienen del tamaño justo.
+- Con un video, el contador de milisegundos ya no pide redibujos aparte (se actualiza con los cuadros del video).
+- Al arrancar, Capyro dice en la terminal con qué dibuja ("capyro: dibujo con ..."): sirve para saber si está usando la placa de video.
 
 ## v0.3.2-alpha · Se adapta a lo que abrís
 

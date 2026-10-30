@@ -12,7 +12,7 @@
 //! El modo vive en un atómico global para que cualquier parte de la interfaz
 //! lo pueda consultar sin pasar la configuración de mano en mano.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 use eframe::egui::{self, pos2, Color32, Pos2, Rect};
@@ -104,9 +104,31 @@ pub fn clock(now: f64) -> f64 {
 const REST: f64 = std::f64::consts::PI / 6.0;
 
 /// Cada cuánto se redibuja lo que se mueve solo (barra de progreso, ms,
-/// visualizador): 30 por segundo; en Bajo, 20.
+/// visualizador): 30 por segundo; en Bajo, 20. Si la ventana se dibuja con el
+/// procesador (sin placa de video), la mitad: cada cuadro cuesta mucho.
 pub fn ambient() -> Duration {
-    if animations() { crate::app::FRAME_AMBIENT } else { Duration::from_millis(50) }
+    let base = if animations() { crate::app::FRAME_AMBIENT } else { Duration::from_millis(50) };
+    if software() { base * 2 } else { base }
+}
+
+static SOFTWARE: AtomicBool = AtomicBool::new(false);
+
+/// La ventana se dibuja con el procesador: llvmpipe (Mesa sin placa de video),
+/// el "GDI Generic" o "Basic Render Driver" de Windows, SwiftShader, lavapipe...
+pub fn set_software(on: bool) {
+    SOFTWARE.store(on, Ordering::Relaxed);
+}
+
+pub fn software() -> bool {
+    SOFTWARE.load(Ordering::Relaxed)
+}
+
+/// ¿El nombre del renderizador es uno que dibuja con el procesador?
+pub fn is_software_renderer(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    ["llvmpipe", "softpipe", "software rasterizer", "swrast", "gdi generic", "basic render", "swiftshader", "lavapipe", "(cpu)"]
+        .iter()
+        .any(|k| n.contains(k))
 }
 
 /* ------------------------------------------------------------------------ */
@@ -380,6 +402,15 @@ fn premul(r: f32, g: f32, b: f32, alpha: f32) -> Color32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dibujo_por_software() {
+        assert!(is_software_renderer("llvmpipe (LLVM 17.0.6, 256 bits)"));
+        assert!(is_software_renderer("Microsoft Basic Render Driver"));
+        assert!(is_software_renderer("GDI Generic"));
+        assert!(!is_software_renderer("Mesa Intel(R) HD Graphics 3000 (SNB GT2)"));
+        assert!(!is_software_renderer("NVIDIA GeForce GTX 1050/PCIe/SSE2"));
+    }
 
     #[test]
     fn nombres() {

@@ -20,6 +20,7 @@ mod updater;
 mod perf;
 mod videoinfo;
 mod viz;
+mod wine;
 mod icons;
 mod theme;
 
@@ -52,6 +53,8 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
     let core = unsafe { ffi::Core::from_raw(core) };
     let cfg = config::Config::load();
     eprintln!("capyro {} · config: {} · backend: {:?}", ffi::version(), cfg.source, cfg.backend);
+    // en Wine: que el bucle de eventos no gire en vacío (ver wine.rs)
+    wine::install();
 
     // OpenGL o Direct3D (ver render.rs): el que ande
     let renderers = render::order(cfg.renderer);

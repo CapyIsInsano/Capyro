@@ -397,6 +397,22 @@ fn decode_png(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     Some((w, h, img.into_raw()))
 }
 
+/// Nombre de lo que dibuja la ventana (la placa de video, o "llvmpipe" si es el procesador).
+fn renderer_name(cc: &eframe::CreationContext<'_>) -> String {
+    if let Some(gl) = cc.gl.as_ref() {
+        use eframe::glow::HasContext as _;
+        // SAFETY: el contexto de OpenGL está activo mientras se crea la app.
+        return unsafe { gl.get_parameter_string(eframe::glow::RENDERER) };
+    }
+    #[cfg(windows)]
+    if let Some(rs) = cc.wgpu_render_state.as_ref() {
+        let info = rs.adapter.get_info();
+        let cpu = info.device_type == eframe::wgpu::DeviceType::Cpu;
+        return format!("{}{}", info.name, if cpu { " (cpu)" } else { "" });
+    }
+    String::new()
+}
+
 pub fn window_icon() -> Option<egui::IconData> {
     let (width, height, rgba) = decode_png(ICON_PNG)?;
     Some(egui::IconData { rgba, width, height })
@@ -438,6 +454,14 @@ impl CapyroApp {
         theme::install_fonts(&cc.egui_ctx);
         theme::apply_visuals(&cc.egui_ctx, cfg.accent);
         apply_performance(&cc.egui_ctx, cfg.performance);
+        // sin placa de video (se dibuja con el procesador): redibujar menos seguido
+        let gpu = renderer_name(cc);
+        crate::perf::set_software(crate::perf::is_software_renderer(&gpu));
+        eprintln!(
+            "capyro: dibujo con {}{}",
+            if gpu.is_empty() { "?" } else { gpu.as_str() },
+            if crate::perf::software() { " (sin placa de video: menos cuadros por segundo)" } else { "" }
+        );
 
         let logo = decode_png(LOGO_PNG).map(|(w, h, rgba)| {
             let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
@@ -1362,10 +1386,18 @@ impl CapyroApp {
                 } else {
                     self.fps_meter.reset();
                 }
+                // los cuadros de video ya vienen del tamaño en que se ven (1:1): sin placa
+                // de video, el filtro "más cercano" se ve igual y cuesta la cuarta parte
+                // (las carátulas se animan y se escalan: ahí, el suave)
+                let opts = if crate::perf::software() && self.core.media_kind() == MediaKind::Video {
+                    TextureOptions::NEAREST
+                } else {
+                    TextureOptions::LINEAR
+                };
                 match &mut self.video_tex {
-                    Some(tex) => tex.set(img, TextureOptions::LINEAR),
+                    Some(tex) => tex.set(img, opts),
                     None => {
-                        self.video_tex = Some(ctx.load_texture("capyro-video", img, TextureOptions::LINEAR));
+                        self.video_tex = Some(ctx.load_texture("capyro-video", img, opts));
                     }
                 }
                 self.video_serial = serial;
@@ -1720,8 +1752,10 @@ impl CapyroApp {
             let x = r.left() + 16.0;
             p.galley(pos2(x, r.center().y - ng.size().y / 2.0), ng, Color32::WHITE);
             p.galley(pos2(x + nw + 5.0, r.center().y - ug.size().y / 2.0), ug, TEXT_DIM);
-            if self.core.state() == State::Playing {
-                // que corran los números: 30 por segundo alcanzan para verlos correr
+            // que corran los números: 30 por segundo alcanzan para verlos correr
+            // (con un video no hace falta: ya se redibuja con cada cuadro, y pedir
+            // aparte suma cuadros de más que no coinciden con los del video)
+            if self.core.state() == State::Playing && self.core.media_kind() != MediaKind::Video {
                 ui.ctx().request_repaint_after(crate::perf::ambient());
             }
         }
@@ -3515,7 +3549,7 @@ impl eframe::App for CapyroApp {
             self.viz.update(self.core.audio_rate() as f32, dt, playing && got == n);
             if !self.viz.is_silent() {
                 // las barras se suavizan solas (viz.rs): a 30 cuadros se ven igual de fluidas
-                ctx.request_repaint_after(FRAME_AMBIENT);
+                ctx.request_repaint_after(crate::perf::ambient());
             }
         }
 
@@ -3591,7 +3625,7 @@ impl eframe::App for CapyroApp {
         // Alto: la luz del video se derrama por toda la ventana
         if self.cfg.performance == crate::perf::Mode::Alto {
             if self.ambient.step(now) {
-                ctx.request_repaint_after(FRAME_AMBIENT);
+                ctx.request_repaint_after(crate::perf::ambient());
             }
             let accent = self.cfg.accent;
             let (focused, pointer) = ctx.input(|i| (i.focused, i.pointer.hover_pos()));

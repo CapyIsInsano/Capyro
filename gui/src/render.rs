@@ -2,7 +2,8 @@
 //!
 //! Un solo Capyro para todas las PC de Windows: en "auto" prueba primero el
 //! que anduvo la última vez (queda anotado en `renderer.txt`, en la carpeta
-//! de estado) y, si no hay, Direct3D. Si un modo da error al arrancar se pasa
+//! de estado) y, si no hay, Direct3D. En Wine, siempre OpenGL primero (ver
+//! [`crate::wine`]). Si un modo da error al arrancar se pasa
 //! al otro en el momento; y si no da error pero la ventana no llega a
 //! dibujarse (pasa con algunos drivers de OpenGL), un vigilante vuelve a
 //! abrir Capyro con el otro modo.
@@ -55,6 +56,10 @@ pub fn order(cfg_pref: Pref) -> Vec<eframe::Renderer> {
         match env.unwrap_or(cfg_pref) {
             Pref::OpenGl => vec![Glow],
             Pref::Direct3d => vec![Wgpu],
+            // En Wine, OpenGL va directo a la placa de video de Linux; Direct3D 12
+            // necesita Vulkan (las placas viejas, como la de una X220, no tienen) y
+            // si no hay, Wine dibuja con el procesador.
+            Pref::Auto if crate::wine::is_wine() => vec![Glow, Wgpu],
             Pref::Auto => match remembered() {
                 Some(Glow) => vec![Glow, Wgpu],
                 _ => vec![Wgpu, Glow],
