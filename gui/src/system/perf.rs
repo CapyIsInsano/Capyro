@@ -7,7 +7,7 @@
 //! - **Alto**: suma la iluminación cinematográfica ([`Ambient`]): los colores
 //!   del video (o de la carátula) se derraman por toda la ventana; y además
 //!   el fondo animado, los brillos, las transiciones y las partículas de
-//!   [`crate::alto`].
+//!   [`crate::ui::alto`].
 //!
 //! El modo vive en un atómico global para que cualquier parte de la interfaz
 //! lo pueda consultar sin pasar la configuración de mano en mano.
@@ -310,7 +310,7 @@ impl Ambient {
         strength: f32,
         reach: f32,
         under: Option<Rect>,
-        base: Option<&crate::alto::Gradient>,
+        base: Option<&crate::ui::alto::Gradient>,
     ) {
         let Some(src) = self.source else { return };
         if !self.visible() || area.width() < 4.0 || area.height() < 4.0 {
@@ -347,7 +347,7 @@ impl Ambient {
                         let a = alpha.clamp(0.0, 1.0);
                         let light = [r / 255.0 * a, g / 255.0 * a, b / 255.0 * a, a];
                         let under_c = g0.at(p);
-                        crate::alto::to_color(std::array::from_fn(|k| light[k] + under_c[k] * (1.0 - a)))
+                        crate::ui::alto::to_color(std::array::from_fn(|k| light[k] + under_c[k] * (1.0 - a)))
                     }
                 };
                 flags.push((col.a() > 0, under.contains(p)));

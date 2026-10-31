@@ -30,7 +30,7 @@ pub struct Session {
 }
 
 pub fn path() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("session.lua"))
+    crate::system::paths::state_dir().map(|d| d.join("session.lua"))
 }
 
 fn repeat_str(r: Repeat) -> &'static str {

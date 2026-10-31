@@ -13,22 +13,22 @@ use eframe::egui::{
     TextEdit, Ui, UiBuilder, Vec2,
 };
 
-use super::{animate_button, ellipsize, file_name, CapyroApp};
+use crate::app::{animate_button, ellipsize, file_name, CapyroApp};
 use crate::ffi::State;
-use crate::icons;
-use crate::playlists::{MAX_NAME, MAX_PLAYLISTS};
-use crate::theme::*;
+use crate::ui::icons;
+use crate::system::playlists::{MAX_NAME, MAX_PLAYLISTS};
+use crate::ui::theme::*;
 
 /// A qué se le está eligiendo playlist en el menucito.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum PlTarget {
+pub(crate) enum PlTarget {
     /// Una canción de la Cola.
     File(String),
     /// Toda la Cola.
     Queue,
 }
 
-pub(super) struct PlPopup {
+pub(crate) struct PlPopup {
     pub target: PlTarget,
     pub anchor: Pos2,
 }
@@ -60,17 +60,17 @@ fn pill(painter: &eframe::egui::Painter, rect: Rect, text: &str, bg: Color32, fg
 }
 
 impl CapyroApp {
-    pub(super) fn playlist_panel(&mut self, ui: &mut Ui, video: Rect) {
+    pub(crate) fn playlist_panel(&mut self, ui: &mut Ui, video: Rect) {
         // Entra deslizándose desde la derecha y se desvanece al salir.
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-playlist-anim"), self.show_playlist, crate::perf::t(0.18));
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-playlist-anim"), self.show_playlist, crate::system::perf::t(0.18));
         if t <= 0.001 {
             self.pl_popup = None;
             self.pl_rename = None;
             return;
         }
         let ease = 1.0 - (1.0 - t).powi(3);
-        let slide = (1.0 - crate::alto::pop(t, ease)) * 40.0;
+        let slide = (1.0 - crate::ui::alto::pop(t, ease)) * 40.0;
         let panel = Rect::from_min_max(
             pos2((video.right() - 300.0).max(video.left() + 8.0) + slide, video.top() + 8.0),
             pos2(video.right() - 8.0 + slide, video.bottom() - 8.0),
@@ -82,21 +82,21 @@ impl CapyroApp {
             // Bloquea los clics para que no lleguen al área de video de abajo.
             ui.interact(panel, Id::unique("capyro-playlist-bg"), Sense::click());
         }
-        crate::theme::soft_shadow(&painter, panel, 10.0, 6.0, 1.5, 60);
+        crate::ui::theme::soft_shadow(&painter, panel, 10.0, 6.0, 1.5, 60);
         painter.rect_filled(panel, 10.0, BG_PANEL);
         painter.rect_stroke(panel, 10.0, Stroke::new(1.0, Color32::from_white_alpha(12)), StrokeKind::Inside);
 
         let accent = self.cfg.accent;
-        crate::alto::reveal(&ctx, Id::unique("capyro-playlist-anim"), panel, 10.0, self.show_playlist, BG_PANEL, accent);
+        crate::ui::alto::reveal(&ctx, Id::unique("capyro-playlist-anim"), panel, 10.0, self.show_playlist, BG_PANEL, accent);
         self.playlist_body(ui, &painter, panel, interactive, ease);
     }
 
     /// La lista fija a un costado (vista de música): siempre abierta, con el
     /// botón "+ Agregar archivo(s)" abajo.
-    pub(super) fn playlist_dock(&mut self, ui: &mut Ui, rect: Rect) {
+    pub(crate) fn playlist_dock(&mut self, ui: &mut Ui, rect: Rect) {
         let painter = ui.painter().clone();
         ui.interact(rect, Id::unique("capyro-playlist-dock-bg"), Sense::click()); // que no atraviese
-        crate::theme::soft_shadow(&painter, rect, 12.0, 6.0, 1.5, 50);
+        crate::ui::theme::soft_shadow(&painter, rect, 12.0, 6.0, 1.5, 50);
         painter.rect_filled(rect, 12.0, BG_PANEL);
         painter.rect_stroke(rect, 12.0, Stroke::new(1.0, Color32::from_white_alpha(12)), StrokeKind::Inside);
         let body = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - 52.0));
@@ -163,7 +163,7 @@ impl CapyroApp {
         for (id, label, w) in tabs {
             let r = Rect::from_min_size(pos2(x, ty - 11.0), vec2(w, 22.0));
             let a = animate_button(ui, Id::unique(("capyro-pl-tab", id.map_or(usize::MAX, |i| i))), r, interactive);
-            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-pl-tab-sel", id.map_or(usize::MAX, |i| i))), tab == id, crate::perf::t(0.15));
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-pl-tab-sel", id.map_or(usize::MAX, |i| i))), tab == id, crate::system::perf::t(0.15));
             let bg = Color32::from_white_alpha((8.0 + 12.0 * a.hover) as u8).lerp_to_gamma(accent, sel);
             let fg = TEXT_DIM.lerp_to_gamma(TEXT, a.hover).lerp_to_gamma(Color32::WHITE, sel);
             pill(&painter, Rect::from_center_size(r.center(), r.size() * (1.0 - 0.05 * a.press)), &label, bg, fg, true);
@@ -360,7 +360,7 @@ impl CapyroApp {
                         let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
                         // el hover se mide sobre la fila entera (ver v0.2.2: la ✕ se escondía)
                         let row_hovered = interactive && ui.is_enabled() && ui.rect_contains_pointer(row);
-                        let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-row-hover", in_queue, i)), row_hovered, crate::perf::t(0.12));
+                        let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-row-hover", in_queue, i)), row_hovered, crate::system::perf::t(0.12));
                         let is_current = highlight == Some(i);
                         // (si el archivo sigue en el disco: se mira cada 5 s, no en cada cuadro)
                         let missing = !in_queue && {
@@ -473,7 +473,7 @@ impl CapyroApp {
                 ops.push(Op::ClosePopup);
             }
             ui.interact(r, Id::unique("capyro-pl-popup-bg"), Sense::click());
-            crate::theme::soft_shadow(&painter, r, 10.0, 8.0, 2.0, 80);
+            crate::ui::theme::soft_shadow(&painter, r, 10.0, 8.0, 2.0, 80);
             painter.rect_filled(r, 10.0, BG_WINDOW);
             painter.rect_stroke(r, 10.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
             painter.text(pos2(r.left() + 12.0, r.top() + 18.0), Align2::LEFT_CENTER, title, bold(12.0), TEXT);

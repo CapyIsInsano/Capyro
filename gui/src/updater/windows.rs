@@ -36,7 +36,7 @@ pub(super) fn try_run(w: &mut Worker, job: &Job, cache: &Path) -> Result<Outcome
 pub(super) fn install_location(_info: &BuildInfo) -> Option<Install> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    let installed = dir.join("config").join("capyro.lua").is_file() || dir.join(crate::paths::CONFIG_POINTER).is_file();
+    let installed = dir.join("config").join("capyro.lua").is_file() || dir.join(crate::system::paths::CONFIG_POINTER).is_file();
     installed.then(|| Install { prefix: dir.to_path_buf(), bindir: dir.to_path_buf() })
 }
 
@@ -49,7 +49,7 @@ pub(super) fn cleanup_after_update() {
                 let _ = std::fs::remove_file(&f);
             }
         }
-        let _ = std::fs::remove_dir_all(crate::paths::cache_dir().join("update"));
+        let _ = std::fs::remove_dir_all(crate::system::paths::cache_dir().join("update"));
     });
 }
 

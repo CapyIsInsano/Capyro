@@ -47,7 +47,9 @@ typedef enum {
     CAPYRO_ERR_DECODE       = 6, /* FFmpeg no pudo leer el archivo */
     CAPYRO_ERR_NO_STREAMS   = 7, /* el archivo no tiene audio ni video */
     CAPYRO_ERR_THREAD       = 8, /* no se pudo crear el hilo de decodificación */
-    CAPYRO_ERR_WRITE        = 9  /* no se pudo escribir las etiquetas (¿archivo en uso?) */
+    CAPYRO_ERR_WRITE        = 9, /* no se pudo escribir (etiquetas o conversión: ¿disco lleno, archivo en uso?) */
+    CAPYRO_ERR_CANCELLED    = 10, /* se canceló (Capyro Converter) */
+    CAPYRO_ERR_ENCODER      = 11  /* no hay con qué codificar a ese formato (Capyro Converter) */
 } CapyroError;
 
 typedef enum {
@@ -294,9 +296,6 @@ int  capyro_core_get_repeat(CapyroCore *core);
 void capyro_core_set_shuffle(CapyroCore *core, bool enabled);
 bool capyro_core_get_shuffle(CapyroCore *core);
 
-#ifdef __cplusplus
-}
-#endif
 
 /* ---- etiquetas (Capyro Studio) -----------------------------------------
  * Leer y escribir los metadatos de un archivo de audio. Escribir reescribe
@@ -360,5 +359,76 @@ int capyro_cover_read(const char *path, int max_side, CapyroImage *out);
 
 /* Una imagen cualquiera (para mostrar la portada nueva antes de guardar). */
 int capyro_image_read(const char *path, int max_side, CapyroImage *out);
+
+
+/* ---- Capyro Converter ---------------------------------------------------
+ * Pasa un archivo a otro formato: video a audio, audio a video (con la
+ * portada de fondo), cambiar de códec, achicar, recortar, emparejar el
+ * volumen. El formato de salida sale de la extensión de `out_path`
+ * (.mp4, .mkv, .webm, .mov, .mp3, .m4a, .flac, .ogg, .opus, .wav).
+ * Corre en el hilo que la llama (la GUI la llama desde otro hilo). */
+
+/* Qué tiene un archivo (para que la GUI ofrezca lo que se puede). */
+typedef struct {
+    bool    has_video;        /* video de verdad (no una portada) */
+    bool    has_audio;
+    bool    has_cover;        /* tiene portada */
+    double  duration;         /* segundos (0 = no se sabe) */
+    int32_t width, height;    /* del video (ya girado, como se ve) */
+    double  fps;
+    char    video_codec[32];  /* "h264", "hevc"... ("" si no hay) */
+    char    audio_codec[32];  /* "aac", "mp3", "opus"... */
+    int32_t sample_rate;
+    int32_t channels;
+    int32_t bits;             /* bits por muestra (FLAC, WAV); 0 si no aplica */
+    int64_t bit_rate;         /* del archivo entero, bits por segundo */
+    char    audio_copy_ext[8];/* extensión para sacar el audio sin recodificar ("m4a", "mp3", "opus", "flac", "mka"...) */
+} CapyroMediaProbe;
+
+int capyro_media_probe(const char *path, CapyroMediaProbe *out);
+
+typedef struct {
+    /* "" = sin video / sin audio; "copy" = tal cual (sin recodificar); o el
+     * códec: "h264", "hevc", "vp9", "av1", "mpeg4" / "aac", "mp3", "opus",
+     * "vorbis", "flac", "alac", "pcm". */
+    char    video_codec[16];
+    char    audio_codec[16];
+    int32_t quality;          /* 0..100 (100 = la mejor): calidad del video */
+    int32_t max_height;       /* lado corto máximo (480, 720, 1080...); 0 = el original */
+    int32_t fps;              /* 0 = los del original */
+    int32_t speed;            /* 0 rápido, 1 normal, 2 lento (archivo más chico) */
+    int32_t audio_kbps;       /* 0 = lo normal de cada códec */
+    int32_t sample_rate;      /* 0 = la del original */
+    int32_t channels;         /* 0 = los del original; 1 mono, 2 estéreo */
+    bool    normalize;        /* emparejar el volumen (EBU R128) */
+    bool    gpu;              /* probar primero el codificador de la placa de video */
+    bool    compat;           /* máxima compatibilidad (H.264 High 4.1, 8 bits, 4:2:0) */
+    bool    keep_tags;        /* etiquetas, capítulos y portada (si el formato la guarda) */
+    double  start;            /* recortar: desde (segundos) */
+    double  end;              /* hasta (<= 0: hasta el final) */
+    char    cover_image[1024];/* audio → video: la imagen ("" = la portada del archivo) */
+} CapyroConvertOptions;
+
+/* Se llama seguido con cuánto va (0..1). Devolver distinto de 0 cancela. */
+typedef int (*CapyroProgressFn)(void *user, double fraction);
+
+/* Qué se usó y, si salió mal, por qué (en castellano). */
+typedef struct {
+    char video_encoder[32];   /* "libx264", "h264_nvenc", "copiar"... ("" sin video) */
+    char audio_encoder[32];
+    char message[256];
+} CapyroConvertResult;
+
+int capyro_convert(const char *in_path, const char *out_path, const CapyroConvertOptions *opt,
+                   CapyroProgressFn progress, void *user, CapyroConvertResult *result);
+
+/* ¿Hay con qué codificar a `codec` ("h264", "mp3"...)? Con `gpu`, solo los
+ * de la placa de video (que estén en FFmpeg no quiere decir que la placa
+ * los tenga: eso se sabe al convertir). */
+bool capyro_convert_has_encoder(const char *codec, bool gpu);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CAPYRO_CORE_H */

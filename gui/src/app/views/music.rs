@@ -24,10 +24,11 @@ use eframe::egui::{
     UiBuilder, Vec2,
 };
 
-use super::{animate_button, ease_out, fit_text, CapyroApp, FRAME_SMOOTH};
+use crate::system::config::VizMode;
+use crate::app::{animate_button, ease_out, fit_text, CapyroApp, FRAME_SMOOTH};
 use crate::ffi::State;
-use crate::icons;
-use crate::theme::*;
+use crate::ui::icons;
+use crate::ui::theme::*;
 
 /// Ancho mínimo (sin márgenes) para las tres columnas.
 const MIN_WIDTH: f32 = 736.0;
@@ -35,7 +36,7 @@ const MIN_WIDTH: f32 = 736.0;
 const MIN_HEIGHT: f32 = 430.0;
 const GAP: f32 = 12.0;
 
-pub(super) struct MusicLayout {
+pub(crate) struct MusicLayout {
     pub left: Rect,
     pub center: Rect,
     pub right: Rect,
@@ -43,7 +44,7 @@ pub(super) struct MusicLayout {
 
 /// Pestaña de la burbuja de funciones.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum DockTab {
+pub(crate) enum DockTab {
     #[default]
     Settings,
     Info,
@@ -64,7 +65,7 @@ impl DockTab {
 
 /// Las tres columnas para `area` (todo lo que hay debajo del header), o
 /// None si no entran.
-pub(super) fn layout_for(area: Rect) -> Option<MusicLayout> {
+pub(crate) fn layout_for(area: Rect) -> Option<MusicLayout> {
     if area.width() < MIN_WIDTH || area.height() < MIN_HEIGHT {
         return None;
     }
@@ -78,7 +79,7 @@ pub(super) fn layout_for(area: Rect) -> Option<MusicLayout> {
 impl CapyroApp {
     /// La vista de música completa. `appear` (0..1) es la entrada al pasar
     /// de un video (o de la vista clásica) a un audio.
-    pub(super) fn music_view(&mut self, ui: &mut Ui, l: &MusicLayout, appear: f32) {
+    pub(crate) fn music_view(&mut self, ui: &mut Ui, l: &MusicLayout, appear: f32) {
         // (acá no hay un área de video opaca que tape la luz de Alto)
         self.ambient_under = None;
         let slide = 14.0 * (1.0 - appear);
@@ -94,8 +95,8 @@ impl CapyroApp {
         let painter = ui.painter().clone();
         let accent = self.cfg.accent;
         let now = ctx.input(|i| i.time);
-        let anim = crate::perf::animations();
-        let alto = crate::alto::on();
+        let anim = crate::system::perf::animations();
+        let alto = crate::ui::alto::on();
         let cx = area.center().x;
 
         // ¿qué se muestra? (de eso dependen las alturas)
@@ -103,7 +104,9 @@ impl CapyroApp {
         let album = self.np.album.trim().to_owned();
         let extra_line = self.np.extra.clone();
         let tech = self.np.tech.clone();
-        let viz_on = self.cfg.visualizer && anim;
+        let viz = self.cfg.viz_mode();
+        // a los lados: lugar para las barras a cada costado de la portada
+        let side_room = if viz == VizMode::Sides { 2.0 * 58.0 } else { 36.0 };
         let badges = self.cfg.show_format || self.cfg.show_millis;
         let badge_h = 30.0;
         // el visualizador va encima de la carátula: no ocupa lugar aparte
@@ -113,7 +116,7 @@ impl CapyroApp {
             + if extra_line.is_empty() { 0.0 } else { 17.0 }
             + if tech.is_empty() { 0.0 } else { 17.0 };
         let fixed = 6.0 + badge_h + 14.0 + text_h + 12.0 + 36.0 + 8.0 + 54.0 + 8.0 + 32.0 + 14.0 + 54.0 + 6.0;
-        let side = (area.height() - fixed).min(area.width() - 36.0).clamp(90.0, 340.0);
+        let side = (area.height() - fixed).min(area.width() - side_room).clamp(90.0, 340.0);
         // la carátula "un poco arriba": del lugar que sobra, un tercio arriba
         let extra = (area.height() - fixed - side).max(0.0);
         let mut y = area.top() + 6.0;
@@ -142,9 +145,13 @@ impl CapyroApp {
             ctx.request_repaint_after(FRAME_SMOOTH);
         }
         let ce = ease_out(enter);
-        let energy = if alto && self.core.state() == State::Playing { self.viz.energy() } else { 0.0 };
+        let playing = self.core.state() == State::Playing;
+        let energy = if (alto || self.cfg.pulse()) && playing { self.viz.energy() } else { 0.0 };
+        // la portada late con los graves (⚙ → "Portada con los graves"); si
+        // no, en Alto se mueve apenas
+        let pulse = if self.cfg.pulse() { 0.06 * energy } else { 0.012 * energy };
         let cover = Rect::from_center_size(pos2(cx, y + side / 2.0), Vec2::splat(side));
-        let mut shown = Rect::from_center_size(cover.center(), cover.size() * (0.94 + 0.06 * ce) * (1.0 + 0.012 * energy));
+        let mut shown = Rect::from_center_size(cover.center(), cover.size() * (0.94 + 0.06 * ce) * (1.0 + pulse));
         let radius = (side * 0.07).clamp(8.0, 18.0);
         // Alto: la carátula es de vidrio: se inclina un poco hacia el mouse y lo refleja
         let pointer = ctx.pointer_hover_pos().filter(|p| area.contains(*p));
@@ -167,12 +174,11 @@ impl CapyroApp {
         if alto {
             let tint = self.ambient.mean().map(|c| Color32::from_rgb(c[0] as u8, c[1] as u8, c[2] as u8));
             let other = tint.unwrap_or_else(|| accent.lerp_to_gamma(Color32::WHITE, 0.45));
-            let playing = self.core.state() == State::Playing;
             let k = if playing { 0.7 + 0.3 * energy } else { 0.5 };
-            crate::alto::aura(&painter, shown, radius, accent, other, now, k * ce);
+            crate::ui::alto::aura(&painter, shown, radius, accent, other, now, k * ce);
         }
         if alto && energy > 0.01 {
-            crate::alto::glow_rect(&painter, shown, accent, 0.5 * energy);
+            crate::ui::alto::glow_rect(&painter, shown, accent, 0.5 * energy);
         }
         let mut image_rect = None;
         if let Some(tex) = &self.video_tex {
@@ -198,13 +204,20 @@ impl CapyroApp {
             self.ambient.source = image_rect; // la luz de Alto sale de la carátula
         }
         if let Some(p) = pointer {
-            crate::alto::glass(&painter, image_rect.unwrap_or(shown), radius, p, glass_k);
+            crate::ui::alto::glass(&painter, image_rect.unwrap_or(shown), radius, p, glass_k);
         }
         if alto && glass_k > 0.001 && glass_k < 0.999 {
             ctx.request_repaint_after(FRAME_SMOOTH);
         }
+        /* --- visualizador: a los lados de la carátula --- */
+        if viz == VizMode::Sides && !self.viz.is_silent() {
+            let k = self.viz.energy().clamp(0.0, 1.0);
+            let reach = ((area.width() - side) / 2.0 - 14.0).clamp(10.0, side * 0.42);
+            let col = accent.lerp_to_gamma(Color32::WHITE, 0.15 + 0.2 * k);
+            self.viz.draw_sides(&painter, Rect::from_center_size(cover.center(), Vec2::splat(side)), reach, 8.0, col.gamma_multiply(0.9 * ce));
+        }
         /* --- visualizador: en el medio de la carátula, sobre su parte de abajo --- */
-        if viz_on && !self.viz.is_silent() {
+        if viz == VizMode::Middle && !self.viz.is_silent() {
             let k = self.viz.energy().clamp(0.0, 1.0);
             let h = (shown.height() * 0.34).max(36.0);
             let fade = Rect::from_min_max(pos2(shown.left(), shown.bottom() - h), shown.max);
@@ -312,7 +325,7 @@ impl CapyroApp {
             painter.galley(pos2(r.left() + 16.0, cy - ng.size().y / 2.0), ng, Color32::WHITE);
             painter.galley(pos2(r.left() + 16.0 + nw + 5.0, cy - ug.size().y / 2.0), ug, TEXT_DIM);
             if self.core.state() == State::Playing {
-                ui.ctx().request_repaint_after(crate::perf::ambient());
+                ui.ctx().request_repaint_after(crate::system::perf::ambient());
             }
         }
     }
@@ -338,7 +351,7 @@ impl CapyroApp {
         let id = Id::unique("capyro-music-volume-bar");
         let resp = ui.interact(track.expand2(vec2(6.0, 10.0)), id, Sense::click_and_drag());
         let active = resp.hovered() || resp.dragged();
-        let grow = ctx.animate_bool_with_time(id.with("grow"), active, crate::perf::t(0.12));
+        let grow = ctx.animate_bool_with_time(id.with("grow"), active, crate::system::perf::t(0.12));
         if active {
             ctx.set_cursor_icon(CursorIcon::PointingHand);
         }
@@ -358,8 +371,8 @@ impl CapyroApp {
         painter.rect_filled(t, th / 2.0, TRACK);
         let fill_x = t.left() + t.width() * shown;
         painter.rect_filled(Rect::from_min_max(t.min, pos2(fill_x, t.bottom())), th / 2.0, if muted { TEXT_FAINT } else { accent });
-        if crate::alto::on() {
-            crate::alto::glow(painter, pos2(fill_x, cy), 14.0 + 8.0 * grow, accent, 0.25 * grow);
+        if crate::ui::alto::on() {
+            crate::ui::alto::glow(painter, pos2(fill_x, cy), 14.0 + 8.0 * grow, accent, 0.25 * grow);
         }
         painter.circle_filled(pos2(fill_x, cy), 5.0 + 2.0 * grow, Color32::WHITE);
         let label = if muted { "Mudo".to_owned() } else { format!("{:.0} %", self.core.volume() * 100.0) };
@@ -375,7 +388,7 @@ impl CapyroApp {
         let painter = ui.painter().clone();
         let accent = self.cfg.accent;
         ui.interact(rect, Id::unique("capyro-functions-dock-bg"), Sense::click()); // que no atraviese
-        crate::theme::soft_shadow(&painter, rect, 12.0, 6.0, 1.5, 50);
+        crate::ui::theme::soft_shadow(&painter, rect, 12.0, 6.0, 1.5, 50);
         painter.rect_filled(rect, 12.0, BG_PANEL);
         painter.rect_stroke(rect, 12.0, Stroke::new(1.0, Color32::from_white_alpha(12)), StrokeKind::Inside);
 
@@ -383,17 +396,33 @@ impl CapyroApp {
         let unseen = self.changes_seen != crate::ffi::version();
         let updating = self.updater.is_running() || matches!(self.updater.last, Some(crate::updater::Outcome::Installed { .. }));
         let tabs = Rect::from_min_max(rect.min + vec2(8.0, 8.0), pos2(rect.right() - 8.0, rect.top() + 52.0));
-        // debajo de las pestañas, a todo el ancho: el botón de Capyro Studio
-        let studio_r = Rect::from_min_size(pos2(tabs.left(), tabs.bottom() + 6.0), vec2(tabs.width(), 32.0));
-        if super::studio::studio_button(ui, "capyro-studio-btn", studio_r, accent, self.studio_open()) {
+        // debajo de las pestañas: Capyro Studio y Capyro Converter, lado a lado
+        let row = Rect::from_min_size(pos2(tabs.left(), tabs.bottom() + 6.0), vec2(tabs.width(), 32.0));
+        let half = (row.width() - 6.0) / 2.0;
+        let studio_r = Rect::from_min_size(row.min, vec2(half, row.height()));
+        let conv_r = Rect::from_min_size(pos2(row.right() - half, row.top()), vec2(half, row.height()));
+        // con poco lugar, sin "Capyro" delante
+        let wide = half >= 128.0;
+        if crate::app::overlay::launcher(ui, "capyro-studio-btn", studio_r, accent, icons::sliders, if wide { "Capyro Studio" } else { "Studio" }, self.studio_open(), None) {
             self.open_studio(&ctx);
         }
+        let progress = self.converter_progress();
+        let conv = crate::app::overlay::launcher(ui, "capyro-converter-btn", conv_r, accent, icons::convert, if wide { "Converter" } else { "Convertir" }, self.converter_open(), progress);
+        if conv {
+            self.open_converter(&ctx);
+        }
+        if progress.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        self.ui_rects.insert("studio", studio_r);
+        self.ui_rects.insert("converter", conv_r);
+        let studio_r = row;
         let tw = tabs.width() / DockTab::ALL.len() as f32;
         for (i, tab) in DockTab::ALL.into_iter().enumerate() {
             let r = Rect::from_min_size(pos2(tabs.left() + i as f32 * tw, tabs.top()), vec2(tw, tabs.height())).shrink2(vec2(2.0, 0.0));
             let a = animate_button(ui, Id::unique(("capyro-dock-tab", i)), r, true);
             let selected = self.dock_tab == tab;
-            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-dock-tab-sel", i)), selected, crate::perf::t(0.15));
+            let sel = ctx.animate_bool_with_time(Id::unique(("capyro-dock-tab-sel", i)), selected, crate::system::perf::t(0.15));
             let bg = Color32::from_white_alpha((6.0 + 10.0 * a.hover) as u8).lerp_to_gamma(accent.gamma_multiply(0.22), sel);
             painter.rect_filled(r, 9.0, bg);
             let col = TEXT_DIM.lerp_to_gamma(TEXT, a.hover).lerp_to_gamma(accent, sel);

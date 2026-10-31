@@ -1,5 +1,5 @@
 //! Los extras del modo de rendimiento **Alto** (además de la iluminación
-//! cinematográfica de [`crate::perf::Ambient`]):
+//! cinematográfica de [`crate::system::perf::Ambient`]):
 //!
 //! - **fondo con degradé dinámico**: tres manchas de color (el acento, el
 //!   color de lo que se está viendo y uno que los acompaña) que se mueven
@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use eframe::egui::{self, pos2, vec2, Color32, Id, Pos2, Rect, Shape, Stroke};
 
-use crate::perf::{self, Mode};
+use crate::system::perf::{self, Mode};
 
 /// Cada cuánto se redibuja el fondo cuando no hay otra cosa moviéndose (15 por segundo).
 pub const IDLE_FRAME: Duration = Duration::from_millis(66);

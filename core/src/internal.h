@@ -3,8 +3,8 @@
 #define CAPYRO_INTERNAL_H
 
 #include "capyro_core.h"
-#include "dsp.h"
-#include "platform.h"
+#include "audio/dsp.h"
+#include "platform/platform.h"
 
 #include <stdbool.h>
 #include <stdint.h>

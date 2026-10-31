@@ -7,7 +7,7 @@ use mlua::{Lua, Table, Value};
 
 /// La config por defecto va embebida, así Capyro arranca aunque no exista
 /// ningún archivo en disco.
-pub const DEFAULT_CONFIG: &str = include_str!("../../config/capyro.lua");
+pub const DEFAULT_CONFIG: &str = include_str!("../../../config/capyro.lua");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -83,6 +83,48 @@ impl System {
 
 /// Backend de ventana en Linux. Con Wayland nativo winit todavía no recibe
 /// archivos arrastrados; con X11 (vía XWayland) sí.
+/// Dónde va el visualizador en la vista de música.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VizMode {
+    /// Dos columnas de barras, una a cada lado de la portada.
+    Sides,
+    /// Sobre la parte de abajo de la portada.
+    Middle,
+    Off,
+}
+
+impl VizMode {
+    pub const ALL: [VizMode; 3] = [VizMode::Sides, VizMode::Middle, VizMode::Off];
+
+    /// Como va en capyro.lua.
+    pub fn name(self) -> &'static str {
+        match self {
+            VizMode::Sides => "lados",
+            VizMode::Middle => "medio",
+            VizMode::Off => "apagado",
+        }
+    }
+
+    /// Como se ve en ⚙.
+    pub fn label(self) -> &'static str {
+        match self {
+            VizMode::Sides => "A los lados",
+            VizMode::Middle => "En medio",
+            VizMode::Off => "Apagado",
+        }
+    }
+
+    /// "lados" / "medio" / "apagado" (y sus variantes en inglés).
+    pub fn parse(s: &str) -> Option<VizMode> {
+        match s.trim().to_lowercase().as_str() {
+            "lados" | "a los lados" | "costados" | "sides" => Some(VizMode::Sides),
+            "medio" | "en medio" | "centro" | "middle" | "center" => Some(VizMode::Middle),
+            "apagado" | "no" | "off" | "ninguno" => Some(VizMode::Off),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     Auto,
@@ -227,8 +269,12 @@ pub struct Config {
     pub backend: Backend,
     /// Recordar lista, posición, volumen... entre una vez y otra.
     pub remember_session: bool,
-    /// Barras de frecuencia de fondo mientras suena un audio.
-    pub visualizer: bool,
+    /// Barras de frecuencia mientras suena un audio: a los lados de la
+    /// portada, en medio (sobre ella) o apagado. En Bajo no hay (ver
+    /// [`Config::viz_mode`]).
+    pub visualizer: VizMode,
+    /// La portada se agranda y se achica con los graves. En Bajo no.
+    pub cover_pulse: bool,
     /// Carpeta de las capturas (vacío = la de Imágenes del sistema + /Capyro).
     pub screenshot_dir: Option<std::path::PathBuf>,
     /// Valores con los que arranca Capyro.
@@ -257,14 +303,35 @@ pub struct Config {
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
     /// Con qué se dibuja la ventana en Windows (OpenGL / Direct3D / auto).
-    pub renderer: crate::render::Pref,
+    pub renderer: crate::system::render::Pref,
     /// Modo de rendimiento: bajo (sin animaciones ni extras), medio o alto
     /// (con iluminación cinematográfica).
-    pub performance: crate::perf::Mode,
+    pub performance: crate::system::perf::Mode,
     /// `options.system` tal cual (None = "auto"). Usar [`Config::system`].
     pub system_setting: Option<System>,
     /// De dónde salió (para el log): ruta o "embebida".
     pub source: String,
+}
+
+impl Config {
+    /// El visualizador que se ve de verdad: en Bajo, ninguno.
+    pub fn viz_mode(&self) -> VizMode {
+        if crate::system::perf::animations() {
+            self.visualizer
+        } else {
+            VizMode::Off
+        }
+    }
+
+    /// ¿La portada late con los graves? (en Bajo, no)
+    pub fn pulse(&self) -> bool {
+        self.cover_pulse && crate::system::perf::animations()
+    }
+
+    /// ¿Hay que analizar el audio? (para el visualizador o para la portada)
+    pub fn wants_spectrum(&self) -> bool {
+        self.viz_mode() != VizMode::Off || self.pulse()
+    }
 }
 
 impl Config {
@@ -306,7 +373,7 @@ impl Config {
 /// instalador en Windows (el primero que se busca al abrir). Nunca el de
 /// ejemplo del repo ni el instalado junto al programa.
 pub fn user_config_path() -> Option<PathBuf> {
-    crate::paths::user_config()
+    crate::system::paths::user_config()
 }
 
 /// "Ctrl+Shift+Right": como se escribe en capyro.lua.
@@ -428,9 +495,10 @@ impl Config {
                 }),
                 "accent" => lua_quote(&format!("#{:02X}{:02X}{:02X}", self.accent.r(), self.accent.g(), self.accent.b())),
                 "remember_session" => self.remember_session.to_string(),
-                "visualizer" => self.visualizer.to_string(),
+                "visualizer" => lua_quote(self.visualizer.name()),
+                "cover_pulse" => self.cover_pulse.to_string(),
                 "screenshot_dir" => {
-                    let p = self.screenshot_dir.as_deref().map(crate::paths::tilde).unwrap_or_default();
+                    let p = self.screenshot_dir.as_deref().map(crate::system::paths::tilde).unwrap_or_default();
                     lua_quote(&p)
                 }
                 "splash" => self.splash.to_string(),
@@ -575,7 +643,7 @@ fn candidate_paths() -> Vec<PathBuf> {
     // CAPYRO_CONFIG, ~/.config/capyro (Linux) o la del instalador (Windows)
     out.extend(user_config_path());
     #[cfg(not(windows))]
-    if let Some(home) = crate::paths::home() {
+    if let Some(home) = crate::system::paths::home() {
         out.push(home.join(".config/capyro/capyro.lua"));
     }
     out.push(PathBuf::from("config/capyro.lua"));
@@ -604,7 +672,8 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         auto_next: true,
         backend: Backend::Auto,
         remember_session: true,
-        visualizer: true,
+        visualizer: VizMode::Middle,
+        cover_pulse: true,
         screenshot_dir: None,
         start_speed: 1.0,
         start_shuffle: false,
@@ -614,8 +683,8 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         update_repo: None,
         update_branch: None,
         decoding: crate::ffi::Hwdec::Auto,
-        renderer: crate::render::Pref::Auto,
-        performance: crate::perf::Mode::Medio,
+        renderer: crate::system::render::Pref::Auto,
+        performance: crate::system::perf::Mode::Medio,
         click_sound: true,
         show_format: true,
         show_millis: true,
@@ -698,13 +767,25 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         if let Some(v) = opts.get::<Option<bool>>("remember_session")? {
             cfg.remember_session = v;
         }
-        if let Some(v) = opts.get::<Option<bool>>("visualizer")? {
-            cfg.visualizer = v;
+        // antes era true/false: true sigue siendo "en medio"
+        match opts.get::<Value>("visualizer")? {
+            Value::Boolean(on) => cfg.visualizer = if on { VizMode::Middle } else { VizMode::Off },
+            Value::String(s) => {
+                let v = s.to_string_lossy();
+                match VizMode::parse(&v) {
+                    Some(m) => cfg.visualizer = m,
+                    None => eprintln!("capyro: {name}: visualizer desconocido '{v}' (lados, medio o apagado)"),
+                }
+            }
+            _ => {}
+        }
+        if let Some(v) = opts.get::<Option<bool>>("cover_pulse")? {
+            cfg.cover_pulse = v;
         }
         if let Some(v) = opts.get::<Option<String>>("screenshot_dir")? {
             let v = v.trim();
             if !v.is_empty() {
-                cfg.screenshot_dir = Some(crate::paths::expand_tilde(v));
+                cfg.screenshot_dir = Some(crate::system::paths::expand_tilde(v));
             }
         }
         if let Some(v) = opts.get::<Option<bool>>("splash")? {
@@ -766,13 +847,13 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
             }
         }
         if let Some(v) = opts.get::<Option<String>>("performance")? {
-            match crate::perf::Mode::parse(&v) {
+            match crate::system::perf::Mode::parse(&v) {
                 Some(m) => cfg.performance = m,
                 None => eprintln!("capyro: {name}: performance desconocido '{v}' (bajo, medio o alto)"),
             }
         }
         if let Some(v) = opts.get::<Option<String>>("renderer")? {
-            match crate::render::Pref::parse(&v) {
+            match crate::system::render::Pref::parse(&v) {
                 Some(r) => cfg.renderer = r,
                 None => eprintln!("capyro: {name}: renderer desconocido '{v}' (auto, opengl o direct3d)"),
             }
@@ -847,13 +928,28 @@ mod tests {
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG, "embebida").unwrap();
         assert!(cfg.bindings.len() >= 21);
-        assert!(cfg.remember_session && cfg.visualizer);
+        assert!(cfg.remember_session && cfg.visualizer == VizMode::Middle && cfg.cover_pulse);
         assert!(cfg.splash && cfg.startup_sound && cfg.click_sound);
         assert_eq!(cfg.update_repo, None);
         assert_eq!(cfg.backend, Backend::Auto);
         assert_eq!(cfg.seek_step, 5.0);
         // Ctrl+L tiene que quedar antes que cualquier binding sin modificadores
         assert!(!cfg.bindings.first().unwrap().modifiers.is_none());
+    }
+
+    #[test]
+    fn visualizador_viejo_y_nuevo() {
+        let viejo = DEFAULT_CONFIG.replace("visualizer       = \"medio\"", "visualizer = false");
+        assert_eq!(parse(&viejo, "t").unwrap().visualizer, VizMode::Off);
+        let viejo = DEFAULT_CONFIG.replace("visualizer       = \"medio\"", "visualizer = true");
+        assert_eq!(parse(&viejo, "t").unwrap().visualizer, VizMode::Middle);
+        let nuevo = DEFAULT_CONFIG.replace("visualizer       = \"medio\"", "visualizer = \"lados\"");
+        let cfg = parse(&nuevo, "t").unwrap();
+        assert_eq!(cfg.visualizer, VizMode::Sides);
+        // y se guarda como texto
+        let back = parse(&cfg.to_lua(), "t").unwrap();
+        assert_eq!(back.visualizer, VizMode::Sides);
+        assert!(back.cover_pulse);
     }
 
     #[test]
@@ -882,7 +978,7 @@ mod tests {
         cfg.show_format = false;
         cfg.show_millis = false;
         cfg.show_video_info = false;
-        cfg.performance = crate::perf::Mode::Alto;
+        cfg.performance = crate::system::perf::Mode::Alto;
         cfg.music_view = false;
         cfg.hide_bar_button = false;
         let text = cfg.to_lua();
@@ -901,7 +997,7 @@ mod tests {
         assert_eq!(back.update_repo.as_deref(), Some("CapyIsInsano/Capyro"));
         assert_eq!(back.decoding, crate::ffi::Hwdec::Cpu);
         assert!(!back.show_format && !back.show_millis && !back.show_video_info);
-        assert_eq!(back.performance, crate::perf::Mode::Alto);
+        assert_eq!(back.performance, crate::system::perf::Mode::Alto);
         assert!(!back.music_view && !back.hide_bar_button);
         assert!(text.contains("performance      = \"alto\","), "{text}");
         assert_eq!(back.splash, cfg.splash);

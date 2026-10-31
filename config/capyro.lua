@@ -72,7 +72,10 @@ local options = {
     accent       = "#FF7417",  -- color de acento (botón play, barra de progreso)
 
     remember_session = true,   -- al abrir, retomar la lista, el archivo y la posición
-    visualizer       = true,   -- barras de frecuencia mientras suena un audio
+    visualizer       = "medio", -- barras de frecuencia con un audio: "lados" (a los dos
+                                -- lados de la portada), "medio" (sobre la portada) o "apagado"
+    cover_pulse      = true,   -- la portada se agranda y se achica con los graves
+                               -- (en el modo de rendimiento "bajo" no hay ni una ni otra)
     screenshot_dir   = "",     -- "" = Imágenes/Capyro; o una ruta, ej. "~/Capturas"
     splash           = true,   -- pantalla de "Cargando" al abrir (con animación)
     startup_sound    = true,   -- sonido de inicio cuando termina de cargar

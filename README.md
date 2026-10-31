@@ -28,10 +28,14 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.3.3:** **Capyro Studio**, un panel encima de la ventana (botón grande en
-> la burbuja de funciones) para **cambiar la portada** y **editar las etiquetas** de un audio,
-> con un **ecualizador de 15 bandas** y 10 perfiles, y una **vista previa** de un tramo.
-> Respeta los modos de rendimiento y, cerrado, no ocupa memoria.
+> **Novedades de la v0.3.3:** **Capyro Studio**, un panel encima de la ventana para
+> **cambiar la portada** y **editar las etiquetas** de un audio o un video, con un
+> **ecualizador de 15 bandas** y 10 perfiles, y una **vista previa** de un tramo.
+> **Capyro Converter**: pasá un video a audio, un audio a video con la portada de fondo, o
+> achicá un video, con 7 perfiles (Alta calidad, Tamaño reducido, Compatibilidad universal,
+> Música sin pérdida, Video para celulares, Extraer audio, Crear video con portada) y
+> funciones avanzadas. Además: videos de hasta **8K** sin cortes de sonido, el visualizador
+> **a los lados** de la portada y la portada que **late con los graves**.
 >
 > **De la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
 > **vista de música**: la carátula grande al medio con título, artista y álbum, los controles,
@@ -85,6 +89,8 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
 | 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, instala la versión nueva (en Linux la compila; en Windows baja la ya compilada) y te muestra qué cambió. |
 | ⚡ **Rendimiento** | Tres modos en ⚙: **Bajo** (sin animaciones ni extras, para PCs con pocos recursos), **Medio** y **Alto** (iluminación cinematográfica, fondo animado, brillos que siguen al mouse y partículas). |
+| 🎛️ **Capyro Studio** | Un panel encima de la ventana para **cambiar la portada** y **editar las etiquetas** de un audio o un video (MP3, FLAC, M4A, OGG, Opus, MP4, MKV…), con **ecualizador de 15 bandas**, 10 perfiles y vista previa de un tramo. Sin recodificar: no pierde calidad. |
+| 🔁 **Capyro Converter** | Pasá un **video a audio**, un **audio a video** con la portada de fondo, achicá un video o sacale el audio tal cual. **7 perfiles** (Alta calidad, Tamaño reducido, Compatibilidad universal, Música sin pérdida, Video para celulares, Extraer audio, Crear video con portada) y **funciones avanzadas**: formato, códecs (H.264, H.265, VP9, AV1, AAC, MP3, Opus, FLAC…), calidad, resolución, fps, kbps, canales, recorte, volumen parejo y GPU. Convierte en segundo plano. |
 | 🎚️ **Interfaz adaptativa** | Con un audio, la **vista de música** (carátula grande, título, artista y álbum, controles, volumen y efectos; la lista a un costado y Ajustes / Info / Novedades al otro). Con un video, la barra de abajo se **oculta con un clic**. Se adapta al tamaño de la ventana y se apaga en ⚙. |
 | ✨ **Interfaz** | Ventana propia con esquinas redondeadas, pantalla de carga, botones animados, menús que aparecen deslizándose y avisos con fundido. |
 | 🦫 **Detalles** | Tocá el logo y suena un capibara (hay tres, salen al azar). Al abrir suena el inicio, y al actualizarse, su propio sonido. |
@@ -437,6 +443,39 @@ Capyro se acomoda a lo que abrís:
   `capyro.lua` (`music_view` y `hide_bar_button`). En el modo de rendimiento **Bajo** los
   cambios son instantáneos; en **Medio** y **Alto**, con transiciones (y en Alto la carátula
   ilumina toda la ventana).
+- En **⚙ → Visualizador** elegís dónde van las barras: **a los lados** de la portada, **en
+  medio** (sobre ella) o **apagado**; y con **Portada con los graves** la portada se agranda y
+  se achica con los bajos. En el modo **Bajo** no hay ninguno de los dos (`visualizer` y
+  `cover_pulse` en `capyro.lua`).
+
+### Capyro Studio y Capyro Converter
+
+Los dos se abren con sus botones: en la vista de música, debajo de las pestañas de la burbuja
+de funciones; con un video, abajo a la izquierda, al lado de ⓘ y de Novedades. Son paneles que
+se ponen encima de la ventana (se cierran con ✕, con <kbd>Esc</kbd> o tocando afuera).
+
+- **Capyro Studio** edita el archivo que está sonando: la **portada** (tocala para elegir otra
+  imagen), el título, el artista, el álbum y el resto de las etiquetas, con una **vista previa**
+  de un tramo y el **ecualizador de 15 bandas**. Guarda sin recodificar y deja el original como
+  `.bak`.
+- **Capyro Converter** arranca con el archivo que suena (o elegís otro, o lo arrastrás a la
+  ventana). Elegís un **perfil** y, si querés, lo afinás en **Funciones avanzadas**:
+
+| Perfil | Con un video | Con un audio |
+|---|---|---|
+| **Alta calidad** | MP4, H.264 casi sin pérdida, AAC 256 kbps | MP3 a 320 kbps |
+| **Tamaño reducido** | MP4, H.265 a 720p (H.264 si no hay con qué), AAC 96 kbps | Opus a 96 kbps |
+| **Compatibilidad universal** | MP4, H.264 High 4.1 hasta 1080p, AAC estéreo | MP3 a 192 kbps, estéreo |
+| **Música sin pérdida** | El audio en FLAC | FLAC |
+| **Video para celulares** | MP4, H.264 a 720p y 30 fps, AAC 128 kbps | Un MP4 a 720p con la portada |
+| **Extraer audio** | El audio tal cual, sin recodificar (rápido y sin pérdida) | Lo mismo |
+| **Crear video con portada** | — | MP4 a 1080p: la portada al medio y de fondo, desenfocada |
+
+  El archivo nuevo va a la misma carpeta (o la que elijas) y **nunca pisa nada**: si ya existe,
+  se llama "nombre (2)". Podés cerrar el panel mientras convierte: el botón muestra cuánto va y
+  avisa al terminar. Con **Usar la placa de video**, prueba primero NVENC (NVIDIA), Quick Sync
+  (Intel) o AMF (AMD), y si no se puede sigue con el procesador. En Windows, H.264 sale de
+  OpenH264 (el FFmpeg que trae Capyro es LGPL, sin x264).
 
 ### Decodificación por GPU
 
@@ -525,7 +564,8 @@ return {
         ["repeat"]       = "off",      -- "off", "all" u "one"
         accent           = "#FF7417",  -- ¡el color naranja también se cambia!
         remember_session = true,       -- retomar lista y posición
-        visualizer       = true,       -- barras de frecuencia en los audios
+        visualizer       = "medio",    -- barras con los audios: "lados", "medio" o "apagado"
+        cover_pulse      = true,       -- la portada late con los graves
         screenshot_dir   = "",         -- "" = ~/Imágenes/Capyro
         backend          = "auto",     -- "auto", "x11" o "wayland"
         splash           = true,       -- pantalla de carga al abrir
@@ -609,9 +649,9 @@ para lo que se mueve siempre (visualizador, milisegundos) y 60 para las animacio
 medir en tu PC: `CAPYRO_DEBUG_FPS=1 capyro` anota cada segundo cuántos cuadros dibuja y
 cuánto le cuesta cada uno (con `=2`, además, qué pidió cada redibujado).
 
-Con música, si apagás los milisegundos (**⚙ → Milisegundos**) y el visualizador
-(`visualizer = false`), Capyro redibuja solo cuando cambia algo que se ve: el procesador
-casi no se entera.
+Con música, si apagás los milisegundos (**⚙ → Milisegundos**), el visualizador
+(**⚙ → Visualizador → Apagado**) y la portada con los graves, Capyro redibuja solo cuando
+cambia algo que se ve: el procesador casi no se entera.
 
 Si el video va trabado, fijate en **⚙ → Decodificación** que diga GPU: en placas viejas
 (Intel HD 3000, por ejemplo) la GPU decodifica H.264 y el procesador queda libre.
@@ -730,7 +770,7 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
 - **El audio marca el tiempo**: la posición sale de las muestras que realmente sonaron, y el
   video muestra el fotograma que corresponde.
 - **Velocidad y tono** van en el grafo de FFmpeg (`atempo`, `asetrate`). El **ecualizador,
-  el estéreo y el modo noche** están en C (`core/src/dsp.c`) dentro del callback de audio,
+  el estéreo y el modo noche** están en C (`core/src/audio/dsp.c`) dentro del callback de audio,
   por eso responden al instante.
 - **La lista vive en el núcleo**: orden, aleatorio y repetir se deciden en C. La GUI solo
   muestra y manda comandos.
@@ -740,7 +780,7 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
   commit, el repo, el prefijo de instalación y el sistema (`capyro --version` los muestra). El
   actualizador (`gui/src/updater.rs`) corre en su propio hilo y compara ese commit con el del repo.
 - **Un código, dos sistemas**: lo que cambia entre Linux y Windows está aislado en
-  `core/src/platform.c` (hilos, reloj, archivos, versión del sistema), `gui/src/paths.rs`
+  `core/src/platform/platform.c` (hilos, reloj, archivos, versión del sistema), `gui/src/system/paths.rs`
   (carpetas) y `gui/src/updater/` (`unix.rs` compila, `windows.rs` baja la release). Todo lo
   demás es igual en los dos.
 </details>
@@ -750,50 +790,51 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
 
 ```
 capyro/
-├── CMakeLists.txt            # build principal (trae Corrosion; detecta Lin/Win)
-├── cmake/buildinfo.cmake     # guarda el commit de git y el sistema en cada build
-├── cmake/mingw-w64.cmake     # compilar para Windows desde Linux
-├── core/                     # ── núcleo en C ──
-│   ├── include/capyro_core.h #    API pública (lo único que ve Rust)
+├── CMakeLists.txt              # build principal (trae Corrosion; detecta Lin/Win)
+├── cmake/                      # buildinfo (commit y sistema) y compilar para Windows desde Linux
+├── core/                       # ── núcleo en C ──
+│   ├── include/capyro_core.h   #    API pública (lo único que ve Rust)
 │   └── src/
-│       ├── core.c            #    API, transporte, lista de reproducción
-│       ├── player.c          #    FFmpeg + miniaudio: hilos, colas, reloj
-│       ├── dsp.c/.h          #    efectos de audio (EQ, estéreo, modo noche)
-│       ├── sfx.c             #    sonidos de la app (decodifica desde memoria)
-│       ├── buildinfo.c       #    commit y prefijo del build (para actualizar)
-│       ├── hwdec.c           #    decodificación por GPU (VA-API, NVDEC, VDPAU / D3D11VA, DXVA2)
-│       ├── platform.c/.h     #    hilos, reloj, archivos y sistema (POSIX o Win32)
-│       ├── internal.h        #    estructuras internas
-│       ├── miniaudio_impl.c  #    implementación de miniaudio
-│       └── main.c            #    punto de entrada
-├── gui/                      # ── interfaz en Rust ──
+│       ├── main.c              #    punto de entrada
+│       ├── core.c · internal.h #    API, transporte, lista de reproducción, estado
+│       ├── buildinfo.c         #    commit y prefijo del build (para actualizar)
+│       ├── player/             #    reproducir
+│       │   ├── player.c        #      FFmpeg + miniaudio: hilos, colas, reloj, 8K
+│       │   └── hwdec.c         #      decodificación por GPU (VA-API, NVDEC, VDPAU / D3D11VA, DXVA2)
+│       ├── audio/              #    sonido
+│       │   ├── dsp.c/.h        #      efectos (EQ de 3 y de 15 bandas, estéreo, modo noche)
+│       │   ├── sfx.c           #      sonidos de la app (decodifica desde memoria)
+│       │   └── miniaudio_impl.c
+│       ├── media/              #    archivos
+│       │   ├── tags.c          #      etiquetas (Capyro Studio)
+│       │   ├── cover.c/.h      #      portadas
+│       │   └── convert.c       #      Capyro Converter
+│       └── platform/           #    hilos, reloj, archivos y sistema (POSIX o Win32)
+├── gui/                        # ── interfaz en Rust ──
 │   └── src/
-│       ├── lib.rs            #    capyro_gui_run() + ventana
-│       ├── app.rs            #    layout y lógica de la UI
-│       ├── app/fx_menu.rs    #    menú de efectos de audio
-│       ├── app/lists.rs      #    panel Lista: cola y playlists
-│       ├── app/keys_editor.rs #   editor de atajos
-│       ├── app/changes_menu.rs #  menú de novedades
-│       ├── app/tutorial.rs   #    tutorial de bienvenida
-│       ├── playlists.rs      #    guardar / leer las playlists
-│       ├── changes.rs        #    novedades (lee el CHANGELOG embebido)
-│       ├── ffi.rs            #    bindings seguros al núcleo
-│       ├── viz.rs            #    visualizador (FFT propia)
-│       ├── session.rs        #    guardar / retomar la sesión
-│       ├── paths.rs          #    dónde se guarda cada cosa (Linux / Windows)
-│       ├── updater.rs        #    buscar e instalar actualizaciones
-│       ├── updater/unix.rs   #      Linux: git + cmake
-│       ├── updater/windows.rs #     Windows: baja la release "windows"
-│       ├── config.rs         #    lectura de capyro.lua (mlua)
-│       ├── formats.rs        #    resúmenes de cada formato
-│       ├── icons.rs          #    íconos dibujados a mano
-│       └── theme.rs          #    colores y fuentes
-├── config/capyro.lua         # configuración por defecto
-├── assets/                   # logo + sounds/ (capibaras, error, inicio, actualización)
-├── packaging/                # Linux: .desktop + íconos · windows/: .ico, .rc y manifiesto
-├── .github/workflows/        # CI: compila para Windows y publica la release "windows"
-├── tests/                    # pruebas del núcleo
-└── docs/                     # capturas e ilustraciones de este README
+│       ├── lib.rs              #    capyro_gui_run() + ventana
+│       ├── ffi.rs · ffi/       #    el puente seguro con el núcleo (convert.rs: Converter)
+│       ├── app.rs              #    la app: estado, arranque y cada cuadro
+│       ├── app/
+│       │   ├── views/          #      vistas: classic.rs (video), music.rs, window.rs (encabezado, avisos)
+│       │   ├── menus/          #      ⓘ info, ⚙ settings, effects, news, keys (atajos), lists (cola y playlists)
+│       │   ├── studio.rs · studio/        # Capyro Studio: cover, form, preview, eq, save
+│       │   ├── converter.rs · converter/  # Capyro Converter: profiles, input, options, output
+│       │   ├── overlay.rs      #      el panel que se pone encima (Studio, Converter)
+│       │   ├── widgets.rs      #      botones, chips, campos, deslizadores
+│       │   ├── actions.rs      #      atajos, abrir archivos, volumen, capturas, sesión
+│       │   ├── sounds.rs · updates.rs · tutorial.rs
+│       ├── ui/                 #    lo que se dibuja: theme, icons, alto (modo Alto), viz (visualizador)
+│       ├── system/             #    config (capyro.lua), paths, session, playlists, cache, perf,
+│       │                       #    render, wine, errlog, changelog, uninstall
+│       ├── media/              #    formats (resúmenes), videoinfo (1080p, 4K…)
+│       └── updater.rs · updater/ #  actualizar (unix.rs: git + cmake · windows.rs: baja la release)
+├── config/capyro.lua           # configuración por defecto
+├── assets/                     # logo + sounds/
+├── packaging/                  # Linux: .desktop + íconos · windows/: .ico, .rc y manifiesto
+├── .github/workflows/          # CI: compila para Windows y publica la release "windows"
+├── tests/                      # pruebas del núcleo (también del Converter)
+└── docs/                       # capturas e ilustraciones de este README
 ```
 </details>
 

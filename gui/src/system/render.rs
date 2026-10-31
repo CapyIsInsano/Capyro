@@ -3,7 +3,7 @@
 //! Un solo Capyro para todas las PC de Windows: en "auto" prueba primero el
 //! que anduvo la última vez (queda anotado en `renderer.txt`, en la carpeta
 //! de estado) y, si no hay, Direct3D. En Wine, siempre OpenGL primero (ver
-//! [`crate::wine`]). Si un modo da error al arrancar se pasa
+//! [`crate::system::wine`]). Si un modo da error al arrancar se pasa
 //! al otro en el momento; y si no da error pero la ventana no llega a
 //! dibujarse (pasa con algunos drivers de OpenGL), un vigilante vuelve a
 //! abrir Capyro con el otro modo.
@@ -59,7 +59,7 @@ pub fn order(cfg_pref: Pref) -> Vec<eframe::Renderer> {
             // En Wine, OpenGL va directo a la placa de video de Linux; Direct3D 12
             // necesita Vulkan (las placas viejas, como la de una X220, no tienen) y
             // si no hay, Wine dibuja con el procesador.
-            Pref::Auto if crate::wine::is_wine() => vec![Glow, Wgpu],
+            Pref::Auto if crate::system::wine::is_wine() => vec![Glow, Wgpu],
             Pref::Auto => match remembered() {
                 Some(Glow) => vec![Glow, Wgpu],
                 _ => vec![Wgpu, Glow],
@@ -75,7 +75,7 @@ pub fn order(cfg_pref: Pref) -> Vec<eframe::Renderer> {
 
 #[cfg(windows)]
 fn memo_path() -> Option<std::path::PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("renderer.txt"))
+    crate::system::paths::state_dir().map(|d| d.join("renderer.txt"))
 }
 
 #[cfg(windows)]
@@ -115,12 +115,12 @@ pub fn watch(renderer: eframe::Renderer, other: Option<eframe::Renderer>) {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        crate::errlog::log(&format!("la ventana no se dibujó con {renderer:?}"));
+        crate::system::errlog::log(&format!("la ventana no se dibujó con {renderer:?}"));
         let retry = std::env::var_os("CAPYRO_RENDERER_RETRY").is_some();
         match other {
             Some(o) if !retry => {
                 let name = if o == eframe::Renderer::Glow { "opengl" } else { "direct3d" };
-                crate::errlog::log(&format!("vuelvo a abrir Capyro con {name}"));
+                crate::system::errlog::log(&format!("vuelvo a abrir Capyro con {name}"));
                 if let Ok(exe) = std::env::current_exe() {
                     let _ = std::process::Command::new(exe)
                         .args(std::env::args_os().skip(1))
@@ -131,7 +131,7 @@ pub fn watch(renderer: eframe::Renderer, other: Option<eframe::Renderer>) {
                 std::process::exit(0);
             }
             _ => {
-                crate::errlog::fatal(
+                crate::system::errlog::fatal(
                     "La ventana de Capyro no se pudo dibujar ni con OpenGL ni con Direct3D.\n\nProbá actualizar los drivers de video.",
                 );
                 std::process::exit(1);

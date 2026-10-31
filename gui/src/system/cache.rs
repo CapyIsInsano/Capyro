@@ -5,7 +5,7 @@
 //!   más pesado), la canción del tutorial, el registro de la actualización;
 //! - el registro de errores (`capyro.log`, al lado de la caché);
 //! - lo que dejan en la carpeta temporal las pruebas y las actualizaciones
-//!   (`capyro-upd-test-*`, `capyro-carpeta-*`, `capyro-swap-*`, `capyro/`);
+//!   (`capyro-upd-test-*`, `capyro-carpeta-*`, `capyro-swap-*`, `capyro-converter-*`, `capyro/`);
 //! - en Windows, el recuerdo de con qué se dibujó la última vez (`renderer.txt`,
 //!   se vuelve a elegir solo).
 //!
@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 /// Lo que dejan las pruebas y las actualizaciones en la carpeta temporal.
-const TEMP_PREFIXES: [&str; 3] = ["capyro-upd-test-", "capyro-carpeta-", "capyro-swap-"];
+const TEMP_PREFIXES: [&str; 4] = ["capyro-upd-test-", "capyro-carpeta-", "capyro-swap-", "capyro-converter-"];
 
 /// Cómo salió la limpieza.
 #[derive(Debug, Default, Clone)]
@@ -29,7 +29,7 @@ pub struct Cleaned {
 /// Todo lo que se borraría (solo lo que existe).
 pub fn targets() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let cache = crate::paths::cache_dir();
+    let cache = crate::system::paths::cache_dir();
     out.push(cache.with_file_name("capyro.log"));
     out.push(cache);
     let tmp = std::env::temp_dir();
@@ -45,7 +45,7 @@ pub fn targets() -> Vec<PathBuf> {
         }
     }
     #[cfg(windows)]
-    if let Some(state) = crate::paths::state_dir() {
+    if let Some(state) = crate::system::paths::state_dir() {
         out.push(state.join("renderer.txt"));
     }
     out.sort();
@@ -81,7 +81,7 @@ pub fn clear() -> Cleaned {
             Err(e) => {
                 // lo que sí se pudo borrar adentro también cuenta
                 done.freed += bytes.saturating_sub(size_of(&p));
-                done.failed.push(format!("{}: {e}", crate::paths::tilde(&p)));
+                done.failed.push(format!("{}: {e}", crate::system::paths::tilde(&p)));
             }
         }
     }

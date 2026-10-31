@@ -24,7 +24,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::config::System;
+use crate::system::config::System;
 use crate::ffi::BuildInfo;
 
 // Cada sistema compila solo su forma de actualizarse.
@@ -387,12 +387,12 @@ struct Worker {
 }
 
 fn cache_dir() -> PathBuf {
-    crate::paths::cache_dir()
+    crate::system::paths::cache_dir()
 }
 
 /// `~/.cache/capyro/update.log` con `~` para mostrar.
 pub fn log_path_display() -> String {
-    crate::paths::tilde(&cache_dir().join("update.log"))
+    crate::system::paths::tilde(&cache_dir().join("update.log"))
 }
 
 /// Errores de git → sin conexión / repo / otro.

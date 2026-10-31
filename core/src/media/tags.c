@@ -13,7 +13,7 @@
  */
 #include "capyro_core.h"
 #include "cover.h"
-#include "platform.h"
+#include "platform/platform.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -163,27 +163,6 @@ static void drop_ogg_pictures(AVDictionary **d) {
     }
 }
 
-/* MKV: la portada va como adjunto ("cover.jpg"), no como pista de imagen
- * (copiada como pista, quedaría como un video de un cuadro). */
-static int add_mkv_cover(AVFormatContext *out, const uint8_t *data, size_t size, int codec_id) {
-    AVStream *so = avformat_new_stream(out, NULL);
-    if (!so) {
-        return CAPYRO_ERR_NO_MEMORY;
-    }
-    so->codecpar->codec_type = AVMEDIA_TYPE_ATTACHMENT;
-    so->codecpar->codec_id = (enum AVCodecID)codec_id;
-    so->codecpar->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
-    if (!so->codecpar->extradata) {
-        return CAPYRO_ERR_NO_MEMORY;
-    }
-    memcpy(so->codecpar->extradata, data, size);
-    so->codecpar->extradata_size = (int)size;
-    bool png = codec_id == AV_CODEC_ID_PNG;
-    av_dict_set(&so->metadata, "filename", png ? "cover.png" : "cover.jpg", 0);
-    av_dict_set(&so->metadata, "mimetype", png ? "image/png" : "image/jpeg", 0);
-    return CAPYRO_OK;
-}
-
 /* Copia los capítulos (videos y audiolibros los tienen). */
 static int copy_chapters(AVFormatContext *in, AVFormatContext *out) {
     for (unsigned i = 0; i < in->nb_chapters; i++) {
@@ -197,7 +176,7 @@ static int copy_chapters(AVFormatContext *in, AVFormatContext *out) {
         co->start = ci->start;
         co->end = ci->end;
         av_dict_copy(&co->metadata, ci->metadata, 0);
-        if (av_dynarray_add_nofree(&out->chapters, &out->nb_chapters, co) < 0) {
+        if (av_dynarray_add_nofree(&out->chapters, (int *)&out->nb_chapters, co) < 0) {
             av_dict_free(&co->metadata);
             av_free(co);
             return CAPYRO_ERR_NO_MEMORY;
@@ -314,7 +293,7 @@ int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mod
             }
             if (mkv) {
                 if (si->attached_pic.size > 0) {
-                    int e = add_mkv_cover(out, si->attached_pic.data, (size_t)si->attached_pic.size, si->codecpar->codec_id);
+                    int e = cover_add_mkv_attachment(out, si->attached_pic.data, (size_t)si->attached_pic.size, si->codecpar->codec_id);
                     if (e != CAPYRO_OK) {
                         ret = e;
                         goto done;
@@ -389,7 +368,7 @@ int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mod
             }
         }
     } else if (cover_mode == CAPYRO_COVER_SET && mkv) {
-        int e = add_mkv_cover(out, cover.data, cover.size, cover.codec_id);
+        int e = cover_add_mkv_attachment(out, cover.data, cover.size, cover.codec_id);
         if (e != CAPYRO_OK) {
             ret = e;
             goto done;

@@ -8,10 +8,10 @@ use eframe::egui::{
     UiBuilder, Vec2,
 };
 
-use super::{animate_button, CapyroApp};
-use crate::config::{self, Action};
-use crate::icons;
-use crate::theme::*;
+use crate::app::{animate_button, CapyroApp};
+use crate::system::config::{self, Action};
+use crate::ui::icons;
+use crate::ui::theme::*;
 
 enum Op {
     Remove(Action, Modifiers, Key),
@@ -28,7 +28,7 @@ impl CapyroApp {
     /// Mientras se espera una tecla: la toma, la asigna y se come todas las
     /// teclas del frame (para que no disparen atajos). Devuelve true si estaba
     /// esperando.
-    pub(super) fn capture_key(&mut self, ctx: &egui::Context) -> bool {
+    pub(crate) fn capture_key(&mut self, ctx: &egui::Context) -> bool {
         let Some(action) = self.keys_capture else { return false };
         let pressed = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {
@@ -52,7 +52,7 @@ impl CapyroApp {
         true
     }
 
-    pub(super) fn save_config(&mut self, ctx: &egui::Context, msg: String) {
+    pub(crate) fn save_config(&mut self, ctx: &egui::Context, msg: String) {
         match self.cfg.save() {
             Ok(_) => self.toast(ctx, msg, false),
             Err(e) => {
@@ -62,9 +62,9 @@ impl CapyroApp {
         }
     }
 
-    pub(super) fn keys_editor(&mut self, ui: &mut Ui, area: Rect) {
+    pub(crate) fn keys_editor(&mut self, ui: &mut Ui, area: Rect) {
         let ctx = ui.ctx().clone();
-        let t = ctx.animate_bool_with_time(Id::unique("capyro-keys-anim"), self.show_keys, crate::perf::t(0.18));
+        let t = ctx.animate_bool_with_time(Id::unique("capyro-keys-anim"), self.show_keys, crate::system::perf::t(0.18));
         if t <= 0.001 {
             self.keys_capture = None;
             self.keys_adding = false;
@@ -75,7 +75,7 @@ impl CapyroApp {
         let now = ctx.input(|i| i.time);
         let size = vec2(area.width().min(560.0), area.height());
         let full = Rect::from_center_size(area.center(), size);
-        let panel = Rect::from_center_size(area.center(), size * (0.96 + 0.04 * crate::alto::pop(t, ease)));
+        let panel = Rect::from_center_size(area.center(), size * (0.96 + 0.04 * crate::ui::alto::pop(t, ease)));
         let interactive = self.show_keys && t > 0.6;
         let mut ops: Vec<Op> = Vec::new();
 
@@ -90,14 +90,14 @@ impl CapyroApp {
         }
         // velo oscuro detrás, como un diálogo
         painter.rect_filled(ui.max_rect(), 0.0, Color32::from_black_alpha((90.0 * ease) as u8));
-        crate::theme::soft_shadow(&painter, panel, 14.0, 12.0, 3.0, 90);
+        crate::ui::theme::soft_shadow(&painter, panel, 14.0, 12.0, 3.0, 90);
         painter.rect_filled(panel, 14.0, BG_PANEL);
         painter.rect_stroke(panel, 14.0, Stroke::new(1.0, Color32::from_white_alpha(16)), StrokeKind::Inside);
         if ease < 0.98 {
-            ctx.request_repaint_after(super::FRAME_SMOOTH);
+            ctx.request_repaint_after(crate::app::FRAME_SMOOTH);
             return;
         }
-        crate::alto::reveal(&ctx, Id::unique("capyro-keys-anim"), panel, 14.0, self.show_keys, BG_PANEL, accent);
+        crate::ui::alto::reveal(&ctx, Id::unique("capyro-keys-anim"), panel, 14.0, self.show_keys, BG_PANEL, accent);
 
         let x0 = panel.left() + 18.0;
         let x1 = panel.right() - 18.0;
@@ -108,7 +108,7 @@ impl CapyroApp {
         painter.circle_filled(ic, 15.0, accent.gamma_multiply(0.16));
         icons::keyboard(&painter, ic, 18.0, accent);
         painter.text(pos2(x0 + 36.0, top + 22.0), Align2::LEFT_CENTER, "Editar configuración", bold(15.0), TEXT);
-        let path = config::user_config_path().map(|p| crate::paths::tilde(&p)).unwrap_or_default();
+        let path = config::user_config_path().map(|p| crate::system::paths::tilde(&p)).unwrap_or_default();
         painter.text(
             pos2(x0 + 36.0, top + 40.0),
             Align2::LEFT_CENTER,
@@ -155,7 +155,7 @@ impl CapyroApp {
                 let action = *action;
                 let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
                 let hovered = ui.is_enabled() && ui.rect_contains_pointer(row);
-                let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-keys-row", action.name())), hovered, crate::perf::t(0.12));
+                let hover = ui.ctx().animate_bool_with_time(Id::unique(("capyro-keys-row", action.name())), hovered, crate::system::perf::t(0.12));
                 let p = ui.painter().clone();
                 let capturing = capture == Some(action);
                 if capturing {
@@ -175,7 +175,7 @@ impl CapyroApp {
                     let a = animate_button(ui, Id::unique(("capyro-key-chip", action.name(), config::key_spec(b.modifiers, b.key))), r, true);
                     let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.05 * a.press));
                     // tecla "física": borde de abajo más grueso
-                    crate::theme::soft_shadow(&p, rr, 6.0, 6.0, 1.0, 70);
+                    crate::ui::theme::soft_shadow(&p, rr, 6.0, 6.0, 1.0, 70);
                     p.rect_filled(rr, 6.0, BG_WINDOW.lerp_to_gamma(ERROR, 0.25 * a.hover));
                     p.rect_stroke(rr, 6.0, Stroke::new(1.0, Color32::from_white_alpha(22).lerp_to_gamma(ERROR, a.hover)), StrokeKind::Inside);
                     p.galley(rr.center() - g.size() / 2.0 - vec2(4.0 * a.hover, 0.0), g, TEXT.lerp_to_gamma(Color32::WHITE, a.hover));
@@ -191,13 +191,13 @@ impl CapyroApp {
 
                 // "+" o esperando tecla
                 if capturing {
-                    let pulse = 0.6 + 0.4 * ((crate::perf::clock(now) * 4.0).sin() as f32).abs();
+                    let pulse = 0.6 + 0.4 * ((crate::system::perf::clock(now) * 4.0).sin() as f32).abs();
                     let g = p.layout_no_wrap("Presioná una tecla…  (Esc cancela)".to_owned(), regular(11.5), Color32::WHITE);
                     let r = Rect::from_min_size(pos2(x, cy - 12.0), vec2(g.size().x + 20.0, 24.0));
                     p.rect_filled(r, 12.0, accent.gamma_multiply(pulse));
                     p.galley(r.center() - g.size() / 2.0, g, Color32::WHITE);
-                    if crate::perf::animations() {
-                        ui.ctx().request_repaint_after(super::FRAME_SMOOTH);
+                    if crate::system::perf::animations() {
+                        ui.ctx().request_repaint_after(crate::app::FRAME_SMOOTH);
                     }
                 } else {
                     let r = Rect::from_min_size(pos2(x, cy - 12.0), vec2(26.0, 24.0));
@@ -298,7 +298,7 @@ impl CapyroApp {
             let max_h = add_rect.top() - panel.top() - 12.0;
             let pop = Rect::from_min_size(pos2(add_rect.left(), add_rect.top() - 8.0 - h.min(max_h)), vec2(w, h.min(max_h)));
             ui.interact(pop, Id::unique("capyro-keys-pop-bg"), Sense::click());
-            crate::theme::soft_shadow(&painter, pop, 10.0, 8.0, 2.0, 80);
+            crate::ui::theme::soft_shadow(&painter, pop, 10.0, 8.0, 2.0, 80);
             painter.rect_filled(pop, 10.0, BG_WINDOW);
             painter.rect_stroke(pop, 10.0, Stroke::new(1.0, Color32::from_white_alpha(18)), StrokeKind::Inside);
             painter.text(pos2(pop.left() + 12.0, pop.top() + 18.0), Align2::LEFT_CENTER, "Funciones sin tecla", bold(12.0), TEXT);

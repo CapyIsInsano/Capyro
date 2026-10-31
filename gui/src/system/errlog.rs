@@ -7,7 +7,7 @@ pub fn log(msg: &str) {
     #[cfg(windows)]
     {
         use std::io::Write;
-        let path = crate::paths::cache_dir().with_file_name("capyro.log");
+        let path = crate::system::paths::cache_dir().with_file_name("capyro.log");
         if let Some(d) = path.parent() {
             let _ = std::fs::create_dir_all(d);
         }

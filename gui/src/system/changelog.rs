@@ -6,7 +6,7 @@ pub const REPO_URL: &str = "https://github.com/CapyIsInsano/Capyro";
 /// CHANGELOG completo en GitHub (HEAD = la rama principal, se llame como se llame).
 pub const CHANGELOG_URL: &str = "https://github.com/CapyIsInsano/Capyro/blob/HEAD/CHANGELOG.md";
 
-const CHANGELOG: &str = include_str!("../../CHANGELOG.md");
+const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
 
 /// Una línea de la lista: nivel 0 = punto principal, 1 = sub-punto.
 #[derive(Debug, Clone, PartialEq)]

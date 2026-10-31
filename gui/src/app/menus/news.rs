@@ -5,23 +5,23 @@ use eframe::egui::{
     self, pos2, vec2, Align2, Color32, Id, Key, Modifiers, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder,
 };
 
-use super::{animate_button, CapyroApp};
-use crate::changes;
-use crate::icons;
-use crate::theme::*;
+use crate::app::{animate_button, CapyroApp};
+use crate::system::changelog;
+use crate::ui::icons;
+use crate::ui::theme::*;
 
 /// Abre una página en el navegador del sistema.
-pub(super) fn open_url(url: &str) -> std::io::Result<()> {
-    crate::paths::open_url(url)
+pub(crate) fn open_url(url: &str) -> std::io::Result<()> {
+    crate::system::paths::open_url(url)
 }
 
 impl CapyroApp {
     /// Con `dock`, ocupa ese lugar fijo (burbuja de funciones de la vista de
     /// música); la lista tiene su propio scroll. Devuelve el alto.
-    pub(super) fn changes_menu(&mut self, ui: &mut Ui, dock: Option<Rect>) -> f32 {
+    pub(crate) fn changes_menu(&mut self, ui: &mut Ui, dock: Option<Rect>) -> f32 {
         let ctx = ui.ctx().clone();
         let docked = dock.is_some();
-        let t = if docked { 1.0 } else { ctx.animate_bool_with_time(Id::unique("capyro-changes-anim"), self.show_changes, crate::perf::t(0.15)) };
+        let t = if docked { 1.0 } else { ctx.animate_bool_with_time(Id::unique("capyro-changes-anim"), self.show_changes, crate::system::perf::t(0.15)) };
         if t <= 0.001 {
             return 0.0;
         }
@@ -56,7 +56,7 @@ impl CapyroApp {
         let max_h = (anchor.y - ui.max_rect().top() - 70.0).max(200.0);
         let size = vec2(width, (header_h + content_h + 8.0 + footer_h).min(max_h));
         let full = Rect::from_min_size(pos2(anchor.x, anchor.y - size.y), size);
-        let grown = size * (0.85 + 0.15 * crate::alto::pop(t, ease));
+        let grown = size * (0.85 + 0.15 * crate::ui::alto::pop(t, ease));
         let panel = Rect::from_min_size(pos2(anchor.x, anchor.y - grown.y), grown);
         let interactive = self.show_changes && t > 0.6;
 
@@ -69,14 +69,14 @@ impl CapyroApp {
             }
             ui.interact(full, Id::unique("capyro-changes-bg"), Sense::click());
         }
-        crate::theme::soft_shadow(&painter, panel, 12.0, 8.0, 2.0, 70);
+        crate::ui::theme::soft_shadow(&painter, panel, 12.0, 8.0, 2.0, 70);
         painter.rect_filled(panel, 12.0, BG_PANEL);
         painter.rect_stroke(panel, 12.0, Stroke::new(1.0, Color32::from_white_alpha(14)), StrokeKind::Inside);
         if ease < 0.98 {
-            ctx.request_repaint_after(super::FRAME_SMOOTH);
+            ctx.request_repaint_after(crate::app::FRAME_SMOOTH);
             return 0.0;
         }
-        crate::alto::reveal(&ctx, Id::unique("capyro-changes-anim"), panel, 12.0, self.show_changes, BG_PANEL, accent);
+        crate::ui::alto::reveal(&ctx, Id::unique("capyro-changes-anim"), panel, 12.0, self.show_changes, BG_PANEL, accent);
         (panel, interactive, painter, size)
         };
         let x0 = panel.left() + 16.0;
@@ -137,10 +137,10 @@ impl CapyroApp {
         /* pie: las versiones anteriores están en el repo */
         let fy = panel.bottom() - footer_h;
         painter.line_segment([pos2(x0, fy), pos2(x1, fy)], Stroke::new(1.0, Color32::from_white_alpha(14)));
-        let older = super::fit_text(&painter, "¿Las versiones anteriores? Están en el repositorio:", regular(11.5), x1 - x0);
+        let older = crate::app::fit_text(&painter, "¿Las versiones anteriores? Están en el repositorio:", regular(11.5), x1 - x0);
         painter.text(pos2(x0, fy + 20.0), Align2::LEFT_CENTER, older, regular(11.5), TEXT_FAINT);
-        let link = changes::REPO_URL.trim_start_matches("https://");
-        let link = super::fit_text(&painter, link, bold(12.0), x1 - x0 - 24.0);
+        let link = changelog::REPO_URL.trim_start_matches("https://");
+        let link = crate::app::fit_text(&painter, link, bold(12.0), x1 - x0 - 24.0);
         let g = painter.layout_no_wrap(link, bold(12.0), accent);
         let lr = Rect::from_min_size(pos2(x0 - 4.0, fy + 32.0), g.size() + vec2(28.0, 8.0));
         let a = animate_button(ui, Id::unique("capyro-changes-link"), lr, interactive);
@@ -156,14 +156,14 @@ impl CapyroApp {
         painter.line_segment([ac + vec2(-1.0, -4.0), ac + vec2(4.0, -4.0)], st);
         painter.line_segment([ac + vec2(4.0, -4.0), ac + vec2(4.0, 1.0)], st);
         if a.resp.clicked() {
-            if let Err(e) = open_url(changes::CHANGELOG_URL) {
+            if let Err(e) = open_url(changelog::CHANGELOG_URL) {
                 self.play_error();
                 self.toast(&ctx, format!("No pude abrir el navegador: {e}"), true);
             } else {
                 self.toast(&ctx, "Abriendo el historial completo en el navegador…", false);
             }
         }
-        a.resp.on_hover_text(changes::CHANGELOG_URL);
+        a.resp.on_hover_text(changelog::CHANGELOG_URL);
 
         if !docked && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             self.show_changes = false;

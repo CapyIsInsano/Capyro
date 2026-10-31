@@ -27,7 +27,7 @@ pub struct Playlists {
 }
 
 pub fn path() -> Option<PathBuf> {
-    crate::paths::data_dir().map(|d| d.join("playlists.lua"))
+    crate::system::paths::data_dir().map(|d| d.join("playlists.lua"))
 }
 
 fn lua_quote(s: &str) -> String {

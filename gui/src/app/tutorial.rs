@@ -19,10 +19,10 @@ use eframe::egui::{
 };
 
 use super::{animate_button, decode_png, CapyroApp};
-use crate::perf;
+use crate::system::perf;
 use crate::ffi::{OsInfo, State};
-use crate::icons;
-use crate::theme::*;
+use crate::ui::icons;
+use crate::ui::theme::*;
 
 /// Música del tutorial (ya con el volumen al 45 %). Va como un MP3 de
 /// verdad con tags y carátula: suena en el reproductor, así el área de video
@@ -43,7 +43,7 @@ pub(super) struct SavedQueue {
 
 /// Escribe la canción en ~/.cache/capyro/tutorial/ (si no estaba) y da la ruta.
 fn track_path() -> Option<PathBuf> {
-    let path = crate::paths::cache_dir().join("tutorial").join(TRACK_FILE);
+    let path = crate::system::paths::cache_dir().join("tutorial").join(TRACK_FILE);
     let ok = std::fs::metadata(&path).map(|m| m.len() == TRACK.len() as u64).unwrap_or(false);
     if !ok {
         std::fs::create_dir_all(path.parent()?).ok()?;
@@ -222,7 +222,7 @@ struct Spark {
 }
 
 fn marker_path() -> Option<PathBuf> {
-    crate::paths::state_dir().map(|d| d.join("tutorial-visto"))
+    crate::system::paths::state_dir().map(|d| d.join("tutorial-visto"))
 }
 
 /// ¿Es la primera vez que se abre Capyro?
@@ -547,7 +547,7 @@ impl CapyroApp {
 
         if link_clicked || claude_clicked {
             let url = if link_clicked { GITHUB_URL } else { CLAUDE_URL };
-            if let Err(e) = super::changes_menu::open_url(url) {
+            if let Err(e) = super::menus::news::open_url(url) {
                 self.toast(&ctx, format!("No pude abrir el navegador: {e}"), true);
             }
         } else if let Some(yes) = answer {
@@ -678,7 +678,7 @@ impl CapyroApp {
         let below = top + full_g.size().y + 26.0;
         let dots = INTRO.len();
         let widths: Vec<f32> = (0..dots)
-            .map(|d| ui.ctx().animate_value_with_time(Id::unique(("capyro-tut-dot", d)), if d == para { 22.0 } else { 6.0 }, crate::perf::t(0.25)))
+            .map(|d| ui.ctx().animate_value_with_time(Id::unique(("capyro-tut-dot", d)), if d == para { 22.0 } else { 6.0 }, crate::system::perf::t(0.25)))
             .collect();
         let total: f32 = widths.iter().sum::<f32>() + 6.0 * (dots as f32 - 1.0);
         let mut x = full.center().x - total / 2.0;
@@ -827,7 +827,7 @@ impl CapyroApp {
         let anim = perf::animations();
         let glow = if anim { 0.5 + 0.5 * ((since * 2.0).sin() as f32) } else { 0.5 };
         p.rect_filled(card.expand(6.0 + 4.0 * glow), 24.0, accent.gamma_multiply(0.06 + 0.05 * glow));
-        crate::theme::soft_shadow(&p, card, 18.0, 12.0, 3.0, 90);
+        crate::ui::theme::soft_shadow(&p, card, 18.0, 12.0, 3.0, 90);
         p.rect_filled(card, 18.0, BG_PANEL);
         p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
         if let Some(logo) = &self.logo {
@@ -975,7 +975,7 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     let card = Rect::from_center_size(full.center(), size);
     let mut p = p.clone();
     p.multiply_opacity(k);
-    crate::theme::soft_shadow(&p, card, 18.0, 12.0, 3.0, 90);
+    crate::ui::theme::soft_shadow(&p, card, 18.0, 12.0, 3.0, 90);
     p.rect_filled(card, 18.0, BG_PANEL);
     p.rect_stroke(card, 18.0, Stroke::new(1.0, accent.gamma_multiply(0.5)), StrokeKind::Inside);
     let cx = card.center().x;
@@ -1203,7 +1203,7 @@ fn draw_bubble(
 
     let mut p = p.clone();
     p.multiply_opacity(fade);
-    crate::theme::soft_shadow(&p, r, 14.0, 10.0, 2.5, 90);
+    crate::ui::theme::soft_shadow(&p, r, 14.0, 10.0, 2.5, 90);
     p.rect_filled(r, 14.0, BG_PANEL);
     p.rect_stroke(r, 14.0, Stroke::new(1.0, accent.gamma_multiply(0.45)), StrokeKind::Inside);
 

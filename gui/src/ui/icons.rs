@@ -156,7 +156,7 @@ pub fn win_maximize(pt: &Painter, c: Pos2, s: f32, col: Color32, maximized: bool
         let back = Rect::from_center_size(p(c, s, 0.08, -0.08), vec2(0.5 * s, 0.5 * s));
         pt.rect_stroke(back, 1.5, st, StrokeKind::Middle);
         let front = Rect::from_center_size(p(c, s, -0.08, 0.08), vec2(0.5 * s, 0.5 * s));
-        pt.rect_filled(front, 1.5, crate::theme::BG_WINDOW);
+        pt.rect_filled(front, 1.5, crate::ui::theme::BG_WINDOW);
         pt.rect_stroke(front, 1.5, st, StrokeKind::Middle);
     } else {
         let r = Rect::from_center_size(c, vec2(0.62 * s, 0.62 * s));
@@ -296,7 +296,7 @@ pub fn sliders(pt: &Painter, c: Pos2, s: f32, col: Color32) {
     let st = Stroke::new(W, col);
     for (x, knob) in [(-0.3, 0.12), (0.0, -0.16), (0.3, 0.05)] {
         pt.line_segment([p(c, s, x, -0.38), p(c, s, x, 0.38)], st);
-        pt.circle_filled(p(c, s, x, knob), 0.11 * s, crate::theme::BG_WINDOW);
+        pt.circle_filled(p(c, s, x, knob), 0.11 * s, crate::ui::theme::BG_WINDOW);
         pt.circle_stroke(p(c, s, x, knob), 0.11 * s, st);
     }
 }
@@ -489,4 +489,15 @@ pub fn app_window(pt: &Painter, c: Pos2, s: f32, frame: Color32, accent: Color32
         let x = block.right() + s * 0.08;
         pt.line_segment([pos2(x, y), pos2(x + s * w, y)], Stroke::new(s * 0.035, Color32::from_white_alpha(70)));
     }
+}
+
+/// Capyro Converter: dos flechas, una para cada lado (⇄).
+pub fn convert(pt: &Painter, c: Pos2, s: f32, col: Color32) {
+    let st = Stroke::new(W, col);
+    // arriba: de izquierda a derecha
+    pt.line_segment([p(c, s, -0.38, -0.17), p(c, s, 0.36, -0.17)], st);
+    pt.add(Shape::line(vec![p(c, s, 0.18, -0.35), p(c, s, 0.38, -0.17), p(c, s, 0.18, 0.01)], st));
+    // abajo: de derecha a izquierda
+    pt.line_segment([p(c, s, 0.38, 0.19), p(c, s, -0.36, 0.19)], st);
+    pt.add(Shape::line(vec![p(c, s, -0.18, 0.01), p(c, s, -0.38, 0.19), p(c, s, -0.18, 0.37)], st));
 }

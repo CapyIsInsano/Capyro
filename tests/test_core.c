@@ -783,6 +783,93 @@ static void test_hwdec(const char *dir) {
     capyro_core_shutdown(core);
 }
 
+
+/* ---- Capyro Converter ---- */
+
+static int cancel_now(void *user, double f) {
+    (void)user;
+    (void)f;
+    return 1;
+}
+
+static void test_convert(const char *dir) {
+    char clip[1024], wav[1024], out[1024];
+    snprintf(clip, sizeof(clip), "%s/clip.mp4", dir);
+    snprintf(wav, sizeof(wav), "%s/tono.wav", dir);
+    if (!exists(clip) || !exists(wav)) {
+        printf("SALTEO: faltan clip.mp4 / tono.wav para Capyro Converter\n");
+        return;
+    }
+    CHECK(capyro_convert_has_encoder("flac", false));
+    CHECK(!capyro_convert_has_encoder("nada", false));
+
+    CapyroMediaProbe pr;
+    CHECK(capyro_media_probe(clip, &pr) == CAPYRO_OK);
+    CHECK(pr.has_video && pr.has_audio && pr.width == 320 && pr.height == 240);
+    CHECK(CLOSE_TO(pr.duration, 2.0, 0.2));
+    CHECK(strcmp(pr.audio_copy_ext, "m4a") == 0);
+
+    CapyroConvertOptions o;
+    CapyroConvertResult r;
+
+    /* video → audio sin pérdida */
+    memset(&o, 0, sizeof(o));
+    snprintf(o.audio_codec, sizeof(o.audio_codec), "flac");
+    snprintf(out, sizeof(out), "%s/conv-audio.flac", dir);
+    CHECK(capyro_convert(clip, out, &o, NULL, NULL, &r) == CAPYRO_OK);
+    CHECK(capyro_media_probe(out, &pr) == CAPYRO_OK && !pr.has_video && strcmp(pr.audio_codec, "flac") == 0);
+    remove(out);
+
+    /* copiar tal cual a otro formato */
+    memset(&o, 0, sizeof(o));
+    snprintf(o.video_codec, sizeof(o.video_codec), "copy");
+    snprintf(o.audio_codec, sizeof(o.audio_codec), "copy");
+    snprintf(out, sizeof(out), "%s/conv-copia.mkv", dir);
+    CHECK(capyro_convert(clip, out, &o, NULL, NULL, &r) == CAPYRO_OK);
+    CHECK(capyro_media_probe(out, &pr) == CAPYRO_OK && pr.has_video && pr.width == 320 && pr.has_audio);
+    CHECK(strcmp(r.video_encoder, "copiar") == 0);
+    remove(out);
+
+    /* audio → video (sin portada: fondo liso), achicado a 240p */
+    memset(&o, 0, sizeof(o));
+    snprintf(o.video_codec, sizeof(o.video_codec), "mpeg4");
+    snprintf(o.audio_codec, sizeof(o.audio_codec), "aac");
+    o.max_height = 240;
+    o.quality = 50;
+    snprintf(out, sizeof(out), "%s/conv-video.mkv", dir);
+    CHECK(capyro_convert(wav, out, &o, NULL, NULL, &r) == CAPYRO_OK);
+    CHECK(capyro_media_probe(out, &pr) == CAPYRO_OK && pr.has_video && pr.height == 240 && pr.has_audio);
+    CHECK(CLOSE_TO(pr.duration, 2.0, 0.4));
+    remove(out);
+
+    /* recortar: de 0,5 s a 1,5 s */
+    memset(&o, 0, sizeof(o));
+    snprintf(o.audio_codec, sizeof(o.audio_codec), "pcm");
+    o.start = 0.5;
+    o.end = 1.5;
+    snprintf(out, sizeof(out), "%s/conv-recorte.wav", dir);
+    CHECK(capyro_convert(clip, out, &o, NULL, NULL, &r) == CAPYRO_OK);
+    CHECK(capyro_media_probe(out, &pr) == CAPYRO_OK);
+    printf("converter: recorte de 1 s → %.3f s\n", pr.duration);
+    CHECK(CLOSE_TO(pr.duration, 1.0, 0.06));
+    remove(out);
+
+    /* cancelar: no queda nada a medias */
+    memset(&o, 0, sizeof(o));
+    snprintf(o.audio_codec, sizeof(o.audio_codec), "flac");
+    snprintf(out, sizeof(out), "%s/conv-cancelado.flac", dir);
+    CHECK(capyro_convert(clip, out, &o, cancel_now, NULL, &r) == CAPYRO_ERR_CANCELLED);
+    CHECK(!exists(out));
+
+    /* nunca sobre el mismo archivo; un códec que no entra en el formato, con aviso */
+    CHECK(capyro_convert(clip, clip, &o, NULL, NULL, &r) == CAPYRO_ERR_INVALID_ARG);
+    memset(&o, 0, sizeof(o));
+    snprintf(o.audio_codec, sizeof(o.audio_codec), "copy");
+    snprintf(out, sizeof(out), "%s/conv-mal.mp3", dir);
+    CHECK(capyro_convert(clip, out, &o, NULL, NULL, &r) == CAPYRO_ERR_UNSUPPORTED);
+    CHECK(r.message[0] != '\0' && !exists(out));
+}
+
 int main(int argc, char **argv) {
     test_os();
     test_basics();
@@ -790,6 +877,7 @@ int main(int argc, char **argv) {
     if (argc > 1) {
         test_media(argv[1]);
         test_hwdec(argv[1]);
+        test_convert(argv[1]);
     } else {
         printf("sin carpeta de media: salteo las pruebas de decodificación\n");
     }

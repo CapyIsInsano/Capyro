@@ -4,26 +4,41 @@
 //! `main.c` crea el núcleo y llama a `capyro_gui_run`, que corre el event
 //! loop de eframe/egui hasta que se cierra la ventana.
 
-mod alto;
-mod app;
-mod cache;
-mod changes;
-mod config;
-mod errlog;
-mod ffi;
-mod paths;
-mod playlists;
-mod render;
-mod formats;
-mod session;
-mod uninstall;
-mod updater;
-mod perf;
-mod videoinfo;
-mod viz;
-mod wine;
-mod icons;
-mod theme;
+mod app; // la ventana: vistas, menús, Capyro Studio y Capyro Converter
+mod ffi; // el puente con el núcleo en C
+mod updater; // buscar e instalar actualizaciones
+
+/// Lo que se dibuja: colores y fuentes, íconos, el modo Alto y el visualizador.
+mod ui {
+    pub mod alto;
+    pub mod icons;
+    pub mod theme;
+    pub mod viz;
+}
+
+/// Lo que toca el sistema: configuración, carpetas, sesión, playlists,
+/// caché, registros, rendimiento, cómo se dibuja la ventana y Wine.
+mod system {
+    pub mod cache;
+    pub mod changelog;
+    pub mod config;
+    pub mod errlog;
+    pub mod paths;
+    pub mod perf;
+    pub mod playlists;
+    pub mod render;
+    pub mod session;
+    pub mod uninstall;
+    pub mod wine;
+}
+
+/// Datos de los formatos: resúmenes de cada uno y nombres de resoluciones.
+mod media {
+    pub mod formats;
+    pub mod videoinfo;
+}
+
+use system::{config, errlog, render, wine};
 
 use std::ffi::c_int;
 use std::panic::{catch_unwind, AssertUnwindSafe};

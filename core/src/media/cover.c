@@ -357,6 +357,49 @@ char *cover_ogg_picture(const uint8_t *data, size_t size, const char *mime, int 
 
 /* ------------------------------------------------------------------ */
 /* API pública                                                         */
+/* MKV: la portada va como adjunto ("cover.jpg"), no como pista de imagen
+ * (copiada como pista, quedaría como un video de un cuadro). */
+int cover_add_mkv_attachment(AVFormatContext *out, const uint8_t *data, size_t size, int codec_id) {
+    AVStream *so = avformat_new_stream(out, NULL);
+    if (!so) {
+        return CAPYRO_ERR_NO_MEMORY;
+    }
+    so->codecpar->codec_type = AVMEDIA_TYPE_ATTACHMENT;
+    so->codecpar->codec_id = (enum AVCodecID)codec_id;
+    so->codecpar->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!so->codecpar->extradata) {
+        return CAPYRO_ERR_NO_MEMORY;
+    }
+    memcpy(so->codecpar->extradata, data, size);
+    so->codecpar->extradata_size = (int)size;
+    bool png = codec_id == AV_CODEC_ID_PNG;
+    av_dict_set(&so->metadata, "filename", png ? "cover.png" : "cover.jpg", 0);
+    av_dict_set(&so->metadata, "mimetype", png ? "image/png" : "image/jpeg", 0);
+    return CAPYRO_OK;
+}
+
+/* La imagen de un archivo (jpg, png, webp...) ya decodificada. */
+AVFrame *cover_image_frame(const char *image_path) {
+    AVFormatContext *fmt = NULL;
+    AVPacket *pkt = NULL;
+    int s = -1;
+    if (read_image_packet(image_path, &fmt, &pkt, &s) != CAPYRO_OK) {
+        return NULL;
+    }
+    AVFrame *frame = decode_packet(fmt->streams[s]->codecpar, pkt);
+    av_packet_free(&pkt);
+    avformat_close_input(&fmt);
+    return frame;
+}
+
+/* La portada de una pista "imagen adjunta" ya decodificada. */
+AVFrame *cover_attached_frame(const AVStream *st) {
+    if (!st || !(st->disposition & AV_DISPOSITION_ATTACHED_PIC) || st->attached_pic.size <= 0) {
+        return NULL;
+    }
+    return decode_packet(st->codecpar, &st->attached_pic);
+}
+
 /* ------------------------------------------------------------------ */
 
 bool capyro_cover_supported(const char *path) {

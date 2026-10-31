@@ -275,7 +275,9 @@ const char *capyro_core_error_string(int err) {
     case CAPYRO_ERR_DECODE:       return "no se pudo leer el archivo (¿está dañado?)";
     case CAPYRO_ERR_NO_STREAMS:   return "el archivo no tiene audio ni video";
     case CAPYRO_ERR_THREAD:       return "no se pudo iniciar la decodificación";
-    case CAPYRO_ERR_WRITE:        return "no se pudo guardar las etiquetas (¿el archivo está en uso?)";
+    case CAPYRO_ERR_WRITE:        return "no se pudo escribir el archivo (¿está en uso o el disco está lleno?)";
+    case CAPYRO_ERR_CANCELLED:    return "cancelado";
+    case CAPYRO_ERR_ENCODER:      return "no hay con qué codificar a ese formato";
     default:                      return "error desconocido";
     }
 }

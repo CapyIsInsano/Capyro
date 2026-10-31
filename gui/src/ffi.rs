@@ -6,6 +6,9 @@
 use std::ffi::{c_char, c_int, c_long, CStr, CString};
 use std::path::{Path, PathBuf};
 
+mod convert; // Capyro Converter
+pub use convert::*;
+
 #[repr(C)]
 pub struct CapyroCore {
     _private: [u8; 0],

@@ -104,6 +104,36 @@ impl Visualizer {
     }
 }
 
+impl Visualizer {
+    /// Barras a los dos lados de `art` (la portada): salen de sus bordes
+    /// hacia afuera, hasta `reach` de largo, con los graves abajo y los
+    /// agudos arriba (las 40 bandas, de a dos por renglón).
+    pub fn draw_sides(&self, painter: &Painter, art: Rect, reach: f32, gap: f32, color: Color32) {
+        let rows = BANDS / 2;
+        let space = 3.0;
+        let h = art.height() * 0.92;
+        let thick = ((h - space * (rows as f32 - 1.0)) / rows as f32).max(1.0);
+        let bottom = art.center().y + h / 2.0;
+        for r in 0..rows {
+            let level = self.levels[2 * r].max(self.levels[2 * r + 1]);
+            let peak = self.peaks[2 * r].max(self.peaks[2 * r + 1]);
+            let y1 = bottom - r as f32 * (thick + space);
+            let y0 = y1 - thick;
+            let len = (level * reach).max(1.5);
+            let plen = (peak * reach).max(1.5) + 3.0;
+            let alpha = 0.35 + 0.65 * level;
+            let c = color.gamma_multiply(alpha);
+            let cp = color.gamma_multiply(0.8);
+            // izquierda (crece hacia la izquierda) y derecha (hacia la derecha)
+            let (lx, rx) = (art.left() - gap, art.right() + gap);
+            painter.rect_filled(Rect::from_min_max(pos2(lx - len, y0), pos2(lx, y1)), thick / 2.0, c);
+            painter.rect_filled(Rect::from_min_max(pos2(rx, y0), pos2(rx + len, y1)), thick / 2.0, c);
+            painter.rect_filled(Rect::from_min_size(pos2(lx - plen - 2.0, y0), vec2(2.0, thick)), 1.0, cp);
+            painter.rect_filled(Rect::from_min_size(pos2(rx + plen, y0), vec2(2.0, thick)), 1.0, cp);
+        }
+    }
+}
+
 /// FFT radix-2 en el lugar (N potencia de 2).
 fn fft(re: &mut [f32], im: &mut [f32]) {
     let n = re.len();

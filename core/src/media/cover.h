@@ -7,6 +7,9 @@
 #include <stdint.h>
 
 struct AVOutputFormat;
+struct AVFormatContext;
+struct AVFrame;
+struct AVStream;
 
 /* Una portada lista para meter en un archivo. */
 typedef struct {
@@ -32,5 +35,14 @@ char *cover_ogg_picture(const uint8_t *data, size_t size, const char *mime, int 
 
 /* MIME de una imagen por su códec (NULL si no es JPEG ni PNG). */
 const char *cover_mime(int codec_id);
+
+/* MKV: la portada va como adjunto ("cover.jpg"/"cover.png"), no como pista
+ * de imagen (copiada como pista, quedaría como un video de un cuadro). */
+int cover_add_mkv_attachment(struct AVFormatContext *out, const uint8_t *data, size_t size, int codec_id);
+
+/* Una imagen (jpg, png, webp, bmp...) o la portada de una pista, ya
+ * decodificada (av_frame_free al terminar). NULL si no se pudo. */
+struct AVFrame *cover_image_frame(const char *image_path);
+struct AVFrame *cover_attached_frame(const struct AVStream *st);
 
 #endif /* CAPYRO_COVER_H */
