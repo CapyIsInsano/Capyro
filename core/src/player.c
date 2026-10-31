@@ -39,6 +39,7 @@
 
 #define MAX_VIDEO_W      1920
 #define MAX_VIDEO_H      1080
+#define CAPTURE_MAX_SIDE 8192  /* capturar fotograma: hasta 8K sin achicar */
 #define MAX_COVER_SIDE   720   /* la carátula se ve como mucho a ~340 puntos (x2 en pantallas HiDPI) */
 #define AUDIO_AHEAD_SEC  0.5    /* cuánto audio decodificado mantener listo */
 #define PKT_QUEUE_BYTES  (32u * 1024u * 1024u)
@@ -417,8 +418,12 @@ static bool convert_frame(Player *p, AVFrame *frame, VideoSlot *slot, int max_w,
         dw = ch;
         dh = cw;
     }
+    /* achicando mucho (4K/8K en una ventana): AREA promedia los píxeles,
+     * se ve igual de bien y cuesta la mitad que BILINEAR (8K → 1080p:
+     * 12 ms en vez de 24 por cuadro) */
+    int flags = (w >= 2 * cw || h >= 2 * ch) ? SWS_AREA : SWS_BILINEAR;
     p->sws = sws_getCachedContext(p->sws, w, h, (enum AVPixelFormat)frame->format,
-                                  cw, ch, AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
+                                  cw, ch, AV_PIX_FMT_RGBA, flags, NULL, NULL, NULL);
     if (!p->sws) {
         return false;
     }
@@ -823,8 +828,95 @@ static void reopen_video(CapyroCore *core, bool force_cpu, const char *why) {
     cp_mutex_unlock(&core->lock);
 }
 
+/* ------------------------------------------------------------------ */
+/* video que no llega (8K sin GPU, máquinas viejas)                     */
+/* ------------------------------------------------------------------ */
+
+#define LATE_SKIP_NONREF 0.25  /* más atrás que esto: el decodificador saltea los cuadros B */
+#define LATE_WAIT_KEY    1.5   /* más atrás que esto: se salta al próximo cuadro clave */
+#define LATE_MAX_RUN_SEC 0.35  /* tirando cuadros, igual se muestra uno cada tanto */
+
+static void set_skip_nonref(Player *p, bool on) {
+    /* contra lo que tiene el decodificador (al pasar de GPU a CPU es otro) */
+    enum AVDiscard want = on ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+    if (p->vctx && p->vctx->skip_frame != want) {
+        p->vctx->skip_frame = want;
+        /* y sin el filtro de bloques (~10 % menos de trabajo; se nota poco) */
+        p->vctx->skip_loop_filter = on ? AVDISCARD_ALL : AVDISCARD_DEFAULT;
+    }
+    p->v_skip_nonref = on;
+}
+
+static void reset_late(Player *p) {
+    p->v_late_run = 0;
+    p->v_wait_key = false;
+    p->v_shown_once = false;
+    set_skip_nonref(p, false);
+}
+
+/* Muy atrasado: tirar paquetes hasta el próximo cuadro clave y mandarlo al
+ * decodificador (que se vacía antes). Devuelve true si hizo algo. */
+static bool skip_to_key(Player *p) {
+    AVPacket *pkt;
+    while ((pkt = pq_pop(&p->vq))) {
+        if (pkt->flags & AV_PKT_FLAG_KEY) {
+            avcodec_flush_buffers(p->vctx);
+            avcodec_send_packet(p->vctx, pkt);
+            av_packet_free(&pkt);
+            p->v_wait_key = false;
+            p->v_shown_once = false; /* el cuadro clave se muestra (es lo más nuevo que hay) */
+            return true;
+        }
+        av_packet_free(&pkt);
+    }
+    if (p->demux_eof) {
+        /* no hay más cuadros clave: el video termina acá */
+        p->v_wait_key = false;
+        p->v_done = true;
+        return true;
+    }
+    return false; /* todavía no llegó: el demuxer trae más */
+}
+
+/* ¿Este cuadro llegó tarde? Ajusta cómo decodificar según lo atrasado que
+ * esté el video y devuelve true si conviene tirarlo (sin convertirlo: con
+ * 8K, convertir también cuesta). */
+static bool video_late(CapyroCore *core, double t, double frame_dur) {
+    Player *p = &core->player;
+    cp_mutex_lock(&core->lock);
+    bool playing = core->state == CAPYRO_STATE_PLAYING && !core->seek_req;
+    double clock = player_clock_locked(core);
+    cp_mutex_unlock(&core->lock);
+    if (!playing || t < 0.0 || !p->v_shown_once) {
+        return false;
+    }
+    double late = clock - t;
+    set_skip_nonref(p, p->v_skip_nonref ? late > 0.05 : late > LATE_SKIP_NONREF);
+    if (late > LATE_WAIT_KEY) {
+        p->v_wait_key = true;
+    }
+    if (late <= frame_dur * 1.5) {
+        return false;
+    }
+    /* tarde: se tira, pero no todos (si no, la imagen se congela) */
+    int max_run = (int)(LATE_MAX_RUN_SEC / (frame_dur > 0.0 ? frame_dur : 0.04));
+    if (p->v_late_run < (max_run > 1 ? max_run : 1)) {
+        p->v_late_run++;
+        return true;
+    }
+    return false;
+}
+
 static bool video_step(CapyroCore *core) {
     Player *p = &core->player;
+    if (p->v_wait_key) {
+        if (!skip_to_key(p)) {
+            return false;
+        }
+        if (p->v_done) {
+            return true;
+        }
+    }
     int err = 0;
     int r = pull_frame(p->vctx, &p->vq, p->frame, p->demux_eof, &p->v_flushed, &p->v_done, &err);
     if (r < 1) {
@@ -847,6 +939,14 @@ static bool video_step(CapyroCore *core) {
             return true;
         }
         p->v_drop_until = -1.0;
+    }
+    {
+        AVRational fr = st->avg_frame_rate;
+        double frame_dur = (fr.num > 0 && fr.den > 0) ? 1.0 / av_q2d(fr) : 0.04;
+        if (video_late(core, t, frame_dur)) {
+            av_frame_unref(f);
+            return true;
+        }
     }
 
     cp_mutex_lock(&core->lock);
@@ -894,6 +994,8 @@ static bool video_step(CapyroCore *core) {
     }
 
     if (ok) {
+        p->v_shown_once = true;
+        p->v_late_run = 0;
         cp_mutex_lock(&core->lock);
         if (!core->seek_req && core->vq_len < VQ_MAX) {
             core->vq[(core->vq_head + core->vq_len) % VQ_SLOTS] = idx;
@@ -921,6 +1023,7 @@ static void do_seek(CapyroCore *core, double target, uint64_t serial) {
     }
     p->demux_eof = p->a_flushed = p->v_flushed = p->a_done = p->v_done = false;
     p->a_drop_until = p->v_drop_until = target;
+    reset_late(p);
     p->seek_serial_done = serial;
 
     cp_mutex_lock(&core->lock);
@@ -988,7 +1091,25 @@ static void decode_thread(void *arg) {
             worked |= demux_one(core);
         }
         if (want_audio) {
-            worked |= audio_step(core, speed, pitch);
+            /* el audio primero, hasta llenar el colchón: con videos pesados
+             * (8K) cada cuadro tarda y, si no, el sonido se corta */
+            size_t target_ring = (size_t)(core->out_rate * AUDIO_AHEAD_SEC);
+            for (int n = 0; n < 64; n++) {
+                if (p->aq.count == 0 && !p->demux_eof && p->aq.bytes + p->vq.bytes < PKT_QUEUE_BYTES) {
+                    demux_one(core);
+                }
+                if (!audio_step(core, speed, pitch)) {
+                    break;
+                }
+                worked = true;
+                cp_mutex_lock(&core->lock);
+                ring = core->ring_len;
+                bool stop = core->seek_req;
+                cp_mutex_unlock(&core->lock);
+                if (stop || p->a_done || ring >= target_ring) {
+                    break;
+                }
+            }
         }
         if (want_video) {
             worked |= video_step(core);
@@ -1244,6 +1365,7 @@ int player_open(CapyroCore *core, const char *path) {
 
     p->start_time   = p->fmt->start_time != AV_NOPTS_VALUE ? (double)p->fmt->start_time / AV_TIME_BASE : 0.0;
     p->a_drop_until = p->v_drop_until = -1.0;
+    reset_late(p);
 
     int vw = 0, vh = 0;
     double vfps = 0.0;
@@ -1431,8 +1553,9 @@ bool capyro_core_capture_frame(CapyroCore *core, CapyroImage *out) {
     if (have && f->width > 0 && f->height > 0) {
         int w = f->width, h = f->height;
         double scale = 1.0;
-        if (w > 3840) scale = 3840.0 / w;
-        if (h * scale > 3840) scale = 3840.0 / h;
+        /* hasta 8K (8192 de lado) se captura en tamaño completo */
+        if (w > CAPTURE_MAX_SIDE) scale = (double)CAPTURE_MAX_SIDE / w;
+        if (h * scale > CAPTURE_MAX_SIDE) scale = (double)CAPTURE_MAX_SIDE / h;
         int dw = (int)(w * scale + 0.5), dh = (int)(h * scale + 0.5);
         struct SwsContext *sws = sws_getContext(w, h, (enum AVPixelFormat)f->format, dw, dh, AV_PIX_FMT_RGBA,
                                                 SWS_BICUBIC, NULL, NULL, NULL);

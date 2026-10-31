@@ -540,3 +540,70 @@ mod tests {
         assert!(edge_fade(pos2(0.0, 0.0), Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0)), 4.0) == 0.0);
     }
 }
+
+/* ---------------- aura (lo "premium" de Alto) ---------------- */
+
+/// Contorno de un rectángulo redondeado, agrandado `grow` puntos, con `n`
+/// puntos por esquina (en sentido horario desde arriba a la izquierda).
+fn rounded_outline(r: Rect, radius: f32, grow: f32, n: usize) -> Vec<Pos2> {
+    let rad = radius.min(r.width() / 2.0).min(r.height() / 2.0).max(0.0);
+    let corners = [
+        (pos2(r.left() + rad, r.top() + rad), 180.0f32),
+        (pos2(r.right() - rad, r.top() + rad), 270.0),
+        (pos2(r.right() - rad, r.bottom() - rad), 0.0),
+        (pos2(r.left() + rad, r.bottom() - rad), 90.0),
+    ];
+    let mut pts = Vec::with_capacity(4 * n);
+    for (c, start) in corners {
+        for k in 0..n {
+            let a = (start + 90.0 * k as f32 / (n - 1) as f32).to_radians();
+            pts.push(c + vec2(a.cos(), a.sin()) * (rad + grow));
+        }
+    }
+    pts
+}
+
+/// Aura de luz alrededor de `rect`: un borde que va de `a` a `b` y gira
+/// despacio (`t` = segundos), más intenso con `intensity` (0..1). Es una sola
+/// malla (un anillo que se desvanece hacia afuera).
+pub fn aura(painter: &egui::Painter, rect: Rect, radius: f32, a: Color32, b: Color32, t: f64, intensity: f32) {
+    if !on() || intensity <= 0.002 {
+        return;
+    }
+    let spread = 20.0 + 14.0 * intensity;
+    let inner = rounded_outline(rect, radius, -1.0, 10);
+    let outer = rounded_outline(rect, radius, spread, 10);
+    let n = inner.len();
+    // un poco más claros: sobre la luz ambiente tienen que destacar
+    let (ca, cb) = (rgb(a.lerp_to_gamma(Color32::WHITE, 0.2)), rgb(b.lerp_to_gamma(Color32::WHITE, 0.3)));
+    let turn = (t * 0.18) as f32; // una vuelta cada ~5,5 s
+    let mut mesh = egui::Mesh::default();
+    for i in 0..n {
+        let f = i as f32 / n as f32;
+        // dos olas de color que giran alrededor
+        let w = 0.5 + 0.5 * ((f + turn) * std::f32::consts::TAU * 2.0).sin();
+        let col = [ca[0] + (cb[0] - ca[0]) * w, ca[1] + (cb[1] - ca[1]) * w, ca[2] + (cb[2] - ca[2]) * w];
+        let alpha = (0.50 + 0.40 * w) * intensity;
+        mesh.colored_vertex(inner[i], premul(col[0], col[1], col[2], alpha));
+        mesh.colored_vertex(outer[i], Color32::TRANSPARENT);
+    }
+    for i in 0..n as u32 {
+        let j = (i + 1) % n as u32;
+        let (a0, a1, b0, b1) = (2 * i, 2 * i + 1, 2 * j, 2 * j + 1);
+        mesh.add_triangle(a0, a1, b1);
+        mesh.add_triangle(a0, b1, b0);
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
+/// Reflejo de vidrio sobre `rect`: un brillo suave donde está el mouse y un
+/// filo de luz en el borde. `k` = cuánto se nota (0..1).
+pub fn glass(painter: &egui::Painter, rect: Rect, radius: f32, pointer: Pos2, k: f32) {
+    if !on() || k <= 0.002 {
+        return;
+    }
+    let p = painter.clone().with_clip_rect(rect.shrink(radius * 0.3).intersect(painter.clip_rect()));
+    let at = pos2(pointer.x.clamp(rect.left(), rect.right()), pointer.y.clamp(rect.top(), rect.bottom()));
+    glow(&p, at, rect.width() * 0.55, Color32::WHITE, 0.16 * k);
+    painter.rect_stroke(rect, radius, Stroke::new(1.0, Color32::from_white_alpha((46.0 * k) as u8)), egui::StrokeKind::Inside);
+}

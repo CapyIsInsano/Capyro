@@ -163,6 +163,49 @@ static void drop_ogg_pictures(AVDictionary **d) {
     }
 }
 
+/* MKV: la portada va como adjunto ("cover.jpg"), no como pista de imagen
+ * (copiada como pista, quedaría como un video de un cuadro). */
+static int add_mkv_cover(AVFormatContext *out, const uint8_t *data, size_t size, int codec_id) {
+    AVStream *so = avformat_new_stream(out, NULL);
+    if (!so) {
+        return CAPYRO_ERR_NO_MEMORY;
+    }
+    so->codecpar->codec_type = AVMEDIA_TYPE_ATTACHMENT;
+    so->codecpar->codec_id = (enum AVCodecID)codec_id;
+    so->codecpar->extradata = av_mallocz(size + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!so->codecpar->extradata) {
+        return CAPYRO_ERR_NO_MEMORY;
+    }
+    memcpy(so->codecpar->extradata, data, size);
+    so->codecpar->extradata_size = (int)size;
+    bool png = codec_id == AV_CODEC_ID_PNG;
+    av_dict_set(&so->metadata, "filename", png ? "cover.png" : "cover.jpg", 0);
+    av_dict_set(&so->metadata, "mimetype", png ? "image/png" : "image/jpeg", 0);
+    return CAPYRO_OK;
+}
+
+/* Copia los capítulos (videos y audiolibros los tienen). */
+static int copy_chapters(AVFormatContext *in, AVFormatContext *out) {
+    for (unsigned i = 0; i < in->nb_chapters; i++) {
+        const AVChapter *ci = in->chapters[i];
+        AVChapter *co = av_mallocz(sizeof(*co));
+        if (!co) {
+            return CAPYRO_ERR_NO_MEMORY;
+        }
+        co->id = ci->id;
+        co->time_base = ci->time_base;
+        co->start = ci->start;
+        co->end = ci->end;
+        av_dict_copy(&co->metadata, ci->metadata, 0);
+        if (av_dynarray_add_nofree(&out->chapters, &out->nb_chapters, co) < 0) {
+            av_dict_free(&co->metadata);
+            av_free(co);
+            return CAPYRO_ERR_NO_MEMORY;
+        }
+    }
+    return CAPYRO_OK;
+}
+
 static bool is_attached_pic(const AVStream *st) {
     return st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && (st->disposition & AV_DISPOSITION_ATTACHED_PIC);
 }
@@ -189,6 +232,7 @@ int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mod
         return CAPYRO_ERR_UNSUPPORTED; /* WAV y compañía: no guardan portada */
     }
     const bool ogg = cover_muxer_is_ogg(fmt);
+    const bool mkv = cover_muxer_is_mkv(fmt);
 
     /* la imagen nueva se prepara antes de tocar nada */
     CoverData cover;
@@ -247,18 +291,34 @@ int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mod
     for (unsigned i = 0; i < in->nb_streams; i++) {
         AVStream *si = in->streams[i];
         map[i] = -1;
-        if (si->codecpar->codec_type != AVMEDIA_TYPE_AUDIO && si->codecpar->codec_type != AVMEDIA_TYPE_VIDEO &&
-            si->codecpar->codec_type != AVMEDIA_TYPE_ATTACHMENT) {
+        enum AVMediaType type = si->codecpar->codec_type;
+        if (type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_ATTACHMENT &&
+            type != AVMEDIA_TYPE_SUBTITLE) {
+            continue;
+        }
+        /* subtítulos: si el formato los acepta (SRT en MKV, mov_text en MP4) */
+        if (type == AVMEDIA_TYPE_SUBTITLE && avformat_query_codec(fmt, si->codecpar->codec_id, FF_COMPLIANCE_NORMAL) != 1) {
             continue;
         }
         if (is_attached_pic(si)) {
-            /* la portada vieja: se copia solo si se deja (y en Ogg va como etiqueta) */
+            /* la portada vieja: se copia solo si se deja (en Ogg va como etiqueta,
+             * en MKV como adjunto) */
             if (cover_mode != CAPYRO_COVER_KEEP) {
                 continue;
             }
             if (ogg) {
                 if (!old_pic && si->attached_pic.size > 0) {
                     old_pic = si;
+                }
+                continue;
+            }
+            if (mkv) {
+                if (si->attached_pic.size > 0) {
+                    int e = add_mkv_cover(out, si->attached_pic.data, (size_t)si->attached_pic.size, si->codecpar->codec_id);
+                    if (e != CAPYRO_OK) {
+                        ret = e;
+                        goto done;
+                    }
                 }
                 continue;
             }
@@ -283,6 +343,10 @@ int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mod
     }
     av_dict_copy(&out->metadata, in->metadata, 0);
     apply_tags(&out->metadata, tags);
+    if (copy_chapters(in, out) != CAPYRO_OK) {
+        ret = CAPYRO_ERR_NO_MEMORY;
+        goto done;
+    }
 
     if (ogg) {
         /* la portada de Ogg es una etiqueta: se arma de nuevo (o no). Si
@@ -323,6 +387,12 @@ int capyro_tags_write_ex(const char *path, const CapyroTags *tags, int cover_mod
             } else {
                 av_free(b64);
             }
+        }
+    } else if (cover_mode == CAPYRO_COVER_SET && mkv) {
+        int e = add_mkv_cover(out, cover.data, cover.size, cover.codec_id);
+        if (e != CAPYRO_OK) {
+            ret = e;
+            goto done;
         }
     } else if (cover_mode == CAPYRO_COVER_SET) {
         /* pista de imagen nueva, marcada como portada */
@@ -418,5 +488,43 @@ done:
         remove_if_exists(tmp);
         return CAPYRO_ERR_WRITE;
     }
+    return CAPYRO_OK;
+}
+
+int capyro_audio_info(const char *path, CapyroAudioInfo *out) {
+    if (!out) {
+        return CAPYRO_ERR_INVALID_ARG;
+    }
+    memset(out, 0, sizeof(*out));
+    AVFormatContext *fmt = NULL;
+    int err = open_input(path, &fmt);
+    if (err != CAPYRO_OK) {
+        return err;
+    }
+    int s = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    if (s < 0) {
+        avformat_close_input(&fmt);
+        return CAPYRO_ERR_UNSUPPORTED;
+    }
+    const AVCodecParameters *par = fmt->streams[s]->codecpar;
+    const char *name = avcodec_get_name(par->codec_id);
+    /* los PCM de WAV/AIFF se llaman "pcm_s16le": alcanza con "PCM" */
+    if (!strncmp(name, "pcm_", 4)) {
+        name = "pcm";
+    }
+    size_t i = 0;
+    for (; name[i] && i + 1 < sizeof(out->codec); i++) {
+        char c = name[i];
+        out->codec[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+    }
+    out->codec[i] = '\0';
+    out->sample_rate = par->sample_rate;
+    out->channels = par->ch_layout.nb_channels;
+    out->bit_rate = par->bit_rate > 0 ? par->bit_rate : (fmt->bit_rate > 0 ? fmt->bit_rate : 0);
+    out->bits = par->bits_per_raw_sample > 0 ? par->bits_per_raw_sample : 0;
+    if (!out->bits && !strcmp(out->codec, "PCM")) {
+        out->bits = par->bits_per_coded_sample;
+    }
+    avformat_close_input(&fmt);
     return CAPYRO_OK;
 }

@@ -260,6 +260,9 @@ impl CapyroApp {
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(11.0) } else { regular(11.0) }, col);
             if chip.resp.clicked() {
+                if !selected {
+                    self.effect_sound();
+                }
                 // un preset es del ecualizador normal: vuelve a él (las 15 bandas
                 // de Capyro Studio quedan guardadas, apagadas)
                 fx = AudioFx { enabled: true, eq15_on: false, eq15: fx.eq15, ..*preset };
@@ -485,6 +488,9 @@ impl CapyroApp {
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             body.text(rr.center(), Align2::CENTER_CENTER, *name, if selected { bold(fs) } else { regular(fs) }, col);
             if chip.resp.clicked() {
+                if !selected {
+                    self.effect_sound();
+                }
                 // un preset es del ecualizador normal: vuelve a él
                 fx = AudioFx { enabled: true, eq15_on: false, eq15: fx.eq15, ..*preset };
                 fx_changed = true;

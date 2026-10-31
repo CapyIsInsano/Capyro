@@ -41,7 +41,7 @@ const ICON_PNG: &[u8] = include_bytes!("../../assets/capyro_logo_256.png");
 
 /// Slots de efectos: 0..=2 capibara (logo), 3 error, 4 inicio, 5 actualización,
 /// 6 clic de botón, 7 captura, 8 "lista para descargar", 9 cerrar/retraer.
-const SOUNDS: [&[u8]; 10] = [
+const SOUNDS: [&[u8]; 11] = [
     include_bytes!("../../assets/sounds/capybara1.mp3"),
     include_bytes!("../../assets/sounds/capybara2.mp3"),
     include_bytes!("../../assets/sounds/capybara3.mp3"),
@@ -52,6 +52,7 @@ const SOUNDS: [&[u8]; 10] = [
     include_bytes!("../../assets/sounds/photo.mp3"),
     include_bytes!("../../assets/sounds/ready.mp3"),
     include_bytes!("../../assets/sounds/retraction.mp3"),
+    include_bytes!("../../assets/sounds/efecto.mp3"),
 ];
 const SFX_CAPYBARAS: usize = 3;
 const SFX_ERROR: usize = 3;
@@ -61,11 +62,13 @@ const SFX_CLICK: usize = 6;
 const SFX_PHOTO: usize = 7;
 const SFX_READY: usize = 8;
 const SFX_RETRACT: usize = 9;
+/// Al cambiar de efecto (un preset: Rock, Lo-fi, Noche...).
+const SFX_EFFECT: usize = 10;
 /// Con `CAPYRO_DEBUG_SFX=1` cada sonido se anota en la terminal (para probar
 /// sin parlantes o ver cuál suena).
 fn debug_sfx(slot: usize) {
-    const NAMES: [&str; 10] =
-        ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "click", "photo", "ready", "retraction"];
+    const NAMES: [&str; 11] =
+        ["capibara1", "capibara2", "capibara3", "error", "inicio", "actualizacion", "click", "photo", "ready", "retraction", "efecto"];
     if std::env::var_os("CAPYRO_DEBUG_SFX").is_some() {
         eprintln!("capyro: sonido {}", NAMES.get(slot).copied().unwrap_or("?"));
     }
@@ -149,6 +152,9 @@ struct NowPlaying {
     title: String,
     artist: String,
     album: String,
+    /// Vista de música: "2024 · Lo-fi" (año y género) y "MP3 · 44,1 kHz · 320 kbps".
+    extra: String,
+    tech: String,
     /// La cola (compartida: no se copia en cada cuadro).
     queue: std::rc::Rc<Vec<String>>,
 }
@@ -684,6 +690,13 @@ impl CapyroApp {
         debug_sfx(slot);
         self.core.sfx_play(slot);
         self.sfx_frame.set(self.last_frame);
+    }
+
+    /// Suena al elegir otro efecto (si los sonidos de la interfaz están prendidos).
+    fn effect_sound(&self) {
+        if self.cfg.click_sound {
+            self.sfx(SFX_EFFECT);
+        }
     }
 
     /// Final del frame: si se tocó un botón y nada sonó, suena el clic.
@@ -1858,11 +1871,28 @@ impl CapyroApp {
         let file = self.core.current_file();
         let title = self.core.title();
         let title = if title.trim().is_empty() { file_name(&file) } else { title };
+        // año, género y datos técnicos: solo al cambiar de archivo (se lee el archivo)
+        let (extra, tech) = if file == self.np.file {
+            (std::mem::take(&mut self.np.extra), std::mem::take(&mut self.np.tech))
+        } else if file.is_empty() || self.core.media_kind() != MediaKind::Audio {
+            (String::new(), String::new())
+        } else {
+            let path = Path::new(&file);
+            let extra = ffi::read_tags(path)
+                .map(|t| {
+                    let year: String = t.year.trim().chars().take(4).collect();
+                    [year, t.genre.trim().to_owned()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+                })
+                .unwrap_or_default();
+            (extra, ffi::audio_info(path).map(|a| a.summary()).unwrap_or_default())
+        };
         self.np = NowPlaying {
             serial: Some(serial),
             title,
             artist: self.core.artist(),
             album: self.core.album(),
+            extra,
+            tech,
             queue: std::rc::Rc::new(self.core.playlist()),
             file,
         };
@@ -1969,6 +1999,15 @@ impl CapyroApp {
             crate::alto::glow(&painter, pos2(fill_x, ty), 16.0 + 10.0 * grow, accent, 0.12 * playing as u8 as f32 + 0.35 * grow);
         }
         painter.rect_filled(Rect::from_min_max(track.min, pos2(fill_x, track.max.y)), th / 2.0, accent);
+        // Alto: un destello recorre lo que ya sonó, cada 3 segundos
+        if crate::alto::on() && self.core.state() == State::Playing && fill_x - left > 24.0 {
+            let now = ui.ctx().input(|i| i.time);
+            let ph = (now / 3.0).fract() as f32;
+            let x = left + (fill_x - left) * ph;
+            let clip = Rect::from_min_max(pos2(left, ty - 8.0), pos2(fill_x, ty + 8.0));
+            let p = painter.clone().with_clip_rect(clip.intersect(painter.clip_rect()));
+            crate::alto::glow(&p, pos2(x, ty), 26.0, Color32::WHITE, 0.55 * (1.0 - (2.0 * ph - 1.0).abs()));
+        }
         if grow > 0.001 {
             let pressed = ctx.animate_bool_with_time(Id::unique("capyro-seek-press"), seek.dragged(), crate::perf::t(0.08));
             painter.circle_filled(pos2(fill_x, ty), 6.5 * grow + 1.5 * pressed, accent);
@@ -2673,6 +2712,24 @@ impl CapyroApp {
         // en la burbuja angosta de la vista de música, los chips con letra más chica
         let chip_fs = if x1 - x0 < 240.0 { 10.5 } else { 11.5 };
         painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Ajustes", bold(13.5), TEXT);
+        // vista clásica (videos): de acá se abre Capyro Studio (en la de
+        // música tiene su botón en la burbuja)
+        if dock.is_none() {
+            let w = 112.0;
+            let r = Rect::from_min_max(pos2(x1 - w, y - 13.0), pos2(x1, y + 13.0));
+            let b = animate_button(ui, Id::unique("capyro-settings-studio"), r, interactive && self.core.playlist_current().is_some());
+            let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.05 * b.press));
+            painter.rect_filled(rr, 8.0, accent.gamma_multiply(0.12 + 0.12 * b.hover));
+            painter.rect_stroke(rr, 8.0, Stroke::new(1.0, accent.gamma_multiply(0.45)), StrokeKind::Inside);
+            let col = accent.lerp_to_gamma(Color32::WHITE, b.hover * 0.35);
+            icons::sliders(&painter, pos2(rr.left() + 15.0, rr.center().y), 12.0 * b.scale(), col);
+            painter.text(pos2(rr.left() + 27.0, rr.center().y), Align2::LEFT_CENTER, "Capyro Studio", regular(11.0), col);
+            if b.resp.clicked() {
+                self.show_settings = false;
+                self.open_studio(&ctx);
+            }
+            b.resp.on_hover_text("Etiquetas, portada y ecualizador avanzado del archivo que está sonando");
+        }
 
         /* velocidad */
         y += 28.0;
@@ -2770,7 +2827,18 @@ impl CapyroApp {
             let sel = ctx.animate_bool_with_time(Id::unique(("capyro-perf-sel", i)), selected, crate::perf::t(0.15));
             let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
+            // Alto se ve "premium": brillo dorado y una chispa
+            let premium = m == crate::perf::Mode::Alto;
+            if premium && crate::alto::on() {
+                crate::alto::glow_rect(&painter, rr, accent.lerp_to_gamma(Color32::from_rgb(255, 214, 120), 0.5), 0.55 + 0.25 * chip.hover);
+            }
             painter.rect_filled(rr, 7.0, bg);
+            if premium {
+                let gold = Color32::from_rgb(255, 214, 120);
+                painter.rect_stroke(rr, 7.0, Stroke::new(1.0, gold.gamma_multiply(0.25 + 0.45 * sel)), StrokeKind::Inside);
+                let t = crate::perf::clock(ctx.input(|i| i.time)) as f32;
+                icons::sparkle(&painter, pos2(rr.right() - 9.0, rr.top() + 8.0), 3.2 + 0.6 * (t * 2.0).sin().abs() * sel, t * 0.6, gold);
+            }
             let col = TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel);
             painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected { bold(chip_fs) } else { regular(chip_fs) }, col);
             if chip.resp.clicked() && !selected {
@@ -2779,7 +2847,7 @@ impl CapyroApp {
             chip.resp.on_hover_text(match m {
                 crate::perf::Mode::Bajo => "Sin animaciones, sin pantalla de carga, sin visualizador ni brillos. Todo sigue funcionando, gastando lo mínimo",
                 crate::perf::Mode::Medio => "Capyro como siempre",
-                crate::perf::Mode::Alto => "Suma la iluminación cinematográfica (los colores del video iluminan toda la ventana, como en YouTube), un fondo con degradé que se mueve, brillos que siguen al mouse, transiciones con más vida y partículas de luz",
+                crate::perf::Mode::Alto => "Premium: suma la iluminación cinematográfica (los colores del video iluminan toda la ventana, como en YouTube), un aura de luz alrededor de la carátula, la carátula de vidrio que sigue al mouse, destellos en la barra, un fondo con degradé que se mueve, brillos, transiciones con más vida y partículas de luz",
             });
         }
         y += 22.0;

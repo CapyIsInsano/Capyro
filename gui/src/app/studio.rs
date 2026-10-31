@@ -1,6 +1,6 @@
 //! Capyro Studio: un panel que se pone encima de la ventana para editar el
-//! audio que está sonando: la portada, las etiquetas, una vista previa de un
-//! tramo y el ecualizador avanzado de 15 bandas.
+//! audio o el video que está sonando: la portada, las etiquetas, una vista
+//! previa de un tramo y el ecualizador avanzado de 15 bandas.
 //!
 //! Solo existe mientras está abierto (`CapyroApp::studio` es None si no): al
 //! cerrarlo se suelta todo, también las imágenes, y no suma memoria.
@@ -10,7 +10,10 @@
 //! curva del ecualizador; en **Alto**, además, la luz del color de la portada,
 //! el brillo de la curva y el panel que se descubre con una línea de luz.
 //!
-//! Por ahora trabaja sobre audio (los videos no).
+//! Con video: las etiquetas se guardan en todos los formatos; la portada, en
+//! MP4/M4V (como pista de imagen) y MKV (como adjunto). Los subtítulos, los
+//! capítulos y las pistas se copian tal cual. Guardar reescribe el archivo
+//! entero, así que corre en otro hilo (un video grande tarda unos segundos).
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -56,6 +59,19 @@ enum Picked {
     Image(PathBuf, Rgba),
     Failed(String),
     Cancelled,
+}
+
+/// Un guardado en curso (el archivo se reescribe en otro hilo).
+struct SaveJob {
+    rx: Receiver<Result<(), CoreError>>,
+    /// Lo que se mandó a guardar (si se sigue editando, sigue "sin guardar").
+    tags: Tags,
+    cover_edit: CoverEdit,
+    /// Para volver a abrirlo donde estaba.
+    open_here: bool,
+    pos: f64,
+    was_playing: bool,
+    index: Option<usize>,
 }
 
 /// Una imagen ya subida a la placa de video, con su color medio (para la luz de Alto).
@@ -114,19 +130,25 @@ pub struct Studio {
     close_armed: Option<f64>,
     /// Recién abierto: el scroll arranca arriba (egui recuerda el de la vez anterior).
     fresh: bool,
+    /// Se eligió otro perfil del ecualizador en este cuadro (suena el efecto).
+    preset_changed: bool,
+    /// Es un video (cambia el dibujo sin portada y el aviso al guardar).
+    video: bool,
+    /// La duración (mientras se guarda el archivo está cerrado y no se sabe).
+    duration: f64,
+    /// Guardando (mientras tanto no se edita ni se cierra).
+    saving: Option<SaveJob>,
 }
 
 impl Studio {
     /// Abre el editor para el archivo que está sonando. Error = texto para mostrar.
     fn open(core: &Core, ctx: &Context) -> Result<Studio, String> {
         let path = core.current_file();
-        core.playlist_current().ok_or("Abrí un audio primero")?;
+        core.playlist_current().ok_or("Abrí un audio o un video primero")?;
         if path.is_empty() {
-            return Err("Abrí un audio primero".to_owned());
+            return Err("Abrí un audio o un video primero".to_owned());
         }
-        if core.media_kind() != MediaKind::Audio {
-            return Err("Capyro Studio edita audio por ahora".to_owned());
-        }
+        let video = core.media_kind() == MediaKind::Video;
         let file = PathBuf::from(&path);
         let tags = ffi::read_tags(&file).map_err(|e| format!("No pude leer las etiquetas: {}", e.0))?;
         let cover = ffi::read_cover(&file, COVER_SHOW_SIDE).map(|img| Picture::new(ctx, "capyro-studio-cover", &img));
@@ -152,6 +174,10 @@ impl Studio {
             eq: fx.eq15,
             close_armed: None,
             fresh: true,
+            preset_changed: false,
+            video,
+            duration,
+            saving: None,
         })
     }
 
@@ -181,27 +207,57 @@ impl Studio {
     }
 
     /// Guarda etiquetas y portada. Si el archivo es el que está sonando, lo
-    /// suelta, lo reescribe y lo vuelve a abrir en el mismo punto (si sonaba,
-    /// sigue). Si no está sonando, solo se reescribe.
-    fn save(&mut self, core: &Core, ctx: &Context, now: f64) {
+    /// suelta, lo reescribe (en otro hilo) y lo vuelve a abrir en el mismo
+    /// punto (si sonaba, sigue). Si no está sonando, solo se reescribe.
+    fn save(&mut self, core: &Core, ctx: &Context) {
+        if self.saving.is_some() {
+            return;
+        }
         self.preview = false;
         self.close_armed = None;
+        self.msg = None;
         let open_here = PathBuf::from(core.current_file()) == self.file;
-        let pos = core.position();
-        let was_playing = core.state() == State::Playing;
-        let index = core.playlist_current();
+        let job_tags = self.tags.clone();
+        let job_cover = self.cover_edit.clone();
+        let (tx, rx) = mpsc::channel();
+        let job = SaveJob {
+            rx,
+            tags: job_tags.clone(),
+            cover_edit: job_cover.clone(),
+            open_here,
+            pos: core.position(),
+            was_playing: core.state() == State::Playing,
+            index: core.playlist_current(),
+        };
         if open_here {
             core.release_file();
         }
-        let result = ffi::write_tags_cover(&self.file, &self.tags, &self.cover_edit);
+        let file = self.file.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(ffi::write_tags_cover(&file, &job_tags, &job_cover));
+            ctx.request_repaint();
+        });
+        self.saving = Some(job);
+    }
+
+    /// ¿Terminó de guardar? Vuelve a abrir el archivo y avisa cómo salió.
+    fn poll_save(&mut self, core: &Core, ctx: &Context, now: f64) {
+        let Some(job) = &self.saving else { return };
+        let result = match job.rx.try_recv() {
+            Ok(r) => r,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => Err(CoreError("se cortó el guardado".to_owned())),
+        };
+        let Some(job) = self.saving.take() else { return };
         // siempre se vuelve a abrir, haya salido bien o mal
-        let reopened = if !open_here {
+        let reopened = if !job.open_here {
             Ok(())
-        } else if let Some(i) = index {
+        } else if let Some(i) = job.index {
             let r = core.playlist_select(i);
             if r.is_ok() {
-                core.seek(pos);
-                if was_playing {
+                core.seek(job.pos);
+                if job.was_playing {
                     core.toggle();
                 }
             }
@@ -211,15 +267,18 @@ impl Studio {
         };
         match (result, reopened) {
             (Ok(()), reopened) => {
-                self.saved = self.tags.clone();
-                if self.cover_edit != CoverEdit::Keep {
+                self.saved = job.tags;
+                if job.cover_edit != CoverEdit::Keep {
                     // lo que quedó en el archivo es lo que se ve
-                    self.cover = match std::mem::replace(&mut self.cover_edit, CoverEdit::Keep) {
+                    self.cover = match &job.cover_edit {
                         CoverEdit::Set(_) => ffi::read_cover(&self.file, COVER_SHOW_SIDE)
                             .map(|img| Picture::new(ctx, "capyro-studio-cover", &img)),
                         _ => None,
                     };
-                    self.new_cover = None;
+                    if self.cover_edit == job.cover_edit {
+                        self.cover_edit = CoverEdit::Keep;
+                        self.new_cover = None;
+                    }
                 }
                 match reopened {
                     Ok(()) => self.say(now, "Guardado · la versión anterior quedó como .bak", false),
@@ -232,7 +291,7 @@ impl Studio {
 
     /// Abre el selector de imágenes del sistema en otro hilo (no congela la ventana).
     fn pick_cover(&mut self, ctx: &Context) {
-        if self.picking.is_some() || !self.cover_ok {
+        if self.picking.is_some() || !self.cover_ok || self.saving.is_some() {
             return;
         }
         let exts: Vec<String> =
@@ -322,6 +381,9 @@ impl Studio {
 
     /// Cerrar: con cambios sin guardar, el primer intento solo avisa.
     fn try_close(&mut self, now: f64) {
+        if self.saving.is_some() {
+            return; // primero que termine de guardar
+        }
         let armed = self.close_armed.is_some_and(|t| now - t < CLOSE_ARM_SECS);
         if self.dirty() && !armed {
             self.close_armed = Some(now);
@@ -514,14 +576,17 @@ impl Studio {
         let fy0 = if narrow { cover_rect.bottom() + 48.0 } else { sec.top() };
         let fw = sec.right() - fx0;
         let mut y = fy0;
+        let video = self.video;
         let t = &mut self.tags;
-        big_field(ui, Rect::from_min_size(pos2(fx0, y), vec2(fw, 42.0)), "title", &mut t.title, "Nombre de la canción", bold(24.0), TEXT, accent);
+        let (title_hint, artist_hint) =
+            if video { ("Título del video", "Autor, canal o director") } else { ("Nombre de la canción", "Artista o intérprete") };
+        big_field(ui, Rect::from_min_size(pos2(fx0, y), vec2(fw, 42.0)), "title", &mut t.title, title_hint, bold(24.0), TEXT, accent);
         y += 46.0;
-        big_field(ui, Rect::from_min_size(pos2(fx0, y), vec2(fw, 30.0)), "artist", &mut t.artist, "Artista o intérprete", regular(15.0), TEXT_DIM, accent);
+        big_field(ui, Rect::from_min_size(pos2(fx0, y), vec2(fw, 30.0)), "artist", &mut t.artist, artist_hint, regular(15.0), TEXT_DIM, accent);
         y += 30.0 + 14.0;
         let row = |y: f32, h: f32| Rect::from_min_size(pos2(fx0, y), vec2(fw, h));
         let c = columns(row(y, 44.0), &[1.0, 1.0], 12.0);
-        field(ui, c[0], "album", "Álbum", &mut t.album, "Álbum al que pertenece", accent, 1);
+        field(ui, c[0], "album", "Álbum", &mut t.album, if video { "Serie o colección" } else { "Álbum al que pertenece" }, accent, 1);
         field(ui, c[1], "album_artist", "Artista del álbum", &mut t.album_artist, "Artista principal del álbum", accent, 1);
         y += 48.0;
         let c = columns(row(y, 44.0), &[1.6, 0.8, 0.7, 0.7], 12.0);
@@ -530,9 +595,9 @@ impl Studio {
         field(ui, c[2], "track", "Pista", &mut t.track, "—", accent, 1);
         field(ui, c[3], "disc", "Disco", &mut t.disc, "—", accent, 1);
         y += 48.0;
-        field(ui, row(y, 44.0), "composer", "Compositor", &mut t.composer, "Quién la compuso", accent, 1);
+        field(ui, row(y, 44.0), "composer", "Compositor", &mut t.composer, if video { "Quién hizo la música" } else { "Quién la compuso" }, accent, 1);
         y += 48.0;
-        field(ui, row(y, 66.0), "comment", "Comentarios", &mut t.comment, "Una nota, la letra, de dónde la sacaste…", accent, 2);
+        field(ui, row(y, 66.0), "comment", "Comentarios", &mut t.comment, if video { "Una nota, de qué trata, de dónde lo sacaste…" } else { "Una nota, la letra, de dónde la sacaste…" }, accent, 2);
 
         // WAV no guarda estas tres etiquetas (su formato no tiene dónde ponerlas)
         if self.file.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
@@ -553,7 +618,12 @@ impl Studio {
         let anim = crate::perf::animations();
         let alto = crate::alto::on();
         let radius = (rect.width() * 0.07).clamp(8.0, 16.0);
-        let a = animate_button(ui, Id::unique("capyro-studio-cover"), rect, self.cover_ok && self.picking.is_none());
+        let a = animate_button(
+            ui,
+            Id::unique("capyro-studio-cover"),
+            rect,
+            self.cover_ok && self.picking.is_none() && self.saving.is_none(),
+        );
         let shown = Rect::from_center_size(rect.center(), rect.size() * (1.0 + 0.015 * a.hover - 0.03 * a.press));
 
         if let Some(p) = self.shown_cover() {
@@ -586,7 +656,11 @@ impl Studio {
             painter.rect_filled(shown, radius, accent.gamma_multiply(0.10));
             painter.rect_stroke(shown, radius, Stroke::new(1.0, accent.gamma_multiply(0.25)), StrokeKind::Inside);
             painter.circle_filled(shown.center() - vec2(0.0, 10.0), shown.width() * 0.17, accent.gamma_multiply(0.16));
-            icons::music_note(&painter, shown.center() - vec2(0.0, 10.0), shown.width() * 0.18, accent);
+            if self.video {
+                icons::film(&painter, shown.center() - vec2(0.0, 10.0), shown.width() * 0.2, accent);
+            } else {
+                icons::music_note(&painter, shown.center() - vec2(0.0, 10.0), shown.width() * 0.18, accent);
+            }
             let text = if self.cover_ok { "Sin portada" } else { "Este formato no guarda portada" };
             painter.text(
                 pos2(shown.center().x, shown.bottom() - 22.0),
@@ -649,7 +723,10 @@ impl Studio {
     /// Vista previa de un tramo: barra con dos manijas, tocar y repetir.
     fn preview_section(&mut self, ui: &mut Ui, core: &Core, accent: Color32, now: f64) {
         let w = ui.available_width();
-        let duration = core.duration().max(0.0);
+        if self.saving.is_none() {
+            self.duration = core.duration().max(0.0);
+        }
+        let duration = self.duration;
         let (head, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
         let painter = ui.painter().clone();
         painter.text(head.left_center(), Align2::LEFT_CENTER, "Vista previa del tramo", bold(13.0), TEXT);
@@ -757,7 +834,7 @@ impl Studio {
         painter.text(
             pos2(row.left() + 42.0, row.center().y - 7.0),
             Align2::LEFT_CENTER,
-            format!("{}  →  {}", fmt_time(self.start), fmt_time(self.end)),
+            format!("{}  –  {}", fmt_time(self.start), fmt_time(self.end)),
             bold(12.5),
             TEXT,
         );
@@ -871,6 +948,7 @@ impl Studio {
             let selected = self.eq_on && self.eq.iter().zip(gains.iter()).all(|(a, b)| (a - b).abs() < 0.05);
             let sel = ctx.animate_bool_with_time(Id::unique(("capyro-studio-preset", i)), selected, crate::perf::t(0.15));
             if pill(ui, &format!("preset-{i}"), r, name, false, sel, accent, true) {
+                self.preset_changed |= !selected;
                 self.eq = *gains;
                 self.eq_on = true;
                 changed = true;
@@ -1048,6 +1126,7 @@ impl CapyroApp {
         let core = &self.core;
         let Some(st) = self.studio.as_mut() else { return };
         st.poll_pick(&ctx, now);
+        st.poll_save(core, &ctx, now);
         st.tick_preview(core);
         if st.preview {
             ctx.request_repaint_after(crate::perf::ambient());
@@ -1115,10 +1194,11 @@ impl CapyroApp {
             [pos2(panel.left() + 1.0, panel.bottom() - foot_h), pos2(panel.right() - 1.0, panel.bottom() - foot_h)],
             Stroke::new(1.0, Color32::from_white_alpha(14)),
         );
-        let dirty = st.dirty();
+        let saving = st.saving.is_some();
+        let dirty = st.dirty() && !saving;
         let save_w = pill_w(ui, "Guardar cambios") + 8.0;
         let save_r = Rect::from_min_max(pos2(x1 - save_w, foot_y - 15.0), pos2(x1, foot_y + 15.0));
-        let mut do_save = pill(ui, "save", save_r, "Guardar cambios", true, 0.0, accent, dirty);
+        let mut do_save = pill(ui, "save", save_r, if saving { "Guardando…" } else { "Guardar cambios" }, true, 0.0, accent, dirty);
         if dirty {
             ui.ctx().input_mut(|i| {
                 if i.consume_key(Modifiers::COMMAND, Key::S) {
@@ -1135,6 +1215,12 @@ impl CapyroApp {
         // a la izquierda: el último mensaje, o si hay cambios sin guardar
         let status_w = undo_r.left() - x0 - 16.0;
         let msg = st.msg.as_ref().filter(|(_, error, at)| *error || now - at < 6.0).cloned();
+        if saving {
+            icons::spinner(&painter, pos2(x0 + 6.0, foot_y), 12.0, accent, crate::perf::clock(now));
+            let text = if st.video { "Guardando… un video grande tarda unos segundos" } else { "Guardando…" };
+            painter.text(pos2(x0 + 18.0, foot_y), Align2::LEFT_CENTER, fit_text(&painter, text, regular(11.5), status_w), regular(11.5), TEXT_DIM);
+            ctx.request_repaint_after(FRAME_SMOOTH);
+        } else {
         match msg {
             Some((text, error, _)) => {
                 let col = if error { ERROR } else { TEXT_DIM };
@@ -1152,10 +1238,14 @@ impl CapyroApp {
                 painter.text(pos2(x0, foot_y), Align2::LEFT_CENTER, "Doble clic en una banda: 0 dB · Ctrl+S: guardar", regular(10.5), TEXT_FAINT);
             }
         }
+        }
 
         /* --- el contenido (con scroll si no entra) --- */
         let body = Rect::from_min_max(pos2(panel.left() + 1.0, top + 64.0), pos2(panel.right() - 1.0, panel.bottom() - foot_h - 1.0));
         let mut body_ui = ui.new_child(UiBuilder::new().max_rect(body));
+        if saving {
+            body_ui.disable(); // mientras se guarda no se edita
+        }
         body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
         let mut scroll = egui::ScrollArea::vertical().id_salt("capyro-studio-scroll").auto_shrink([false, false]);
         if std::mem::take(&mut st.fresh) {
@@ -1178,7 +1268,11 @@ impl CapyroApp {
             });
 
         if do_save && dirty {
-            st.save(core, &ctx, now);
+            st.save(core, &ctx);
+        }
+        if std::mem::take(&mut st.preset_changed) && self.cfg.click_sound {
+            core.sfx_play(super::SFX_EFFECT);
+            self.sfx_frame.set(self.last_frame);
         }
         if !typing && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             st.try_close(now);

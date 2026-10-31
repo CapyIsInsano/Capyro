@@ -18,7 +18,25 @@
   - Si el archivo es el que está sonando, Capyro lo vuelve a abrir en el mismo punto y sigue sonando (o en pausa, como estaba), ya con la portada y los datos nuevos.
   - Si cerrás con cambios sin guardar, avisa: el segundo intento cierra y los descarta. **Ctrl+S** guarda.
   - En Windows, los archivos con acentos o ñ en el nombre ("Canción.mp3") se guardan bien.
-  - Por ahora, audio: MP3, FLAC, OGG, M4A, WAV, Opus. **En WAV** no se guardan el artista principal del álbum, el número de disco, el compositor ni la portada (el formato no tiene dónde ponerlos), y el panel lo avisa.
+  - Audio: MP3, FLAC, OGG, M4A, WAV, Opus. **En WAV** no se guardan el artista principal del álbum, el número de disco, el compositor ni la portada (el formato no tiene dónde ponerlos), y el panel lo avisa.
+- **Capyro Studio también edita videos**: en la vista clásica se abre desde **⚙ → Capyro Studio** (en la de música, con su botón de siempre). Los campos se adaptan ("Título del video", "Autor, canal o director", "Serie o colección"…) y sin portada se ve una película en vez de la nota.
+  - Las etiquetas se guardan en todos los formatos de video. La **portada**, en **MP4/M4V** (como imagen de portada) y **MKV** (como adjunto `cover.jpg`/`cover.png`, que es lo que leen los reproductores y los exploradores de archivos). MOV y WebM no la guardan, y el panel lo avisa.
+  - Al guardar se copian tal cual el video, el audio, **los subtítulos** (SRT en MKV, mov_text en MP4…) y **los capítulos**: no se recodifica nada ni se pierde calidad.
+  - Guardar reescribe el archivo entero, así que ahora pasa **en otro hilo**: con un video de varios GB la ventana no se congela; el pie dice "Guardando… un video grande tarda unos segundos" y, mientras tanto, no se edita ni se cierra el panel. Ojo: el `.bak` es una copia entera del video (ocupa lo mismo).
+- **Sonido al cambiar de efecto**: tocar Bajos, Voces, Lo-fi, Noche… en el menú de efectos (o Rock, Pop, Jazz… en el ecualizador de Studio) suena un efecto corto. Se apaga junto con los demás sonidos de la interfaz (`click_sound = false` en `capyro.lua`).
+- **Vista de música con más información**: el **visualizador** ya no ocupa un renglón propio; va **sobre la parte de abajo de la carátula**, con un degradé oscuro para que se vea bien. En ese lugar ahora entran dos líneas más debajo del título, el artista y el álbum: el **año y el género**, y los **datos técnicos** del archivo (por ejemplo "MP3 · 44,1 kHz · 320 kbps · Estéreo" o "FLAC · 96 kHz · 24 bits").
+- **El modo Alto se nota "premium"**:
+  - la carátula tiene un **aura** de dos colores (el acento y el color de la portada) que gira despacio y respira con los graves;
+  - un **reflejo de vidrio** que sigue al mouse y un borde de luz;
+  - la carátula se inclina apenas hacia el puntero (paralaje);
+  - la barra de progreso tiene un **brillo que la recorre** mientras suena;
+  - el chip "Alto" de ⚙ brilla en dorado con un destello, y su descripción arranca con "Premium".
+- **Videos de hasta 8K** (7680×4320 y 8192 de lado): ya se abrían, pero en una PC que no llega a decodificarlos a tiempo (8K sin decodificar por GPU) **el sonido se cortaba** y todo iba en cámara lenta, porque audio y video se decodifican en el mismo hilo. Ahora:
+  - el **audio va primero**: se llena su colchón antes de cada cuadro de video, así **nunca se corta** (medido con un 8K en una PC de 2 núcleos sin GPU: antes avanzaba a 0,37× con cortes; ahora a 1× y sin un solo corte);
+  - si el video se atrasa, **se tiran cuadros** (sin convertirlos), el decodificador **saltea los cuadros B** que nadie necesita y el filtro de bloques; y si queda más de 1,5 s atrás, **salta al próximo cuadro clave**. La imagen se ve a saltos, pero sincronizada. Con decodificación por GPU, 8K va fluido;
+  - achicar un cuadro enorme a la ventana usa otro filtro (**AREA**: promedia los píxeles, se ve igual) que cuesta la mitad: de 24 a 12 ms por cuadro con 8K;
+  - **Capturar fotograma** guarda en tamaño completo hasta 8K (antes, hasta 3840 de lado);
+  - un video 1080p sigue a 30 cuadros por segundo exactos: nada de esto se activa si la PC llega.
 - **Ecualizador avanzado de 15 bandas** (de 25 Hz a 16 kHz): arrastrá cada banda para arriba o abajo (doble clic: 0 dB), con una curva que las une. Perfiles listos: **Plano**, **Graves**, **Voces**, **Brillante**, **Rock**, **Pop**, **Jazz**, **Clásica**, **Electrónica** y **Cine**. Se guarda con la sesión.
   - **Es uno u otro**: con el avanzado activado, el **ecualizador normal** (graves, medios y agudos) se apaga; en Efectos de audio sus barras quedan grises con un aviso y un botón "Usar el normal". Elegir un preset del menú de efectos también vuelve al normal.
 - **Vista previa del tramo**: una barra con dos manijas para elegir el **inicio** y el **fin** (doble clic: todo el tema), o "Inicio aquí" / "Fin aquí" con la posición actual. El botón ▶ toca solo ese pedazo y se pausa al llegar al fin, o repite si activás "Repetir". El archivo no cambia.

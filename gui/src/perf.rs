@@ -60,7 +60,7 @@ impl Mode {
         match self {
             Mode::Bajo => "Sin animaciones ni extras. Para PCs justas",
             Mode::Medio => "Capyro como siempre",
-            Mode::Alto => "Iluminación, fondo animado, brillos y partículas",
+            Mode::Alto => "Premium: aura, vidrio, iluminación y partículas",
         }
     }
 }

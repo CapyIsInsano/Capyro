@@ -25,6 +25,7 @@ void cover_data_free(CoverData *c);
 /* ¿Este muxer guarda portadas? ¿Y es de la familia Ogg (van como etiqueta)? */
 bool cover_muxer_ok(const struct AVOutputFormat *fmt);
 bool cover_muxer_is_ogg(const struct AVOutputFormat *fmt);
+bool cover_muxer_is_mkv(const struct AVOutputFormat *fmt);
 
 /* Bloque METADATA_BLOCK_PICTURE (FLAC) en base64, para Ogg. av_free al terminar. */
 char *cover_ogg_picture(const uint8_t *data, size_t size, const char *mime, int width, int height);

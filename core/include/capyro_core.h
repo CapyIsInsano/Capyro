@@ -271,7 +271,7 @@ typedef struct {
     int32_t  height;
 } CapyroImage;
 
-/* El cuadro visible en su tamaño original (hasta 3840 de lado), para las
+/* El cuadro visible en su tamaño original (hasta 8192 de lado: 8K), para las
  * capturas: no depende del tamaño de la ventana. false = no hay cuadro. */
 bool capyro_core_capture_frame(CapyroCore *core, CapyroImage *out);
 void capyro_core_free_image(CapyroImage *img);
@@ -323,6 +323,17 @@ void capyro_core_release_file(CapyroCore *core);
 
 int capyro_tags_read(const char *path, CapyroTags *out);
 int capyro_tags_write(const char *path, const CapyroTags *tags);
+
+/* Datos técnicos del audio de un archivo (vista de música). */
+typedef struct {
+    char    codec[32];    /* "MP3", "FLAC", "AAC", "OPUS"... */
+    int32_t sample_rate;  /* Hz */
+    int32_t channels;
+    int64_t bit_rate;     /* bits por segundo (0 = no se sabe) */
+    int32_t bits;         /* bits por muestra (FLAC, WAV); 0 si no aplica */
+} CapyroAudioInfo;
+
+int capyro_audio_info(const char *path, CapyroAudioInfo *out);
 
 /* ---- portada (Capyro Studio) --------------------------------------------
  * Al guardar las etiquetas la portada se deja como está, se cambia por una

@@ -83,6 +83,12 @@ typedef struct {
     bool                    demux_eof, a_flushed, v_flushed, a_done, v_done;
     double                  start_time;
     double                  a_drop_until, v_drop_until; /* < 0 = no descartar */
+    /* videos que la máquina no llega a decodificar a tiempo (8K sin GPU):
+     * el audio sigue entero y el video tira cuadros (ver video_late) */
+    int                     v_late_run;   /* cuadros tirados seguidos por tarde */
+    bool                    v_wait_key;   /* muy atrás: saltar al próximo cuadro clave */
+    bool                    v_skip_nonref;/* el decodificador saltea los cuadros B */
+    bool                    v_shown_once; /* ya se mostró un cuadro desde abrir/saltar */
     /* giro del video (los celulares graban "acostado" y anotan cuánto
      * girarlo): 0, 90, 180 o 270 grados en el sentido del reloj */
     int                     rotation;

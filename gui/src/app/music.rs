@@ -101,12 +101,18 @@ impl CapyroApp {
         // ¿qué se muestra? (de eso dependen las alturas)
         let artist = self.np.artist.trim().to_owned();
         let album = self.np.album.trim().to_owned();
+        let extra_line = self.np.extra.clone();
+        let tech = self.np.tech.clone();
         let viz_on = self.cfg.visualizer && anim;
         let badges = self.cfg.show_format || self.cfg.show_millis;
         let badge_h = 30.0;
-        let viz_h = if viz_on { 30.0 } else { 0.0 };
-        let text_h = 26.0 + if artist.is_empty() { 0.0 } else { 20.0 } + if album.is_empty() { 0.0 } else { 18.0 };
-        let fixed = 6.0 + badge_h + 14.0 + viz_h + text_h + 12.0 + 36.0 + 8.0 + 54.0 + 8.0 + 32.0 + 14.0 + 54.0 + 6.0;
+        // el visualizador va encima de la carátula: no ocupa lugar aparte
+        let text_h = 26.0
+            + if artist.is_empty() { 0.0 } else { 20.0 }
+            + if album.is_empty() { 0.0 } else { 18.0 }
+            + if extra_line.is_empty() { 0.0 } else { 17.0 }
+            + if tech.is_empty() { 0.0 } else { 17.0 };
+        let fixed = 6.0 + badge_h + 14.0 + text_h + 12.0 + 36.0 + 8.0 + 54.0 + 8.0 + 32.0 + 14.0 + 54.0 + 6.0;
         let side = (area.height() - fixed).min(area.width() - 36.0).clamp(90.0, 340.0);
         // la carátula "un poco arriba": del lugar que sobra, un tercio arriba
         let extra = (area.height() - fixed - side).max(0.0);
@@ -138,13 +144,32 @@ impl CapyroApp {
         let ce = ease_out(enter);
         let energy = if alto && self.core.state() == State::Playing { self.viz.energy() } else { 0.0 };
         let cover = Rect::from_center_size(pos2(cx, y + side / 2.0), Vec2::splat(side));
-        let shown = Rect::from_center_size(cover.center(), cover.size() * (0.94 + 0.06 * ce) * (1.0 + 0.012 * energy));
+        let mut shown = Rect::from_center_size(cover.center(), cover.size() * (0.94 + 0.06 * ce) * (1.0 + 0.012 * energy));
         let radius = (side * 0.07).clamp(8.0, 18.0);
+        // Alto: la carátula es de vidrio: se inclina un poco hacia el mouse y lo refleja
+        let pointer = ctx.pointer_hover_pos().filter(|p| area.contains(*p));
+        let glass_k = if alto {
+            ctx.animate_bool_with_time(Id::unique("capyro-cover-glass"), pointer.is_some(), 0.35)
+        } else {
+            0.0
+        };
+        if let (true, Some(p)) = (glass_k > 0.001, pointer) {
+            let d = (p - cover.center()) / (side * 0.5).max(1.0);
+            shown = shown.translate(vec2(d.x.clamp(-1.0, 1.0), d.y.clamp(-1.0, 1.0)) * 5.0 * glass_k);
+        }
         // sombra (en Bajo, una sola capa)
         if anim {
             soft_shadow(&painter, shown, radius, 20.0, 6.0, 110);
         } else {
             soft_shadow(&painter, shown, radius, 8.0, 3.0, 80);
+        }
+        // Alto (encima de la sombra): aura de luz que gira alrededor, con el color de la carátula y el de acento
+        if alto {
+            let tint = self.ambient.mean().map(|c| Color32::from_rgb(c[0] as u8, c[1] as u8, c[2] as u8));
+            let other = tint.unwrap_or_else(|| accent.lerp_to_gamma(Color32::WHITE, 0.45));
+            let playing = self.core.state() == State::Playing;
+            let k = if playing { 0.7 + 0.3 * energy } else { 0.5 };
+            crate::alto::aura(&painter, shown, radius, accent, other, now, k * ce);
         }
         if alto && energy > 0.01 {
             crate::alto::glow_rect(&painter, shown, accent, 0.5 * energy);
@@ -172,25 +197,50 @@ impl CapyroApp {
         if alto && image_rect.is_some() {
             self.ambient.source = image_rect; // la luz de Alto sale de la carátula
         }
+        if let Some(p) = pointer {
+            crate::alto::glass(&painter, image_rect.unwrap_or(shown), radius, p, glass_k);
+        }
+        if alto && glass_k > 0.001 && glass_k < 0.999 {
+            ctx.request_repaint_after(FRAME_SMOOTH);
+        }
+        /* --- visualizador: en el medio de la carátula, sobre su parte de abajo --- */
+        if viz_on && !self.viz.is_silent() {
+            let k = self.viz.energy().clamp(0.0, 1.0);
+            let h = (shown.height() * 0.34).max(36.0);
+            let fade = Rect::from_min_max(pos2(shown.left(), shown.bottom() - h), shown.max);
+            // velo oscuro de abajo hacia arriba, para que las barras se vean sobre cualquier imagen
+            let mut mesh = egui::Mesh::default();
+            let (top, bot) = (Color32::TRANSPARENT, Color32::from_black_alpha(150));
+            let flat = fade.bottom() - radius;
+            for (yy, c) in [(fade.top(), top), (flat, bot)] {
+                mesh.colored_vertex(pos2(fade.left(), yy), c);
+                mesh.colored_vertex(pos2(fade.right(), yy), c);
+            }
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(1, 3, 2);
+            painter.add(egui::Shape::mesh(mesh));
+            let base = Rect::from_min_max(pos2(fade.left(), flat), fade.max);
+            let cr = egui::CornerRadius { nw: 0, ne: 0, sw: radius as u8, se: radius as u8 };
+            painter.rect_filled(base, cr, bot);
+            let band = Rect::from_min_max(
+                pos2(shown.left() + shown.width() * 0.12, shown.bottom() - h * 0.78),
+                pos2(shown.right() - shown.width() * 0.12, shown.bottom() - 10.0),
+            );
+            let col = Color32::WHITE.lerp_to_gamma(accent, 0.35 + 0.25 * k);
+            self.viz.draw(&painter, band, col.gamma_multiply(0.85));
+        }
         self.ui_rects.insert("video", cover);
         y = cover.bottom() + 14.0;
-
-        /* --- visualizador, debajo de la carátula --- */
-        if viz_on {
-            if !self.viz.is_silent() {
-                let band = Rect::from_min_max(pos2(cover.left(), y), pos2(cover.right(), y + 22.0));
-                self.viz.draw(&painter, band, accent.gamma_multiply(0.5));
-            }
-            y += viz_h;
-        }
 
         /* --- título, artista y álbum (entran subiendo al cambiar de tema) --- */
         let max_w = area.width() - 12.0;
         let ke = |delay: f32| ease_out(((enter - delay) / (1.0 - delay)).clamp(0.0, 1.0));
-        let lines: [(String, FontId, Color32, f32, f32); 3] = [
+        let lines: [(String, FontId, Color32, f32, f32); 5] = [
             (self.np.title.clone(), bold(17.0), TEXT, 26.0, 0.1),
             (artist, regular(13.0), TEXT_DIM, 20.0, 0.2),
             (album, regular(12.0), TEXT_FAINT, 18.0, 0.3),
+            (extra_line, regular(11.5), TEXT_DIM.gamma_multiply(0.9), 17.0, 0.35),
+            (tech, FontId::monospace(10.5), TEXT_DIM.gamma_multiply(0.75), 17.0, 0.4),
         ];
         for (text, font, col, h, delay) in lines {
             if text.is_empty() {

@@ -225,6 +225,7 @@ extern "C" {
     fn capyro_tags_read(path: *const c_char, out: *mut RawTags) -> c_int;
     fn capyro_tags_write_ex(path: *const c_char, tags: *const RawTags, cover_mode: c_int, cover_image: *const c_char) -> c_int;
     fn capyro_cover_supported(path: *const c_char) -> bool;
+    fn capyro_audio_info(path: *const c_char, out: *mut RawAudioInfo) -> c_int;
     fn capyro_cover_read(path: *const c_char, max_side: c_int, out: *mut RawImage) -> c_int;
     fn capyro_image_read(path: *const c_char, max_side: c_int, out: *mut RawImage) -> c_int;
 }
@@ -413,6 +414,73 @@ fn raw_tags(tags: &Tags) -> RawTags {
     put_cstr(&mut raw.composer, &tags.composer);
     put_cstr(&mut raw.comment, &tags.comment);
     raw
+}
+
+/// Debe coincidir con `CapyroAudioInfo` de capyro_core.h.
+#[repr(C)]
+struct RawAudioInfo {
+    codec: [c_char; 32],
+    sample_rate: i32,
+    channels: i32,
+    bit_rate: i64,
+    bits: i32,
+}
+
+/// Datos técnicos del audio de un archivo.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AudioInfo {
+    pub codec: String,
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub bit_rate: u64,
+    pub bits: u32,
+}
+
+impl AudioInfo {
+    /// "MP3 · 44,1 kHz · 320 kbps · Estéreo" (lo que se sepa).
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.codec.is_empty() {
+            parts.push(self.codec.clone());
+        }
+        if self.sample_rate > 0 {
+            let k = self.sample_rate as f64 / 1000.0;
+            let t = if (k - k.round()).abs() < 0.05 { format!("{k:.0} kHz") } else { format!("{k:.1} kHz").replace('.', ",") };
+            parts.push(t);
+        }
+        if self.bits > 0 {
+            parts.push(format!("{} bits", self.bits));
+        }
+        if self.bit_rate > 0 {
+            parts.push(format!("{} kbps", (self.bit_rate as f64 / 1000.0).round() as u64));
+        }
+        match self.channels {
+            0 => {}
+            1 => parts.push("Mono".into()),
+            2 => parts.push("Estéreo".into()),
+            6 => parts.push("5.1".into()),
+            8 => parts.push("7.1".into()),
+            n => parts.push(format!("{n} canales")),
+        }
+        parts.join(" · ")
+    }
+}
+
+/// Datos técnicos del audio de un archivo (None si no se pudo abrir).
+pub fn audio_info(path: &Path) -> Option<AudioInfo> {
+    let c = path_to_cstring(path)?;
+    // SAFETY: todo ceros es un RawAudioInfo válido.
+    let mut raw: RawAudioInfo = unsafe { std::mem::zeroed() };
+    if unsafe { capyro_audio_info(c.as_ptr(), &mut raw) } != 0 {
+        return None;
+    }
+    Some(AudioInfo {
+        codec: carray_to_string(&raw.codec),
+        sample_rate: raw.sample_rate.max(0) as u32,
+        channels: raw.channels.max(0) as u32,
+        bit_rate: raw.bit_rate.max(0) as u64,
+        bits: raw.bits.max(0) as u32,
+    })
 }
 
 /// Qué hacer con la portada al guardar las etiquetas.
@@ -877,5 +945,18 @@ mod tests {
     fn os_info_tiene_el_tamanio_de_c() {
         // (lo que devuelve el núcleo lo prueba test_core.c: acá no se linkea el C)
         assert_eq!(std::mem::size_of::<RawOsInfo>(), 4 + 4 + 4 + 64 + 64);
+    }
+}
+
+#[cfg(test)]
+mod audio_info_tests {
+    use super::AudioInfo;
+
+    #[test]
+    fn resumen_de_audio() {
+        let a = AudioInfo { codec: "MP3".into(), sample_rate: 44100, channels: 2, bit_rate: 320_000, bits: 0 };
+        assert_eq!(a.summary(), "MP3 · 44,1 kHz · 320 kbps · Estéreo");
+        let f = AudioInfo { codec: "FLAC".into(), sample_rate: 48000, channels: 1, bit_rate: 0, bits: 24 };
+        assert_eq!(f.summary(), "FLAC · 48 kHz · 24 bits · Mono");
     }
 }

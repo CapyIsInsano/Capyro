@@ -298,6 +298,10 @@ bool cover_muxer_is_ogg(const AVOutputFormat *fmt) {
            !strcmp(fmt->name, "spx");
 }
 
+bool cover_muxer_is_mkv(const AVOutputFormat *fmt) {
+    return fmt && fmt->name && !strcmp(fmt->name, "matroska");
+}
+
 bool cover_muxer_ok(const AVOutputFormat *fmt) {
     if (!fmt || !fmt->name) {
         return false;
@@ -305,8 +309,9 @@ bool cover_muxer_ok(const AVOutputFormat *fmt) {
     if (cover_muxer_is_ogg(fmt)) {
         return true;
     }
-    /* "mov,mp4,m4a..." no: av_guess_format devuelve el nombre de un muxer solo */
-    const char *ok[] = { "mp3", "flac", "ipod", "mp4", "mov" };
+    /* av_guess_format devuelve el nombre de un muxer solo. MOV no (su muxer
+     * descarta la portada); en MKV va como adjunto (cover.jpg/png). */
+    const char *ok[] = { "mp3", "flac", "ipod", "mp4", "matroska" };
     for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) {
         if (!strcmp(fmt->name, ok[i])) {
             return true;
