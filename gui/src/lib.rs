@@ -6,6 +6,7 @@
 
 mod alto;
 mod app;
+mod cache;
 mod changes;
 mod config;
 mod errlog;

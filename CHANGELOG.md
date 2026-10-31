@@ -30,6 +30,7 @@
 - **Sin placa de video** (cuando la ventana se dibuja con el procesador: llvmpipe, "Basic Render Driver"...), lo que se mueve solo (los milisegundos, el visualizador, la barra) se redibuja a la mitad: 15 veces por segundo (10 en Bajo). Con música, de 60 % a **30 %** (19 % en Bajo). Y los cuadros de video se pintan con un filtro más barato, que se ve igual porque ya vienen del tamaño justo.
 - Con un video, el contador de milisegundos ya no pide redibujos aparte (se actualiza con los cuadros del video).
 - Al arrancar, Capyro dice en la terminal con qué dibuja ("capyro: dibujo con ..."): sirve para saber si está usando la placa de video.
+- **Borrar caché** (ⓘ, entre las actualizaciones y "Desinstalar Capyro"): el primer toque calcula cuánto ocupa y el segundo la borra ("se liberaron 412 MB"). Se va todo lo que Capyro guarda para no repetirlo: el código y la compilación del actualizador (lo más pesado; la próxima actualización compila de cero), la canción del tutorial, los registros (`capyro.log`, `update.log`) y lo que dejan las pruebas y las actualizaciones en la carpeta temporal. Tu configuración, las playlists, la sesión y las capturas no se tocan. Mientras se actualiza Capyro, el botón espera.
 
 ## v0.3.2-alpha · Se adapta a lo que abrís
 

@@ -124,6 +124,12 @@ const CONTROLS_Y: f32 = 81.0;
 const BOTTOM_ROW_Y: f32 = 129.0;
 const BELOW_VIDEO: f32 = 142.0;
 
+/// Lo que vuelve del hilo de "Borrar caché".
+enum CacheMsg {
+    Size(u64),
+    Done(crate::cache::Cleaned),
+}
+
 struct Toast {
     text: String,
     start: f64,
@@ -378,6 +384,9 @@ pub struct CapyroApp {
     pl_delete_armed: Option<(usize, f64)>,
     /// "Desinstalar Capyro": primer clic (armado) y cuándo; el segundo confirma.
     uninstall_armed: Option<f64>,
+    /// "Borrar caché": armado (cuándo y cuánto ocupa) y el trabajo en otro hilo.
+    cache_armed: Option<(f64, u64)>,
+    cache_job: Option<Receiver<CacheMsg>>,
     /// Editor de atajos (⚙ → Editar configuración).
     show_keys: bool,
     keys_capture: Option<Action>,
@@ -561,6 +570,8 @@ impl CapyroApp {
             pl_rename: None,
             pl_delete_armed: None,
             uninstall_armed: None,
+            cache_armed: None,
+            cache_job: None,
             show_keys: false,
             keys_capture: None,
             keys_adding: false,
@@ -2359,8 +2370,8 @@ impl CapyroApp {
         let accent = self.cfg.accent;
         let width = dock.map_or(312.0, |d| d.width());
         let inner_w = width - 28.0;
-        // (encabezado 64 + botón de formatos 36 + actualizaciones 54 + desinstalar 36 + pie 34)
-        let base_h = 224.0;
+        // (encabezado 64 + botón de formatos 36 + actualizaciones 54 + caché 36 + desinstalar 36 + pie 34)
+        let base_h = 260.0;
 
         // --- resúmenes (acordeón): se calcula antes para saber el alto total ---
         // Cada formato tiene su propia animación; como solo uno puede estar
@@ -2590,8 +2601,10 @@ impl CapyroApp {
         let upd_top = region.bottom() + 2.0;
         painter.line_segment([pos2(x0, upd_top), pos2(x1, upd_top)], Stroke::new(1.0, Color32::from_white_alpha(14)));
         self.update_row(ui, &painter, Rect::from_min_max(pos2(x0 - 6.0, upd_top + 6.0), pos2(x1 + 6.0, upd_top + 48.0)), interactive);
-        // desinstalar (abajo de actualizaciones, arriba del pie)
-        let un_row = Rect::from_min_max(pos2(x0 - 6.0, upd_top + 50.0), pos2(x1 + 6.0, upd_top + 84.0));
+        // borrar caché y desinstalar (abajo de actualizaciones, arriba del pie)
+        let cache_row = Rect::from_min_max(pos2(x0 - 6.0, upd_top + 50.0), pos2(x1 + 6.0, upd_top + 84.0));
+        self.cache_row(ui, &painter, cache_row, interactive);
+        let un_row = Rect::from_min_max(pos2(x0 - 6.0, upd_top + 86.0), pos2(x1 + 6.0, upd_top + 120.0));
         self.uninstall_row(ui, &painter, un_row, interactive);
 
         // pie: backend de audio y licencia
@@ -2974,6 +2987,105 @@ impl CapyroApp {
             } else {
                 self.uninstall_armed = Some(now);
             }
+        }
+    }
+
+    /// "Borrar caché": el primer toque calcula cuánto ocupa (en otro hilo) y
+    /// arma; el segundo borra (también en otro hilo: puede ser mucho).
+    fn cache_row(&mut self, ui: &mut Ui, painter: &egui::Painter, row: Rect, interactive: bool) {
+        let ctx = ui.ctx().clone();
+        let now = ctx.input(|i| i.time);
+        // llegó algo del hilo
+        if let Some(rx) = &self.cache_job {
+            match rx.try_recv() {
+                Ok(CacheMsg::Size(0)) => {
+                    self.cache_job = None;
+                    self.toast(&ctx, "La caché ya está vacía", false);
+                }
+                Ok(CacheMsg::Size(bytes)) => {
+                    self.cache_job = None;
+                    self.cache_armed = Some((now, bytes));
+                }
+                Ok(CacheMsg::Done(c)) => {
+                    self.cache_job = None;
+                    self.cache_armed = None;
+                    if c.failed.is_empty() {
+                        self.toast(&ctx, format!("Caché borrada: se liberaron {}", crate::cache::human(c.freed)), false);
+                    } else {
+                        for f in &c.failed {
+                            crate::errlog::log(&format!("borrar caché: {f}"));
+                        }
+                        let msg = format!(
+                            "Se liberaron {}, pero {} cosa(s) no se pudieron borrar (están en uso)",
+                            crate::cache::human(c.freed),
+                            c.failed.len()
+                        );
+                        self.toast_for(&ctx, msg, true, 5.0);
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+                Err(mpsc::TryRecvError::Disconnected) => self.cache_job = None,
+            }
+        }
+        let busy = self.cache_job.is_some();
+        let updating = self.updater.is_running();
+        let armed = !busy && self.cache_armed.is_some_and(|(t0, _)| now - t0 < 5.0);
+        let btn = animate_button(ui, Id::unique("capyro-cache-row"), row, interactive && !busy && !updating);
+        let tint = if armed { theme::ERROR } else if updating { TEXT_FAINT } else { TEXT_DIM };
+        if armed {
+            painter.rect_filled(row, 8.0, theme::ERROR.gamma_multiply(0.14));
+        } else if btn.hover > 0.001 || btn.press > 0.001 {
+            painter.rect_filled(row, 8.0, Color32::from_white_alpha((10.0 * btn.hover + 10.0 * btn.press) as u8));
+        }
+        let cy = row.center().y;
+        let x0 = row.left() + 6.0;
+        if busy {
+            icons::spinner(painter, pos2(x0 + 8.0, cy), 13.0, TEXT_DIM, crate::perf::clock(now));
+        } else {
+            icons::sparkle(painter, pos2(x0 + 8.0, cy), 6.5, 0.0, tint);
+        }
+        let label = match (busy, armed) {
+            (true, _) if self.cache_armed.is_some() => "Borrando la caché…".to_owned(),
+            (true, _) => "Calculando cuánto ocupa…".to_owned(),
+            (false, true) => {
+                let bytes = self.cache_armed.map_or(0, |(_, b)| b);
+                format!("Tocá otra vez para borrar {}", crate::cache::human(bytes))
+            }
+            (false, false) => "Borrar caché".to_owned(),
+        };
+        let col = if armed { theme::ERROR } else if updating { TEXT_FAINT } else { TEXT };
+        let label = fit_text(painter, &label, bold(12.5), row.right() - x0 - 32.0);
+        painter.text(pos2(x0 + 26.0, cy), Align2::LEFT_CENTER, label, bold(12.5), col);
+        if armed || busy {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        let hint = if updating {
+            "Se está actualizando Capyro: esperá a que termine"
+        } else {
+            "Borra lo que Capyro guarda para no repetirlo: el código y la compilación del actualizador, la canción del tutorial, los registros y lo que dejan las pruebas. Tu configuración, playlists y capturas no se tocan"
+        };
+        let resp = btn.resp.on_hover_text(hint);
+        if resp.clicked() && !busy && !updating {
+            let (tx, rx) = mpsc::channel();
+            let wake = ctx.clone();
+            if armed {
+                // segundo toque: borrar (queda armado para mostrar "Borrando…")
+                std::thread::spawn(move || {
+                    let _ = tx.send(CacheMsg::Done(crate::cache::clear()));
+                    wake.request_repaint();
+                });
+            } else {
+                // primer toque: ver cuánto ocupa antes de armar
+                self.cache_armed = None;
+                std::thread::spawn(move || {
+                    let _ = tx.send(CacheMsg::Size(crate::cache::size()));
+                    wake.request_repaint();
+                });
+            }
+            self.cache_job = Some(rx);
+        }
+        if !busy && !armed && self.cache_armed.is_some() {
+            self.cache_armed = None; // se venció el segundo toque
         }
     }
 
