@@ -2,10 +2,10 @@
 //! y los accesos a la configuración, las capturas y el tutorial.
 
 use crate::app::*;
-use crate::system::config::VizMode;
+use crate::system::config::{DiscViz, VizMode};
 
 /// Alto de todo el contenido del menú ⚙.
-pub(crate) const SETTINGS_H: f32 = 652.0;
+pub(crate) const SETTINGS_H: f32 = 682.0;
 
 /// Velocidades que ofrece el menú de ajustes (y entre las que saltan los atajos).
 pub(crate) const SPEEDS: [f64; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -228,36 +228,73 @@ impl CapyroApp {
         /* con un audio: el visualizador (a los lados, en medio o apagado) y
          * la portada que late con los graves. En Bajo no hay ninguno. */
         let low = perf_mode == crate::system::perf::Mode::Bajo;
+        // disco de vinilo (con un audio): la portada al medio de un disco que gira
         y += 22.0;
+        let r = painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Disco de vinilo", regular(12.5), TEXT_DIM);
+        ui.interact(r.expand(4.0), Id::unique("capyro-vinyl-label"), Sense::hover()).on_hover_text(if low {
+            "Con un audio, la portada al medio de un disco de vinilo (en Bajo se ve, pero no gira)"
+        } else {
+            "Con un audio, la portada al medio de un disco de vinilo que gira: más rápido si la velocidad es mayor"
+        });
+        if switch(ui, &painter, "vinyl", pos2(x1 - 17.0, y), self.cfg.vinyl, accent, interactive) {
+            self.cfg.vinyl = !self.cfg.vinyl;
+            let msg = if self.cfg.vinyl { "Disco de vinilo activado" } else { "Disco de vinilo desactivado" };
+            self.save_config(&ctx, msg.to_owned());
+        }
+        // el visualizador: con el disco, alrededor / abajo / desactivado;
+        // si no, a los lados / en medio / apagado
+        y += 30.0;
         painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Visualizador", regular(12.5), TEXT_DIM);
         if low {
             painter.text(pos2(x1, y), Align2::RIGHT_CENTER, "no en Bajo", regular(10.5), TEXT_FAINT);
+        } else if self.cfg.vinyl {
+            painter.text(pos2(x1, y), Align2::RIGHT_CENTER, "del disco", regular(10.5), TEXT_FAINT);
         }
         y += 24.0;
         let vw = ((x1 - x0) - gap * 2.0) / 3.0;
-        for (i, m) in VizMode::ALL.iter().copied().enumerate() {
+        let disc = self.cfg.vinyl;
+        for i in 0..3 {
+            let (label, selected, hint) = if disc {
+                let m = DiscViz::ALL[i];
+                let hint = match m {
+                    DiscViz::Around => "Las barras rodean el disco",
+                    DiscViz::Below => "Las barras van abajo del disco",
+                    DiscViz::Off => "Sin barras",
+                };
+                (m.label(), self.cfg.vinyl_visualizer == m, hint)
+            } else {
+                let m = VizMode::ALL[i];
+                let hint = match m {
+                    VizMode::Sides => "Con un audio, barras a los dos lados de la portada",
+                    VizMode::Middle => "Con un audio, barras sobre la parte de abajo de la portada",
+                    VizMode::Off => "Sin barras",
+                };
+                (m.label(), self.cfg.visualizer == m, hint)
+            };
             let r = Rect::from_min_size(pos2(x0 + i as f32 * (vw + gap), y - 13.0), vec2(vw, 26.0));
             let chip = animate_button(ui, Id::unique(("capyro-viz", i)), r, interactive && !low);
-            let selected = self.cfg.visualizer == m;
             let sel = ctx.animate_bool_with_time(Id::unique(("capyro-viz-sel", i)), selected && !low, crate::system::perf::t(0.15));
             let bg = Color32::from_white_alpha((8.0 + 14.0 * chip.hover) as u8).lerp_to_gamma(accent, sel);
             let rr = Rect::from_center_size(r.center(), r.size() * (1.0 - 0.06 * chip.press));
             painter.rect_filled(rr, 7.0, bg);
             let col = if low { TEXT_FAINT } else { TEXT_DIM.lerp_to_gamma(TEXT, chip.hover).lerp_to_gamma(Color32::WHITE, sel) };
-            painter.text(rr.center(), Align2::CENTER_CENTER, m.label(), if selected && !low { bold(chip_fs) } else { regular(chip_fs) }, col);
-            if chip.resp.clicked() && !selected {
-                self.cfg.visualizer = m;
-                self.save_config(&ctx, format!("Visualizador: {}", m.label().to_lowercase()));
+            // "Desactivado" es largo: en la burbuja angosta, con letra más chica
+            let mut fs = chip_fs;
+            let font_of = |fs: f32| if selected && !low { bold(fs) } else { regular(fs) };
+            while fs > 8.5 && painter.layout_no_wrap(label.to_owned(), font_of(fs), col).size().x > vw - 8.0 {
+                fs -= 0.5;
             }
-            chip.resp.on_hover_text(if low {
-                "En el modo Bajo no hay visualizador (cambiá a Medio o Alto)"
-            } else {
-                match m {
-                    VizMode::Sides => "Con un audio, barras a los dos lados de la portada",
-                    VizMode::Middle => "Con un audio, barras sobre la parte de abajo de la portada",
-                    VizMode::Off => "Sin barras",
+            let font = font_of(fs);
+            painter.text(rr.center(), Align2::CENTER_CENTER, fit_text(&painter, label, font.clone(), vw - 6.0), font, col);
+            if chip.resp.clicked() && !selected {
+                if disc {
+                    self.cfg.vinyl_visualizer = DiscViz::ALL[i];
+                } else {
+                    self.cfg.visualizer = VizMode::ALL[i];
                 }
-            });
+                self.save_config(&ctx, format!("Visualizador: {}", label.to_lowercase()));
+            }
+            chip.resp.on_hover_text(if low { "En el modo Bajo no hay visualizador (cambiá a Medio o Alto)" } else { hint });
         }
         y += 32.0;
         let r = painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Portada con los graves", regular(12.5), if low { TEXT_FAINT } else { TEXT_DIM });

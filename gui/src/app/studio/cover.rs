@@ -67,8 +67,36 @@ impl Studio {
             self.cover_ok && self.picking.is_none() && self.saving.is_none(),
         );
         let shown = Rect::from_center_size(rect.center(), rect.size() * (1.0 + 0.015 * a.hover - 0.03 * a.press));
+        // disco de vinilo (⚙ → Disco de vinilo, con un audio): la portada
+        // nueva se ve ya puesta en el disco, girando mientras suena
+        let disc = self.vinyl.filter(|_| !self.video);
 
-        if let Some(p) = self.shown_cover() {
+        if let Some(angle) = disc {
+            let r = shown.width() / 2.0;
+            let label = match self.shown_cover() {
+                Some(p) => {
+                    if alto {
+                        crate::ui::alto::glow(&painter, shown.center(), shown.width() * 0.95, p.tint, 0.32 + 0.1 * a.hover);
+                    }
+                    crate::ui::vinyl::Label::Cover(p.tex.id(), p.aspect)
+                }
+                None => crate::ui::vinyl::Label::Plain,
+            };
+            if anim {
+                soft_shadow(&painter, shown, r, 18.0, 6.0, 110);
+            }
+            crate::ui::vinyl::draw(&painter, shown.center(), r, angle, &label, accent, 1.0, anim);
+            if self.shown_cover().is_none() {
+                let text = if self.cover_ok { "Sin portada" } else { "Este formato no guarda portada" };
+                painter.text(
+                    pos2(shown.center().x, shown.bottom() + 2.0),
+                    Align2::CENTER_CENTER,
+                    fit_text(&painter, text, regular(11.0), shown.width() - 16.0),
+                    regular(11.0),
+                    TEXT_FAINT,
+                );
+            }
+        } else if let Some(p) = self.shown_cover() {
             // Alto: la portada ilumina un poco alrededor con su color
             if alto {
                 crate::ui::alto::glow(&painter, shown.center(), shown.width() * 0.95, p.tint, 0.32 + 0.1 * a.hover);
@@ -116,7 +144,12 @@ impl Studio {
         // al pasar el mouse: velo y "Cambiar portada"; mientras se elige, un spinner
         let veil = if self.picking.is_some() { 1.0 } else { a.hover };
         if veil > 0.001 {
-            painter.rect_filled(shown, radius, Color32::from_black_alpha((150.0 * veil) as u8));
+            let dark = Color32::from_black_alpha((150.0 * veil) as u8);
+            if disc.is_some() {
+                painter.circle_filled(shown.center(), shown.width() / 2.0, dark);
+            } else {
+                painter.rect_filled(shown, radius, dark);
+            }
             let c = shown.center();
             let col = Color32::WHITE.gamma_multiply(veil);
             if self.picking.is_some() {

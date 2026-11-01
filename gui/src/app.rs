@@ -205,6 +205,10 @@ pub struct CapyroApp {
     gear_rect: Rect,
     /// ⚙ en una ventana bajita: cuánto se corrió con la rueda.
     settings_scroll: f32,
+    /// Disco de vinilo: hacia dónde apunta (radianes) y a qué velocidad gira
+    /// (vueltas por segundo; arranca y frena despacio).
+    vinyl_angle: f32,
+    vinyl_vel: f32,
     /// Menú de información (versión y formatos), sobre "Lista".
     show_info: bool,
     info_rect: Rect,
@@ -393,6 +397,8 @@ impl CapyroApp {
             dialog: None,
             show_settings: false,
             settings_scroll: 0.0,
+            vinyl_angle: 0.0,
+            vinyl_vel: 0.0,
             gear_rect: Rect::NOTHING,
             show_info: false,
             info_rect: Rect::NOTHING,
@@ -669,6 +675,18 @@ impl eframe::App for CapyroApp {
         // visualizador: se alimenta con lo último que sonó
         let dt = ((now - self.last_time) as f32).clamp(0.0, 0.1);
         self.last_time = now;
+        // disco de vinilo: gira a 33⅓ por la velocidad mientras suena (en Bajo, quieto)
+        if self.cfg.vinyl && self.core.media_kind() == MediaKind::Audio {
+            let playing = self.core.state() == State::Playing;
+            let target = if playing && crate::system::perf::animations() {
+                crate::ui::vinyl::RPS * self.core.speed() as f32
+            } else {
+                0.0
+            };
+            if crate::ui::vinyl::step(&mut self.vinyl_angle, &mut self.vinyl_vel, target, dt) {
+                ctx.request_repaint_after(crate::system::perf::ambient());
+            }
+        }
         if self.cfg.wants_spectrum() && self.first_pass && self.core.media_kind() == MediaKind::Audio {
             let playing = self.core.state() == State::Playing;
             let n = self.viz.len();

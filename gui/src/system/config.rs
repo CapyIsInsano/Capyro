@@ -125,6 +125,45 @@ impl VizMode {
     }
 }
 
+/// Dónde va el visualizador con el disco de vinilo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscViz {
+    /// Barras alrededor del disco.
+    Around,
+    /// Barras abajo del disco.
+    Below,
+    Off,
+}
+
+impl DiscViz {
+    pub const ALL: [DiscViz; 3] = [DiscViz::Around, DiscViz::Below, DiscViz::Off];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DiscViz::Around => "alrededor",
+            DiscViz::Below => "abajo",
+            DiscViz::Off => "apagado",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DiscViz::Around => "Alrededor",
+            DiscViz::Below => "Abajo",
+            DiscViz::Off => "Desactivado",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<DiscViz> {
+        match s.trim().to_lowercase().as_str() {
+            "alrededor" | "al rededor" | "around" => Some(DiscViz::Around),
+            "abajo" | "below" | "debajo" => Some(DiscViz::Below),
+            "apagado" | "desactivado" | "no" | "off" => Some(DiscViz::Off),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     Auto,
@@ -275,6 +314,11 @@ pub struct Config {
     pub visualizer: VizMode,
     /// La portada se agranda y se achica con los graves. En Bajo no.
     pub cover_pulse: bool,
+    /// Con un audio, la portada en el medio de un disco de vinilo que gira
+    /// (a la velocidad de reproducción). En Bajo se ve, pero quieto.
+    pub vinyl: bool,
+    /// El visualizador con el disco: alrededor, abajo o desactivado.
+    pub vinyl_visualizer: DiscViz,
     /// Carpeta de las capturas (vacío = la de Imágenes del sistema + /Capyro).
     pub screenshot_dir: Option<std::path::PathBuf>,
     /// Valores con los que arranca Capyro.
@@ -328,9 +372,19 @@ impl Config {
         self.cover_pulse && crate::system::perf::animations()
     }
 
+    /// El visualizador del disco que se ve de verdad: en Bajo, ninguno.
+    pub fn disc_viz(&self) -> DiscViz {
+        if crate::system::perf::animations() {
+            self.vinyl_visualizer
+        } else {
+            DiscViz::Off
+        }
+    }
+
     /// ¿Hay que analizar el audio? (para el visualizador o para la portada)
     pub fn wants_spectrum(&self) -> bool {
-        self.viz_mode() != VizMode::Off || self.pulse()
+        let viz = if self.vinyl { self.disc_viz() != DiscViz::Off } else { self.viz_mode() != VizMode::Off };
+        viz || self.pulse()
     }
 }
 
@@ -497,6 +551,8 @@ impl Config {
                 "remember_session" => self.remember_session.to_string(),
                 "visualizer" => lua_quote(self.visualizer.name()),
                 "cover_pulse" => self.cover_pulse.to_string(),
+                "vinyl" => self.vinyl.to_string(),
+                "vinyl_visualizer" => lua_quote(self.vinyl_visualizer.name()),
                 "screenshot_dir" => {
                     let p = self.screenshot_dir.as_deref().map(crate::system::paths::tilde).unwrap_or_default();
                     lua_quote(&p)
@@ -674,6 +730,8 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         remember_session: true,
         visualizer: VizMode::Middle,
         cover_pulse: true,
+        vinyl: false,
+        vinyl_visualizer: DiscViz::Around,
         screenshot_dir: None,
         start_speed: 1.0,
         start_shuffle: false,
@@ -781,6 +839,15 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<bool>>("cover_pulse")? {
             cfg.cover_pulse = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("vinyl")? {
+            cfg.vinyl = v;
+        }
+        if let Some(v) = opts.get::<Option<String>>("vinyl_visualizer")? {
+            match DiscViz::parse(&v) {
+                Some(m) => cfg.vinyl_visualizer = m,
+                None => eprintln!("capyro: {name}: vinyl_visualizer desconocido '{v}' (alrededor, abajo o apagado)"),
+            }
         }
         if let Some(v) = opts.get::<Option<String>>("screenshot_dir")? {
             let v = v.trim();
@@ -950,6 +1017,20 @@ mod tests {
         let back = parse(&cfg.to_lua(), "t").unwrap();
         assert_eq!(back.visualizer, VizMode::Sides);
         assert!(back.cover_pulse);
+    }
+
+    #[test]
+    fn disco_de_vinilo() {
+        let cfg = parse(DEFAULT_CONFIG, "t").unwrap();
+        assert!(!cfg.vinyl);
+        assert_eq!(cfg.vinyl_visualizer, DiscViz::Around);
+        let txt = DEFAULT_CONFIG
+            .replace("vinyl            = false", "vinyl = true")
+            .replace("vinyl_visualizer = \"alrededor\"", "vinyl_visualizer = \"abajo\"");
+        let cfg = parse(&txt, "t").unwrap();
+        assert!(cfg.vinyl && cfg.vinyl_visualizer == DiscViz::Below);
+        let back = parse(&cfg.to_lua(), "t").unwrap();
+        assert!(back.vinyl && back.vinyl_visualizer == DiscViz::Below);
     }
 
     #[test]

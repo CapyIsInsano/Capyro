@@ -1,7 +1,7 @@
 //! Visualizador de audio: barras de frecuencia a partir de las últimas
 //! muestras que sonaron (las da el núcleo). FFT propia, sin dependencias.
 
-use eframe::egui::{pos2, vec2, Color32, Painter, Rect};
+use eframe::egui::{pos2, vec2, Color32, Painter, Pos2, Rect};
 
 const N: usize = 1024; // muestras por análisis (~21 ms a 48 kHz)
 pub const BANDS: usize = 40;
@@ -130,6 +130,30 @@ impl Visualizer {
             painter.rect_filled(Rect::from_min_max(pos2(rx, y0), pos2(rx + len, y1)), thick / 2.0, c);
             painter.rect_filled(Rect::from_min_size(pos2(lx - plen - 2.0, y0), vec2(2.0, thick)), 1.0, cp);
             painter.rect_filled(Rect::from_min_size(pos2(rx + plen, y0), vec2(2.0, thick)), 1.0, cp);
+        }
+    }
+}
+
+impl Visualizer {
+    /// Barras alrededor de un círculo (el disco de vinilo): salen de su
+    /// borde (`r0`) hacia afuera hasta `reach`, espejadas a izquierda y
+    /// derecha, con los graves arriba y los agudos abajo.
+    pub fn draw_around(&self, painter: &Painter, c: Pos2, r0: f32, reach: f32, color: Color32) {
+        let n = BANDS;
+        let width = (std::f32::consts::PI * r0 / n as f32 * 0.55).clamp(1.5, 6.0);
+        for b in 0..n {
+            let level = self.levels[b];
+            let peak = self.peaks[b];
+            let len = (level * reach).max(1.5);
+            let alpha = 0.35 + 0.65 * level;
+            let col = color.gamma_multiply(alpha);
+            let t = (b as f32 + 0.5) / n as f32 * std::f32::consts::PI;
+            for side in [1.0f32, -1.0] {
+                let a = -std::f32::consts::FRAC_PI_2 + side * t;
+                let d = vec2(a.cos(), a.sin());
+                painter.line_segment([c + d * r0, c + d * (r0 + len)], eframe::egui::Stroke::new(width, col));
+                painter.circle_filled(c + d * (r0 + (peak * reach).max(1.5) + 3.0), width * 0.45, color.gamma_multiply(0.8));
+            }
         }
     }
 }

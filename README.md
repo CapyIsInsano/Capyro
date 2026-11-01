@@ -35,7 +35,8 @@ Abrís un archivo, apretás play y listo: *just press play*.
 > achicá un video, con 7 perfiles (Alta calidad, Tamaño reducido, Compatibilidad universal,
 > Música sin pérdida, Video para celulares, Extraer audio, Crear video con portada) y
 > funciones avanzadas. Además: videos de hasta **8K** sin cortes de sonido, el visualizador
-> **a los lados** de la portada y la portada que **late con los graves**.
+> **a los lados** de la portada, la portada que **late con los graves** y el **disco de vinilo**
+> que gira con la portada en el medio.
 >
 > **De la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
 > **vista de música**: la carátula grande al medio con título, artista y álbum, los controles,
@@ -447,6 +448,11 @@ Capyro se acomoda a lo que abrís:
   medio** (sobre ella) o **apagado**; y con **Portada con los graves** la portada se agranda y
   se achica con los bajos. En el modo **Bajo** no hay ninguno de los dos (`visualizer` y
   `cover_pulse` en `capyro.lua`).
+- **⚙ → Disco de vinilo**: la portada va al medio de un **disco que gira** a 33⅓ vueltas por
+  minuto (a 2×, el doble de rápido), arranca y frena despacio como un tocadiscos. Con el disco,
+  el visualizador va **alrededor** del disco, **abajo** o desactivado. También se ve en la vista
+  clásica y en Capyro Studio (la portada nueva aparece ya puesta en el disco). En Bajo el disco
+  se ve, pero quieto (`vinyl` y `vinyl_visualizer` en `capyro.lua`).
 
 ### Capyro Studio y Capyro Converter
 
@@ -566,6 +572,8 @@ return {
         remember_session = true,       -- retomar lista y posición
         visualizer       = "medio",    -- barras con los audios: "lados", "medio" o "apagado"
         cover_pulse      = true,       -- la portada late con los graves
+        vinyl            = false,      -- la portada en un disco de vinilo que gira
+        vinyl_visualizer = "alrededor",-- con el disco: "alrededor", "abajo" o "apagado"
         screenshot_dir   = "",         -- "" = ~/Imágenes/Capyro
         backend          = "auto",     -- "auto", "x11" o "wayland"
         splash           = true,       -- pantalla de carga al abrir
@@ -824,7 +832,7 @@ capyro/
 │       │   ├── widgets.rs      #      botones, chips, campos, deslizadores
 │       │   ├── actions.rs      #      atajos, abrir archivos, volumen, capturas, sesión
 │       │   ├── sounds.rs · updates.rs · tutorial.rs
-│       ├── ui/                 #    lo que se dibuja: theme, icons, alto (modo Alto), viz (visualizador)
+│       ├── ui/                 #    lo que se dibuja: theme, icons, alto (modo Alto), vinyl (disco), viz (visualizador)
 │       ├── system/             #    config (capyro.lua), paths, session, playlists, cache, perf,
 │       │                       #    render, wine, errlog, changelog, uninstall
 │       ├── media/              #    formats (resúmenes), videoinfo (1080p, 4K…)

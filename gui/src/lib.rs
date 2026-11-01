@@ -8,11 +8,12 @@ mod app; // la ventana: vistas, menús, Capyro Studio y Capyro Converter
 mod ffi; // el puente con el núcleo en C
 mod updater; // buscar e instalar actualizaciones
 
-/// Lo que se dibuja: colores y fuentes, íconos, el modo Alto y el visualizador.
+/// Lo que se dibuja: colores y fuentes, íconos, el modo Alto, el disco de vinilo y el visualizador.
 mod ui {
     pub mod alto;
     pub mod icons;
     pub mod theme;
+    pub mod vinyl;
     pub mod viz;
 }
 

@@ -237,11 +237,19 @@ impl CapyroApp {
                 }
                 MediaKind::Audio => {
                     let (title, artist) = self.track_labels();
-                    let has_cover = self.video_tex.is_some();
+                    // (con el disco, el lugar es el de una portada aunque no tenga)
+                    let has_cover = self.video_tex.is_some() || self.cfg.vinyl;
                     let side = (rect.height() * 0.5).clamp(80.0, 260.0);
                     let art_center = c - vec2(0.0, if has_cover { 28.0 } else { 36.0 });
                     let text_y = if has_cover { art_center.y + side / 2.0 + 24.0 } else { c.y + 6.0 };
-                    if self.cfg.viz_mode() != crate::system::config::VizMode::Off && !self.viz.is_silent() {
+                    let disc = self.cfg.vinyl;
+                    let disc_viz = self.cfg.disc_viz();
+                    let bars_below = if disc {
+                        disc_viz == crate::system::config::DiscViz::Below
+                    } else {
+                        self.cfg.viz_mode() != crate::system::config::VizMode::Off
+                    };
+                    if bars_below && !self.viz.is_silent() {
                         // barras de frecuencia de fondo, debajo del título y el artista
                         let text_bottom = text_y + if artist.is_empty() { 14.0 } else { 34.0 };
                         let top = (rect.bottom() - rect.height() * 0.30).max(text_bottom + 6.0);
@@ -254,7 +262,23 @@ impl CapyroApp {
                         }
                     }
 
-                    if let Some(tex) = &self.video_tex {
+                    if disc {
+                        // disco de vinilo (⚙): la portada como etiqueta, girando
+                        let around = disc_viz == crate::system::config::DiscViz::Around;
+                        let r = side / 2.0 * if around { 0.84 } else { 1.0 };
+                        let label = match &self.video_tex {
+                            Some(t) => crate::ui::vinyl::Label::Cover(t.id(), self.video_aspect.max(0.05)),
+                            None => crate::ui::vinyl::Label::Plain,
+                        };
+                        crate::ui::theme::soft_shadow(&painter, Rect::from_center_size(art_center, Vec2::splat(2.0 * r)), r, 12.0, 4.0, 90);
+                        crate::ui::vinyl::draw(&painter, art_center, r, self.vinyl_angle, &label, accent, 1.0, crate::system::perf::animations());
+                        if self.video_tex.is_some() {
+                            source = Some(Rect::from_center_size(art_center, Vec2::splat(2.0 * r * crate::ui::vinyl::LABEL)));
+                        }
+                        if around && !self.viz.is_silent() {
+                            self.viz.draw_around(&painter, art_center, r + 4.0, side / 2.0 - r + 10.0, accent.gamma_multiply(0.8));
+                        }
+                    } else if let Some(tex) = &self.video_tex {
                         let art = Rect::from_center_size(art_center, Vec2::splat(side));
                         let mut size = vec2(side, side / self.video_aspect);
                         if size.y > side {

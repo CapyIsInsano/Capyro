@@ -127,6 +127,8 @@ pub struct Studio {
     video: bool,
     /// La duración (mientras se guarda el archivo está cerrado y no se sabe).
     duration: f64,
+    /// Disco de vinilo: hacia dónde apunta (None = apagado). Lo pone el panel en cada cuadro.
+    vinyl: Option<f32>,
     /// Guardando (mientras tanto no se edita ni se cierra).
     saving: Option<SaveJob>,
 }
@@ -168,6 +170,7 @@ impl Studio {
             preset_changed: false,
             video,
             duration,
+            vinyl: None,
             saving: None,
         })
     }
@@ -265,7 +268,9 @@ impl CapyroApp {
         let accent = self.cfg.accent;
         let now = ctx.input(|i| i.time);
         let core = &self.core;
+        let vinyl = self.cfg.vinyl.then_some(self.vinyl_angle);
         let Some(st) = self.studio.as_mut() else { return };
+        st.vinyl = vinyl;
         st.poll_pick(&ctx, now);
         st.poll_save(core, &ctx, now);
         st.tick_preview(core);

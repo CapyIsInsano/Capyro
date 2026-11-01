@@ -24,7 +24,8 @@ use eframe::egui::{
     UiBuilder, Vec2,
 };
 
-use crate::system::config::VizMode;
+use crate::system::config::{DiscViz, VizMode};
+use crate::ui::vinyl;
 use crate::app::{animate_button, ease_out, fit_text, CapyroApp, FRAME_SMOOTH};
 use crate::ffi::State;
 use crate::ui::icons;
@@ -88,6 +89,62 @@ impl CapyroApp {
         self.music_center(ui, l.center.translate(vec2(0.0, slide * 0.6)));
     }
 
+    /// La portada como disco de vinilo que gira (⚙ → Disco de vinilo), con
+    /// el visualizador alrededor o abajo. `cover` es el lugar cuadrado de la
+    /// portada y `shown`, ya movido (paralaje de Alto).
+    #[allow(clippy::too_many_arguments)]
+    fn music_disc(&mut self, painter: &egui::Painter, cover: Rect, shown: Rect, area: Rect, ce: f32, energy: f32, pulse: f32, now: f64) {
+        let accent = self.cfg.accent;
+        let anim = crate::system::perf::animations();
+        let alto = crate::ui::alto::on();
+        let disc_viz = self.cfg.disc_viz();
+        let around = disc_viz == DiscViz::Around;
+        let full = cover.width() / 2.0;
+        let r = full * if around { 0.82 } else { 0.98 } * (0.94 + 0.06 * ce) * (1.0 + pulse);
+        let c = shown.center();
+        let disc_rect = Rect::from_center_size(c, Vec2::splat(2.0 * r));
+        if anim {
+            soft_shadow(painter, disc_rect, r, 20.0, 6.0, 110);
+        } else {
+            soft_shadow(painter, disc_rect, r, 8.0, 3.0, 80);
+        }
+        // Alto: el aura de luz gira alrededor del disco
+        if alto {
+            let tint = self.ambient.mean().map(|c| Color32::from_rgb(c[0] as u8, c[1] as u8, c[2] as u8));
+            let other = tint.unwrap_or_else(|| accent.lerp_to_gamma(Color32::WHITE, 0.45));
+            let playing = self.core.state() == State::Playing;
+            let k = if playing { 0.7 + 0.3 * energy } else { 0.5 };
+            crate::ui::alto::aura(painter, disc_rect, r, accent, other, now, k * ce);
+        }
+        let label = match &self.video_tex {
+            Some(t) => vinyl::Label::Cover(t.id(), self.video_aspect.max(0.05)),
+            None => vinyl::Label::Plain,
+        };
+        vinyl::draw(painter, c, r, self.vinyl_angle, &label, accent, 0.25 + 0.75 * ce, anim);
+        if alto && self.video_tex.is_some() {
+            // la luz de Alto sale de la etiqueta
+            self.ambient.source = Some(Rect::from_center_size(c, Vec2::splat(2.0 * r * vinyl::LABEL)));
+        }
+        if self.viz.is_silent() {
+            return;
+        }
+        let k = self.viz.energy().clamp(0.0, 1.0);
+        let col = accent.lerp_to_gamma(Color32::WHITE, 0.15 + 0.2 * k);
+        match disc_viz {
+            DiscViz::Around => {
+                // de borde del disco hasta un poco más allá del lugar de la portada
+                let room = ((area.width() - cover.width()) / 2.0 - 6.0).clamp(0.0, 22.0);
+                let reach = (full - r) + room - 6.0;
+                self.viz.draw_around(painter, c, r + 5.0, reach.max(8.0), col.gamma_multiply(0.9 * ce));
+            }
+            DiscViz::Below => {
+                let band = Rect::from_min_max(pos2(c.x - full * 0.9, cover.bottom() + 8.0), pos2(c.x + full * 0.9, cover.bottom() + 42.0));
+                self.viz.draw(painter, band, col.gamma_multiply(0.85 * ce));
+            }
+            DiscViz::Off => {}
+        }
+    }
+
     /// Columna del medio: carátula, datos del tema, barra, controles,
     /// volumen y efectos.
     fn music_center(&mut self, ui: &mut Ui, area: Rect) {
@@ -105,8 +162,18 @@ impl CapyroApp {
         let extra_line = self.np.extra.clone();
         let tech = self.np.tech.clone();
         let viz = self.cfg.viz_mode();
+        // disco de vinilo: su visualizador va alrededor o abajo
+        let disc = self.cfg.vinyl;
+        let disc_viz = self.cfg.disc_viz();
+        let below_h = if disc && disc_viz == DiscViz::Below { 44.0 } else { 0.0 };
         // a los lados: lugar para las barras a cada costado de la portada
-        let side_room = if viz == VizMode::Sides { 2.0 * 58.0 } else { 36.0 };
+        let side_room = if disc {
+            if disc_viz == DiscViz::Around { 36.0 + 2.0 * 22.0 } else { 36.0 }
+        } else if viz == VizMode::Sides {
+            2.0 * 58.0
+        } else {
+            36.0
+        };
         let badges = self.cfg.show_format || self.cfg.show_millis;
         let badge_h = 30.0;
         // el visualizador va encima de la carátula: no ocupa lugar aparte
@@ -115,7 +182,7 @@ impl CapyroApp {
             + if album.is_empty() { 0.0 } else { 18.0 }
             + if extra_line.is_empty() { 0.0 } else { 17.0 }
             + if tech.is_empty() { 0.0 } else { 17.0 };
-        let fixed = 6.0 + badge_h + 14.0 + text_h + 12.0 + 36.0 + 8.0 + 54.0 + 8.0 + 32.0 + 14.0 + 54.0 + 6.0;
+        let fixed = 6.0 + badge_h + 14.0 + text_h + 12.0 + 36.0 + 8.0 + 54.0 + 8.0 + 32.0 + 14.0 + 54.0 + 6.0 + below_h;
         let side = (area.height() - fixed).min(area.width() - side_room).clamp(90.0, 340.0);
         // la carátula "un poco arriba": del lugar que sobra, un tercio arriba
         let extra = (area.height() - fixed - side).max(0.0);
@@ -164,6 +231,9 @@ impl CapyroApp {
             let d = (p - cover.center()) / (side * 0.5).max(1.0);
             shown = shown.translate(vec2(d.x.clamp(-1.0, 1.0), d.y.clamp(-1.0, 1.0)) * 5.0 * glass_k);
         }
+        if disc {
+            self.music_disc(&painter, cover, shown, area, ce, energy, pulse, now);
+        } else {
         // sombra (en Bajo, una sola capa)
         if anim {
             soft_shadow(&painter, shown, radius, 20.0, 6.0, 110);
@@ -242,8 +312,9 @@ impl CapyroApp {
             let col = Color32::WHITE.lerp_to_gamma(accent, 0.35 + 0.25 * k);
             self.viz.draw(&painter, band, col.gamma_multiply(0.85));
         }
+        }
         self.ui_rects.insert("video", cover);
-        y = cover.bottom() + 14.0;
+        y = cover.bottom() + 14.0 + below_h;
 
         /* --- título, artista y álbum (entran subiendo al cambiar de tema) --- */
         let max_w = area.width() - 12.0;
