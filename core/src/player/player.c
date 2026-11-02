@@ -565,7 +565,7 @@ static bool demux_one(CapyroCore *core) {
     }
     if (p->pkt->stream_index == p->aidx) {
         pq_push(&p->aq, p->pkt);
-    } else if (p->pkt->stream_index == p->vidx) {
+    } else if (p->pkt->stream_index == p->vidx && !p->video_off) {
         pq_push(&p->vq, p->pkt);
     } else {
         av_packet_unref(p->pkt);
@@ -1047,6 +1047,7 @@ static void decode_thread(void *arg) {
         bool     paused  = core->state != CAPYRO_STATE_PLAYING;
         bool     seek    = core->seek_req && core->seek_serial != p->seek_serial_done;
         bool     reinit  = core->hwdec_reinit;
+        p->video_off     = core->video_off;
         core->hwdec_reinit = false;
         double   target  = core->seek_target;
         uint64_t serial  = core->seek_serial;
@@ -1082,7 +1083,11 @@ static void decode_thread(void *arg) {
         bool worked = false;
 
         bool want_audio = p->aidx >= 0 && !p->a_done && ring < (size_t)(core->out_rate * AUDIO_AHEAD_SEC);
-        bool want_video = p->vidx >= 0 && !p->v_done && vq_len < VQ_MAX;
+        /* segundo plano: el video no se decodifica (lo que quedaba en la cola se tira) */
+        if (p->video_off && p->vq.count > 0) {
+            pq_clear(&p->vq);
+        }
+        bool want_video = p->vidx >= 0 && !p->v_done && !p->video_off && vq_len < VQ_MAX;
 
         if (!p->demux_eof && p->aq.bytes + p->vq.bytes < PKT_QUEUE_BYTES &&
             ((p->aidx >= 0 && p->aq.count < PKT_QUEUE_MIN) ||
@@ -1116,7 +1121,7 @@ static void decode_thread(void *arg) {
         }
 
         if (!worked) {
-            bool all_done = p->demux_eof && (p->aidx < 0 || p->a_done) && (p->vidx < 0 || p->v_done);
+            bool all_done = p->demux_eof && (p->aidx < 0 || p->a_done) && (p->vidx < 0 || p->v_done || p->video_off);
             if (all_done) {
                 cp_mutex_lock(&core->lock);
                 if (!core->seek_req) {

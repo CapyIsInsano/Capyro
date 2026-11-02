@@ -28,7 +28,7 @@ mod sounds;
 mod studio;
 mod tutorial;
 mod updates;
-mod widgets;
+pub(crate) mod widgets;
 /// Las vistas: la ventana, la clásica (video) y la de música.
 mod views {
     pub(super) mod classic;
@@ -266,6 +266,12 @@ pub struct CapyroApp {
     tutorial_pending: bool,
     /// Se está reiniciando para aplicar una actualización.
     restarting: bool,
+    /// Cerrar de verdad (atajo de salir, desinstalar): sin segundo plano.
+    quit_for_real: bool,
+    /// La ventana volvió del segundo plano: sin pantalla de carga ni sonido
+    /// de inicio, y sin tocar lo que ya está sonando. Trae los archivos que
+    /// llegaron de otro Capyro (si hay) para agregarlos.
+    resumed: Option<Vec<PathBuf>>,
     /// Playlists guardadas y qué pestaña de la Lista se ve (None = la Cola).
     playlists: Playlists,
     list_tab: Option<usize>,
@@ -321,7 +327,9 @@ pub fn window_icon() -> Option<egui::IconData> {
 }
 
 impl CapyroApp {
-    pub(crate) fn new(cc: &eframe::CreationContext<'_>, core: Core, cfg: Config) -> Self {
+    /// `resumed`: la ventana vuelve del segundo plano (ver background.rs),
+    /// con los archivos que haya que agregar.
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>, core: Core, cfg: Config, resumed: Option<Vec<PathBuf>>) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         theme::apply_visuals(&cc.egui_ctx, cfg.accent);
         apply_performance(&cc.egui_ctx, cfg.performance);
@@ -339,18 +347,21 @@ impl CapyroApp {
             cc.egui_ctx.load_texture("capyro-logo", img, TextureOptions::LINEAR)
         });
 
-        core.set_volume(cfg.start_volume);
+        // al volver del segundo plano, lo que suena sigue como estaba
+        if resumed.is_none() {
+            core.set_volume(cfg.start_volume);
+            core.set_speed(cfg.start_speed);
+            core.set_shuffle(cfg.start_shuffle);
+            core.set_repeat(cfg.start_repeat);
+        }
         core.set_auto_next(cfg.auto_next);
-        core.set_speed(cfg.start_speed);
-        core.set_shuffle(cfg.start_shuffle);
-        core.set_repeat(cfg.start_repeat);
         core.set_hwdec(cfg.decoding);
         let startup_notice = core
             .audio_backend()
             .is_empty()
             .then(|| "No encontré dispositivo de audio: reproduzco sin sonido".to_owned());
         // en Bajo no hay pantalla de carga: la interfaz aparece directo
-        let splash = cfg.splash && cfg.performance != crate::system::perf::Mode::Bajo;
+        let splash = cfg.splash && cfg.performance != crate::system::perf::Mode::Bajo && resumed.is_none();
         // Lo que dejó la actualización anterior (Windows: los .old).
         updater::cleanup_after_update();
         // Recién actualizado (lo abrió el Capyro viejo al reiniciar): contarlo.
@@ -364,6 +375,8 @@ impl CapyroApp {
             }
             _ => startup_notice,
         };
+        // no se pudo quedar en segundo plano (la bandeja falló): contarlo
+        let startup_notice = crate::background::take_notice().or(startup_notice);
 
         Self {
             core,
@@ -456,6 +469,8 @@ impl CapyroApp {
             avatar: None,
             tutorial_pending: false,
             restarting: false,
+            quit_for_real: false,
+            resumed,
             rng: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64 | 1)
@@ -466,6 +481,10 @@ impl CapyroApp {
     /// La carga del arranque: sonidos (se decodifican en el núcleo) y la
     /// sesión anterior. Corre mientras se ve la pantalla de "Cargando".
     pub(crate) fn finish_loading(&mut self) {
+        if self.resumed.is_some() {
+            self.finish_resume();
+            return;
+        }
         for (slot, data) in SOUNDS.iter().enumerate() {
             if let Err(e) = self.core.sfx_load(slot, data) {
                 eprintln!("capyro: no se pudo cargar el sonido {slot}: {}", e.0);
@@ -525,6 +544,28 @@ impl CapyroApp {
         }
         // Al retomar no arranca a sonar solo: el usuario aprieta play.
         self.boot.autoplay = false;
+    }
+
+    /// Volver del segundo plano: los sonidos ya están en el núcleo y la
+    /// lista sigue sonando; de la sesión, solo lo que es de la ventana.
+    fn finish_resume(&mut self) {
+        self.playlists = Playlists::load();
+        self.boot.autoplay = false;
+        if self.cfg.remember_session {
+            if let Some(sess) = Session::load() {
+                self.changes_seen = sess.seen_changes;
+                self.show_remaining = sess.show_remaining;
+            }
+        }
+    }
+
+    /// Al cerrar la ventana: ¿Capyro queda sonando en la bandeja?
+    fn goes_to_background(&self) -> bool {
+        self.cfg.background
+            && !self.quit_for_real
+            && !self.restarting
+            && self.tutorial.is_none()
+            && crate::background::available()
     }
 
     /// Los menús emergentes son de a uno.
@@ -601,6 +642,7 @@ impl CapyroApp {
 impl eframe::App for CapyroApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.updater.cancel();
+        crate::background::set_pending(self.goes_to_background());
         if !self.restarting {
             // al reiniciar ya se guardó antes de abrir el Capyro nuevo
             self.save_session();
@@ -627,6 +669,11 @@ impl eframe::App for CapyroApp {
         if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) {
             self.last_pointer_move = now;
         }
+        // para ubicar el mini reproductor del segundo plano antes de abrirlo
+        if self.first_pass {
+            let (size, ppp) = ctx.input(|i| (i.viewport().monitor_size, i.viewport().native_pixels_per_point));
+            crate::background::remember_monitor(size, ppp);
+        }
 
         /* --- arranque: primero se dibuja "Cargando", después se carga --- */
         if self.boot.start.is_none() {
@@ -642,7 +689,11 @@ impl eframe::App for CapyroApp {
         let ready = self.boot.ready_at.is_some_and(|r| now >= r);
         if ready && !self.boot.announced {
             self.boot.announced = true;
-            if self.cfg.startup_sound {
+            // volvió del segundo plano con archivos (se abrió Capyro otra vez)
+            if let Some(files) = self.resumed.as_mut().map(std::mem::take).filter(|f| !f.is_empty()) {
+                self.add_paths(&ctx, files, true);
+            }
+            if self.cfg.startup_sound && self.resumed.is_none() {
                 self.sfx(SFX_START);
             }
             if self.boot.autoplay && self.core.state() == State::Stopped {

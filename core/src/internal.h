@@ -83,6 +83,7 @@ typedef struct {
     bool                    demux_eof, a_flushed, v_flushed, a_done, v_done;
     double                  start_time;
     double                  a_drop_until, v_drop_until; /* < 0 = no descartar */
+    bool                    video_off;    /* copia de core->video_off para esta vuelta */
     /* videos que la máquina no llega a decodificar a tiempo (8K sin GPU):
      * el audio sigue entero y el video tira cuadros (ver video_late) */
     int                     v_late_run;   /* cuadros tirados seguidos por tarde */
@@ -179,6 +180,7 @@ struct CapyroCore {
     /* decodificación de video (hwdec.c) */
     int              hwdec_mode;    /* CapyroHwdec */
     bool             hwdec_reinit;  /* la GUI cambió el modo: rearmar el decodificador */
+    bool             video_off;     /* segundo plano: solo el audio (el video no se decodifica) */
     CapyroDecodeInfo decinfo;
     /* dispositivos de GPU ya abiertos (se reusan entre archivos). Los toca
      * el hilo de la GUI al abrir y el de decodificación al rearmar, nunca a

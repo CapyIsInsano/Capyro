@@ -5,7 +5,14 @@ use crate::app::*;
 use crate::system::config::{DiscViz, VizMode};
 
 /// Alto de todo el contenido del menú ⚙.
-pub(crate) const SETTINGS_H: f32 = 682.0;
+pub(crate) const SETTINGS_H: f32 = 712.0;
+
+/// Sin bandeja del sistema (Linux), el segundo plano no tiene dónde quedarse.
+const NO_TRAY: &str = if cfg!(windows) {
+    "Windows no aceptó el ícono en el área de notificación"
+} else {
+    "No encontré la bandeja del sistema: hace falta una (KDE, Cinnamon, Xfce, MATE, waybar… en GNOME, la extensión AppIndicator). Sin ella, cerrar la ventana cierra Capyro"
+};
 
 /// Velocidades que ofrece el menú de ajustes (y entre las que saltan los atajos).
 pub(crate) const SPEEDS: [f64; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
@@ -354,6 +361,24 @@ impl CapyroApp {
                 self.bar_hidden = false; // sin el botón, la barra vuelve
             }
             let msg = if self.cfg.hide_bar_button { "Botón para ocultar la barra activado" } else { "Botón para ocultar la barra desactivado" };
+            self.save_config(&ctx, msg.to_owned());
+        }
+        // segundo plano: al cerrar, sigue sonando en la bandeja del sistema
+        y += 30.0;
+        let tray = crate::background::available_cached();
+        let r = painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Segundo plano", regular(12.5), if tray { TEXT_DIM } else { TEXT_FAINT });
+        ui.interact(r.expand(4.0), Id::unique("capyro-background-label"), Sense::hover()).on_hover_text(if tray {
+            "Al cerrar la ventana, Capyro sigue sonando en la bandeja del sistema (con un video, solo el audio). Clic en su ícono: el mini reproductor"
+        } else {
+            NO_TRAY
+        });
+        if switch(ui, &painter, "background", pos2(x1 - 17.0, y), self.cfg.background, accent, interactive) {
+            self.cfg.background = !self.cfg.background;
+            let msg = match (self.cfg.background, tray) {
+                (true, true) => "Segundo plano activado: al cerrar, Capyro sigue sonando en la bandeja",
+                (true, false) => "Segundo plano activado, pero no encontré la bandeja del sistema",
+                (false, _) => "Segundo plano desactivado: cerrar la ventana cierra Capyro",
+            };
             self.save_config(&ctx, msg.to_owned());
         }
         y += 16.0;

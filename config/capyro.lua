@@ -97,6 +97,15 @@ local options = {
     music_view       = true,
     hide_bar_button  = true,
 
+    -- Segundo plano (también en ⚙ → Segundo plano): al cerrar la ventana,
+    -- Capyro sigue sonando con un ícono en la bandeja del sistema (con un
+    -- video, solo el audio). Clic (o clic derecho) en el ícono: un mini
+    -- reproductor con lo que suena, el disco o la portada, el visualizador,
+    -- cuánto va y cuánto falta, y los botones Abrir y Cerrar. Clic del medio:
+    -- pausa. En Linux hace falta una bandeja (KDE, Cinnamon, Xfce, MATE,
+    -- waybar... en GNOME, con la extensión AppIndicator).
+    background       = false,
+
     -- Modo de rendimiento (también en ⚙ → Rendimiento):
     --   "bajo"  = sin animaciones ni extras (pantalla de carga, visualizador,
     --             brillos): todo funciona igual, pero gasta lo mínimo.

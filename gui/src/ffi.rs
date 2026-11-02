@@ -172,6 +172,7 @@ extern "C" {
     fn capyro_core_get_fx(core: *mut CapyroCore, out: *mut AudioFx);
     fn capyro_core_set_pitch(core: *mut CapyroCore, semitones: f64);
     fn capyro_core_set_hwdec(core: *mut CapyroCore, mode: c_int);
+    fn capyro_core_set_video_enabled(core: *mut CapyroCore, enabled: bool);
     fn capyro_core_get_hwdec(core: *mut CapyroCore) -> c_int;
     fn capyro_core_get_decode_info(core: *mut CapyroCore, out: *mut RawDecodeInfo);
     fn capyro_core_get_pitch(core: *mut CapyroCore) -> f64;
@@ -665,6 +666,18 @@ impl Core {
     /// `ptr` debe venir de `capyro_core_init()` y seguir vivo mientras exista `Core`.
     pub unsafe fn from_raw(ptr: *mut CapyroCore) -> Self {
         Self { ptr }
+    }
+
+    /// Otra vista sobre el mismo núcleo (la ventana se lleva una y el
+    /// segundo plano sigue con otra). `Core` no libera nada al soltarse.
+    pub fn share(&self) -> Core {
+        Core { ptr: self.ptr }
+    }
+
+    /// Con `false`, un video sigue sonando pero sin decodificar la imagen
+    /// (segundo plano). Al volver a `true` se resincroniza solo.
+    pub fn set_video_enabled(&self, enabled: bool) {
+        unsafe { capyro_core_set_video_enabled(self.ptr, enabled) }
     }
 
     /// Fin de archivo y paso al siguiente; se llama una vez por frame.

@@ -39,6 +39,14 @@
   - También en la **vista clásica** (ventanas chicas) y en **Capyro Studio**: la portada se ve ya puesta en el disco (y la nueva, al elegirla), girando mientras suena.
   - Con "Portada con los graves", el disco late; en Alto, el aura gira alrededor del disco.
   - En el modo **Bajo** el disco se ve, pero quieto y sin visualizador. En `capyro.lua`: `vinyl = true` y `vinyl_visualizer = "alrededor"`, `"abajo"` o `"apagado"`.
+- **Segundo plano** (⚙ → Segundo plano, viene apagado): al cerrar la ventana, Capyro **sigue sonando** con un ícono en la **bandeja del sistema**. Con un video suena solo el audio: la imagen deja de decodificarse (en la prueba, un 1080p bajó de ~74 % de CPU a ~2 %) y, al volver, se acomoda sola en el mismo punto.
+  - **Clic o clic derecho en el ícono**: un **mini reproductor** al lado, con lo que suena (título y artista; con un video, "suena solo el audio"), el **disco de vinilo** girando si está activado (o la portada), el **visualizador a un costado**, **cuánto va y cuánto falta** (con la barra para ir a otra parte), pausa y los botones **Abrir** (vuelve la ventana, con la lista y todo como estaba, sin pantalla de carga) y **Cerrar** (cierra Capyro del todo y guarda dónde quedaste).
+  - Se va solo al tocar afuera, con Esc o con otro clic en el ícono; el clic del medio pausa o sigue. Respeta el modo de rendimiento: en Bajo, sin visualizador y con el disco quieto.
+  - Mientras está en segundo plano no hay ventana: el bucle de la ventana termina y queda solo el ícono (y la sesión se guarda cada 15 s, por si se apaga la PC).
+  - **Abrir Capyro otra vez** (o un archivo con Capyro) mientras está en segundo plano trae su ventana de vuelta, con ese archivo sonando, en vez de abrir un segundo Capyro.
+  - **Ctrl+Q** (salir) y desinstalar cierran del todo aunque esté activado.
+  - En Linux, el ícono va por **StatusNotifierItem** (D-Bus): KDE, Cinnamon, Xfce, MATE, LXQt, Budgie, waybar… y GNOME con la extensión AppIndicator. Sin bandeja, el interruptor aparece en gris y cerrar cierra como siempre. En Windows, en el área de notificación.
+  - En `capyro.lua`: `background = true`.
 - **⚙ tiene scroll** en ventanas bajitas (con la rueda), así entra todo aunque la ventana sea chica.
 - **El proyecto está ordenado en carpetas**:
   - en Rust, `app.rs` (casi 4000 líneas) quedó partido: `app/views/` (vista clásica, de música y la ventana), `app/menus/` (ⓘ, ⚙, efectos, novedades, atajos, lista), `app/studio/` (portada, campos, vista previa, ecualizador, guardar), `app/converter/` (perfiles, entrada, opciones, salida) y piezas compartidas (`overlay.rs`: el panel que se pone encima; `widgets.rs`: botones, chips, campos y deslizadores). Lo demás, en `ui/` (tema, íconos, Alto, visualizador), `system/` (config, carpetas, sesión, playlists, caché, rendimiento…) y `media/` (formatos);

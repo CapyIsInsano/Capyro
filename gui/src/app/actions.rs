@@ -74,7 +74,11 @@ impl CapyroApp {
                     self.toast(ctx, "La barra se oculta solo con videos", false);
                 }
             }
-            Action::Quit => ctx.send_viewport_cmd(ViewportCommand::Close),
+            Action::Quit => {
+                // el atajo de salir cierra del todo (también con el segundo plano)
+                self.quit_for_real = true;
+                ctx.send_viewport_cmd(ViewportCommand::Close);
+            }
         }
     }
 

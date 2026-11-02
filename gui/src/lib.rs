@@ -5,6 +5,7 @@
 //! loop de eframe/egui hasta que se cierra la ventana.
 
 mod app; // la ventana: vistas, menús, Capyro Studio y Capyro Converter
+mod background; // segundo plano: el ícono en la bandeja y el mini reproductor
 mod ffi; // el puente con el núcleo en C
 mod updater; // buscar e instalar actualizaciones
 
@@ -68,30 +69,72 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
     // SAFETY: main.c pasa el puntero de capyro_core_init() y lo libera
     // recién después de que esta función retorna.
     let core = unsafe { ffi::Core::from_raw(core) };
-    let cfg = config::Config::load();
+    // ¿hay un Capyro en segundo plano? se le pasan los archivos y vuelve él
+    if background::instance::wake_existing() {
+        eprintln!("capyro: ya había un Capyro en segundo plano: vuelve su ventana");
+        return 0;
+    }
+    let mut cfg = config::Config::load();
     eprintln!("capyro {} · config: {} · backend: {:?}", ffi::version(), cfg.source, cfg.backend);
     // en Wine: que el bucle de eventos no gire en vacío (ver wine.rs)
     wine::install();
 
-    // OpenGL o Direct3D (ver render.rs): el que ande
-    let renderers = render::order(cfg.renderer);
+    // la ventana; al cerrarla con el segundo plano activado, la bandeja
+    // (background.rs) hasta que se pida la ventana otra vez o cerrar
+    let mut resumed: Option<Vec<std::path::PathBuf>> = None;
+    let mut renderer: Option<eframe::Renderer> = None;
+    loop {
+        match open_window(core.share(), &cfg, renderer, resumed.take()) {
+            Ok(r) => renderer = Some(r),
+            Err(code) => return code,
+        }
+        if !background::take_pending() {
+            return 0;
+        }
+        match background::run(&core, &cfg, renderer.unwrap_or_default()) {
+            background::Wake::Open(files) => {
+                // la configuración pudo cambiar a mano mientras tanto
+                cfg = config::Config::load();
+                resumed = Some(files);
+            }
+            background::Wake::Quit => return 0,
+        }
+    }
+}
+
+/// Abre la ventana y espera a que se cierre. Devuelve con qué se dibujó (o
+/// el código de salida si no hubo forma de abrirla).
+fn open_window(
+    core: ffi::Core,
+    cfg: &config::Config,
+    known: Option<eframe::Renderer>,
+    resumed: Option<Vec<std::path::PathBuf>>,
+) -> Result<eframe::Renderer, c_int> {
+    // OpenGL o Direct3D (ver render.rs): el que ande (al volver del segundo
+    // plano, el que ya anduvo)
+    let renderers = match known {
+        Some(r) => vec![r],
+        None => render::order(cfg.renderer),
+    };
 
     // el núcleo y la config pasan a la app del intento que funcione
-    let parts = std::rc::Rc::new(std::cell::RefCell::new(Some((core, cfg.clone()))));
+    let parts = std::rc::Rc::new(std::cell::RefCell::new(Some((core, cfg.clone(), resumed))));
     let mut errors = Vec::new();
     for (i, &renderer) in renderers.iter().enumerate() {
-        render::watch(renderer, renderers.get(i + 1).copied());
+        if known.is_none() {
+            render::watch(renderer, renderers.get(i + 1).copied());
+        }
         let slot = parts.clone();
         let result = eframe::run_native(
             "Capyro",
-            native_options(&cfg, renderer),
+            native_options(cfg, renderer),
             Box::new(move |cc| {
-                let (core, cfg) = slot.borrow_mut().take().ok_or("el núcleo ya se usó")?;
-                Ok(Box::new(app::CapyroApp::new(cc, core, cfg)))
+                let (core, cfg, resumed) = slot.borrow_mut().take().ok_or("el núcleo ya se usó")?;
+                Ok(Box::new(app::CapyroApp::new(cc, core, cfg, resumed)))
             }),
         );
         match result {
-            Ok(()) => return 0,
+            Ok(()) => return Ok(renderer),
             Err(e) => {
                 let msg = format!("{renderer:?}: {e}");
                 errlog::log(&format!("no se pudo abrir la ventana con {msg}"));
@@ -107,7 +150,7 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
         "No se pudo abrir la ventana de Capyro.\n\n{}\n\nProbá actualizar los drivers de video.",
         errors.join("\n")
     ));
-    1
+    Err(1)
 }
 
 fn native_options(cfg: &config::Config, renderer: eframe::Renderer) -> eframe::NativeOptions {

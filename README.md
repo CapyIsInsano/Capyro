@@ -35,8 +35,9 @@ Abrís un archivo, apretás play y listo: *just press play*.
 > achicá un video, con 7 perfiles (Alta calidad, Tamaño reducido, Compatibilidad universal,
 > Música sin pérdida, Video para celulares, Extraer audio, Crear video con portada) y
 > funciones avanzadas. Además: videos de hasta **8K** sin cortes de sonido, el visualizador
-> **a los lados** de la portada, la portada que **late con los graves** y el **disco de vinilo**
-> que gira con la portada en el medio.
+> **a los lados** de la portada, la portada que **late con los graves**, el **disco de vinilo**
+> que gira con la portada en el medio y el **segundo plano**: al cerrar la ventana, Capyro sigue
+> sonando en la bandeja del sistema, con un mini reproductor al tocar su ícono.
 >
 > **De la v0.3.2:** **interfaz adaptativa**. Con un audio, Capyro cambia a la
 > **vista de música**: la carátula grande al medio con título, artista y álbum, los controles,
@@ -454,6 +455,29 @@ Capyro se acomoda a lo que abrís:
   clásica y en Capyro Studio (la portada nueva aparece ya puesta en el disco). En Bajo el disco
   se ve, pero quieto (`vinyl` y `vinyl_visualizer` en `capyro.lua`).
 
+### Segundo plano
+
+Con **⚙ → Segundo plano** activado (viene apagado), cerrar la ventana no cierra Capyro: sigue
+sonando con un ícono en la **bandeja del sistema** (con un video suena solo el audio, sin
+decodificar la imagen: casi no gasta). **Clic o clic derecho en el ícono** abre un **mini
+reproductor** al lado:
+
+- lo que suena (título y artista; con un video, "suena solo el audio"), con el **disco de
+  vinilo** girando si lo tenés activado, o la portada;
+- el **visualizador** a un costado de la portada (si no está apagado, y nunca en Bajo);
+- **cuánto va y cuánto falta**, con la barra para ir a otra parte;
+- pausa, **Abrir** (vuelve la ventana, con todo como estaba) y **Cerrar** (cierra Capyro del
+  todo y guarda dónde quedaste).
+
+Se va solo al tocar afuera, con <kbd>Esc</kbd> o con otro clic en el ícono. El clic del medio en
+el ícono pausa o sigue. Si abrís Capyro otra vez (o un archivo con Capyro) mientras está en
+segundo plano, vuelve su ventana (con ese archivo) en vez de abrirse otro. <kbd>Ctrl</kbd>+<kbd>Q</kbd>
+cierra del todo, aunque esté activado.
+
+En Linux hace falta una bandeja que entienda StatusNotifierItem: KDE, Cinnamon, Xfce, MATE,
+LXQt, Budgie, waybar… En GNOME, con la extensión **AppIndicator**. Sin bandeja, el interruptor
+aparece en gris y cerrar la ventana cierra Capyro como siempre (`background` en `capyro.lua`).
+
 ### Capyro Studio y Capyro Converter
 
 Los dos se abren con sus botones: en la vista de música, debajo de las pestañas de la burbuja
@@ -585,6 +609,7 @@ return {
         performance      = "medio",    -- "bajo" (sin animaciones ni extras), "medio" o "alto" (iluminación)
         music_view       = true,       -- con un audio: la vista de música (carátula, lista y funciones)
         hide_bar_button  = true,       -- con un video: botón para ocultar la barra de abajo (tecla B)
+        background       = false,      -- al cerrar, seguir sonando en la bandeja del sistema
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
         system           = "Lin",      -- "Lin" o "Win": lo pone la instalación ("auto" = detectarlo)
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
@@ -820,7 +845,7 @@ capyro/
 │       └── platform/           #    hilos, reloj, archivos y sistema (POSIX o Win32)
 ├── gui/                        # ── interfaz en Rust ──
 │   └── src/
-│       ├── lib.rs              #    capyro_gui_run() + ventana
+│       ├── lib.rs              #    capyro_gui_run(): la ventana y, al cerrarla, el segundo plano
 │       ├── ffi.rs · ffi/       #    el puente seguro con el núcleo (convert.rs: Converter)
 │       ├── app.rs              #    la app: estado, arranque y cada cuadro
 │       ├── app/
@@ -832,6 +857,8 @@ capyro/
 │       │   ├── widgets.rs      #      botones, chips, campos, deslizadores
 │       │   ├── actions.rs      #      atajos, abrir archivos, volumen, capturas, sesión
 │       │   ├── sounds.rs · updates.rs · tutorial.rs
+│       ├── background.rs · background/ # segundo plano: tray_linux.rs (StatusNotifierItem), tray_windows.rs,
+│       │                       #      popup.rs (mini reproductor), instance.rs (un solo Capyro)
 │       ├── ui/                 #    lo que se dibuja: theme, icons, alto (modo Alto), vinyl (disco), viz (visualizador)
 │       ├── system/             #    config (capyro.lua), paths, session, playlists, cache, perf,
 │       │                       #    render, wine, errlog, changelog, uninstall

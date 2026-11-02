@@ -312,7 +312,10 @@ impl CapyroApp {
             if armed {
                 self.uninstall_armed = None;
                 match crate::system::uninstall::launch() {
-                    Ok(crate::system::uninstall::Outcome::Done) => ctx.send_viewport_cmd(ViewportCommand::Close),
+                    Ok(crate::system::uninstall::Outcome::Done) => {
+                        self.quit_for_real = true;
+                        ctx.send_viewport_cmd(ViewportCommand::Close);
+                    }
                     Ok(crate::system::uninstall::Outcome::NeedsRoot(cmd)) => {
                         ctx.copy_text(cmd.clone());
                         self.toast_for(&ctx, format!("Copié, pegalo en una terminal: {cmd}"), false, 10.0);

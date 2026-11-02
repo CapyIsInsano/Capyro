@@ -344,6 +344,9 @@ pub struct Config {
     pub music_view: bool,
     /// En los videos, un botón para ocultar la barra de abajo.
     pub hide_bar_button: bool,
+    /// Segundo plano: al cerrar la ventana, Capyro sigue sonando en la
+    /// bandeja del sistema (ver background.rs).
+    pub background: bool,
     /// Decodificación de video: automático, GPU o CPU.
     pub decoding: crate::ffi::Hwdec,
     /// Con qué se dibuja la ventana en Windows (OpenGL / Direct3D / auto).
@@ -565,6 +568,7 @@ impl Config {
                 "show_video_info" => self.show_video_info.to_string(),
                 "music_view" => self.music_view.to_string(),
                 "hide_bar_button" => self.hide_bar_button.to_string(),
+                "background" => self.background.to_string(),
                 "update_repo" => lua_quote(self.update_repo.as_deref().unwrap_or("")),
                 "update_branch" => lua_quote(self.update_branch.as_deref().unwrap_or("")),
                 "decoding" => lua_quote(self.decoding.name()),
@@ -749,6 +753,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         show_video_info: true,
         music_view: true,
         hide_bar_button: true,
+        background: false,
         system_setting: None,
         source: name.to_owned(),
     };
@@ -866,6 +871,9 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
         }
         if let Some(v) = opts.get::<Option<bool>>("hide_bar_button")? {
             cfg.hide_bar_button = v;
+        }
+        if let Some(v) = opts.get::<Option<bool>>("background")? {
+            cfg.background = v;
         }
         if let Some(v) = opts.get::<Option<bool>>("show_millis")? {
             cfg.show_millis = v;
@@ -1031,6 +1039,15 @@ mod tests {
         assert!(cfg.vinyl && cfg.vinyl_visualizer == DiscViz::Below);
         let back = parse(&cfg.to_lua(), "t").unwrap();
         assert!(back.vinyl && back.vinyl_visualizer == DiscViz::Below);
+    }
+
+    #[test]
+    fn segundo_plano() {
+        let cfg = parse(DEFAULT_CONFIG, "t").unwrap();
+        assert!(!cfg.background);
+        let cfg = parse(&DEFAULT_CONFIG.replace("background       = false", "background = true"), "t").unwrap();
+        assert!(cfg.background);
+        assert!(parse(&cfg.to_lua(), "t").unwrap().background);
     }
 
     #[test]

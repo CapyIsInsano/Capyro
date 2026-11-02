@@ -109,6 +109,18 @@ impl Visualizer {
     /// hacia afuera, hasta `reach` de largo, con los graves abajo y los
     /// agudos arriba (las 40 bandas, de a dos por renglón).
     pub fn draw_sides(&self, painter: &Painter, art: Rect, reach: f32, gap: f32, color: Color32) {
+        self.side_bars(painter, art, reach, art.left() - gap, -1.0, color);
+        self.side_bars(painter, art, reach, art.right() + gap, 1.0, color);
+    }
+
+    /// Las barras de un solo lado, a la derecha de `art` (el mini
+    /// reproductor del segundo plano).
+    pub fn draw_side(&self, painter: &Painter, art: Rect, reach: f32, gap: f32, color: Color32) {
+        self.side_bars(painter, art, reach, art.right() + gap, 1.0, color);
+    }
+
+    /// Renglones de barras que salen de `x` hacia `dir` (-1 izquierda, 1 derecha).
+    fn side_bars(&self, painter: &Painter, art: Rect, reach: f32, x: f32, dir: f32, color: Color32) {
         let rows = BANDS / 2;
         let space = 3.0;
         let h = art.height() * 0.92;
@@ -122,14 +134,10 @@ impl Visualizer {
             let len = (level * reach).max(1.5);
             let plen = (peak * reach).max(1.5) + 3.0;
             let alpha = 0.35 + 0.65 * level;
-            let c = color.gamma_multiply(alpha);
-            let cp = color.gamma_multiply(0.8);
-            // izquierda (crece hacia la izquierda) y derecha (hacia la derecha)
-            let (lx, rx) = (art.left() - gap, art.right() + gap);
-            painter.rect_filled(Rect::from_min_max(pos2(lx - len, y0), pos2(lx, y1)), thick / 2.0, c);
-            painter.rect_filled(Rect::from_min_max(pos2(rx, y0), pos2(rx + len, y1)), thick / 2.0, c);
-            painter.rect_filled(Rect::from_min_size(pos2(lx - plen - 2.0, y0), vec2(2.0, thick)), 1.0, cp);
-            painter.rect_filled(Rect::from_min_size(pos2(rx + plen, y0), vec2(2.0, thick)), 1.0, cp);
+            let (a, b) = if dir < 0.0 { (x - len, x) } else { (x, x + len) };
+            painter.rect_filled(Rect::from_min_max(pos2(a, y0), pos2(b, y1)), thick / 2.0, color.gamma_multiply(alpha));
+            let px = if dir < 0.0 { x - plen - 2.0 } else { x + plen };
+            painter.rect_filled(Rect::from_min_size(pos2(px, y0), vec2(2.0, thick)), 1.0, color.gamma_multiply(0.8));
         }
     }
 }

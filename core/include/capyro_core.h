@@ -171,6 +171,10 @@ typedef struct CapyroDecodeInfo {
 } CapyroDecodeInfo;
 
 void capyro_core_set_hwdec(CapyroCore *core, int mode); /* CapyroHwdec */
+
+/* Segundo plano (sin ventana): false = el video no se decodifica, suena solo
+ * el audio. Al volver a true salta a donde va (el video sigue en sincronía). */
+void capyro_core_set_video_enabled(CapyroCore *core, bool enabled);
 int  capyro_core_get_hwdec(CapyroCore *core);
 void capyro_core_get_decode_info(CapyroCore *core, CapyroDecodeInfo *out);
 

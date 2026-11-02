@@ -557,6 +557,23 @@ void capyro_core_set_pitch(CapyroCore *core, double semitones) {
     cp_mutex_unlock(&core->lock);
 }
 
+/* Segundo plano: sin ventana, el video no se decodifica (suena solo el
+ * audio y no gasta procesador). Al volver, salta a donde va para que el
+ * video arranque de un cuadro clave, en sincronía. */
+void capyro_core_set_video_enabled(CapyroCore *core, bool enabled) {
+    if (!core) {
+        return;
+    }
+    cp_mutex_lock(&core->lock);
+    bool was_off = core->video_off;
+    core->video_off = !enabled;
+    bool video = core->kind == CAPYRO_MEDIA_VIDEO;
+    cp_mutex_unlock(&core->lock);
+    if (was_off && enabled && video) {
+        capyro_core_seek(core, capyro_core_get_position(core));
+    }
+}
+
 void capyro_core_set_hwdec(CapyroCore *core, int mode) {
     if (!core || mode < CAPYRO_HWDEC_AUTO || mode > CAPYRO_HWDEC_CPU) {
         return;
