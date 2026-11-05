@@ -1,18 +1,18 @@
 <div align="center">
 
-<img src="docs/readme/hero.svg" width="900" alt="Capyro: reproductor multimedia para Linux y Windows">
+<img src="docs/readme/hero.svg" width="900" alt="Capyro: reproductor multimedia para Linux, Windows y macOS">
 
 <br>
 
-<img src="https://img.shields.io/badge/versi%C3%B3n-0.3.3--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.3.3-alpha">
-<img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Windows-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux y Windows">
+<img src="https://img.shields.io/badge/versi%C3%B3n-0.4.0--alpha-FF7417?style=flat-square&labelColor=1B1C20" alt="versión 0.4.0-alpha">
+<img src="https://img.shields.io/badge/plataforma-Linux%20%7C%20Windows%20%7C%20macOS-FF7417?style=flat-square&labelColor=1B1C20" alt="Linux, Windows y macOS">
 <img src="https://img.shields.io/badge/licencia-GPL--3.0-FF7417?style=flat-square&labelColor=1B1C20" alt="GPL-3.0">
 <img src="https://img.shields.io/badge/C11-%20-3A3B40?style=flat-square&labelColor=1B1C20" alt="C11">
 <img src="https://img.shields.io/badge/Rust-1.95%2B-3A3B40?style=flat-square&labelColor=1B1C20" alt="Rust 1.95+">
 <img src="https://img.shields.io/badge/Lua-5.4-3A3B40?style=flat-square&labelColor=1B1C20" alt="Lua 5.4">
 <img src="https://img.shields.io/badge/FFmpeg-5.1%2B-3A3B40?style=flat-square&labelColor=1B1C20" alt="FFmpeg 5.1+">
 
-**Capyro** es un reproductor de audio y video liviano para **Linux y Windows**, con un capibara de mascota.<br>
+**Capyro** es un reproductor de audio y video liviano para **Linux, Windows y macOS**, con un capibara de mascota.<br>
 Abrís un archivo, apretás play y listo: *just press play*.
 
 [Funciones](#funciones) ·
@@ -21,6 +21,7 @@ Abrís un archivo, apretás play y listo: *just press play*.
 [Distribuciones](#distribuciones) ·
 [Instalación](#instalación) ·
 [Windows](#windows) ·
+[Mac](#mac) ·
 [Atajos](#cómo-se-usa) ·
 [Configuración](#configuración) ·
 [Problemas](#solución-de-problemas)
@@ -28,7 +29,14 @@ Abrís un archivo, apretás play y listo: *just press play*.
 </div>
 
 > [!TIP]
-> **Novedades de la v0.3.3:** **Capyro Studio**, un panel encima de la ventana para
+> **Novedades de la v0.4.0:** **Capyro llega a la Mac** (macOS 11 o más nuevo, Apple Silicon
+> e Intel). Un **Capyro.app** de verdad, con todo adentro, que se instala con el mismo
+> **CapyroInstaller** de Windows. Con los botones de colores de macOS, atajos con **Cmd**,
+> **"Abrir con…"** del Finder, decodificación con **VideoToolbox**, **segundo plano en la barra
+> de menús** y actualizaciones solas. En `capyro.lua`, `system = "Mac"` junto a `"Lin"` y
+> `"Win"`: cada sistema compila e instala solo lo suyo.
+>
+> **De la v0.3.3:** **Capyro Studio**, un panel encima de la ventana para
 > **cambiar la portada** y **editar las etiquetas** de un audio o un video, con un
 > **ecualizador de 15 bandas** y 10 perfiles, y una **vista previa** de un tramo.
 > **Capyro Converter**: pasá un video a audio, un audio a video con la portada de fondo, o
@@ -86,10 +94,10 @@ Abrís un archivo, apretás play y listo: *just press play*.
 | 🎵 **Audio** | Carátula, título y artista, un visualizador de frecuencias propio y efectos de audio en tiempo real. |
 | 📃 **Lista** | Una **cola** temporal y hasta **3 playlists** guardadas. Aleatorio sin repetidos, repetir la lista o un archivo, paso automático al siguiente y quitar archivos aunque estén sonando. |
 | 💾 **Memoria** | Retoma la lista, el archivo, la posición, el volumen y los efectos de la última vez. |
-| 🚀 **GPU** | Decodificación de video por **GPU** (Linux: VA-API, NVDEC o VDPAU; Windows: D3D11VA, NVDEC o DXVA2), con vuelta automática a la CPU si la placa no puede. |
-| 🪟 **Linux y Windows** | El mismo Capyro en los dos: cada uno compila e instala solo lo suyo (`system = "Lin"` o `"Win"`). En Windows se instala con [CapyroInstaller](#windows). |
+| 🚀 **GPU** | Decodificación de video por **GPU** (Linux: VA-API, NVDEC o VDPAU; Windows: D3D11VA, NVDEC o DXVA2; Mac: VideoToolbox), con vuelta automática a la CPU si la placa no puede. |
+| 🪟 **Linux, Windows y Mac** | El mismo Capyro en los tres: cada uno compila e instala solo lo suyo (`system = "Lin"`, `"Win"` o `"Mac"`). En [Windows](#windows) y en la [Mac](#mac) se instala con CapyroInstaller. |
 | 📸 **Capturas** | Guarda el fotograma del video como PNG con `Shift`+`S`. |
-| 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, instala la versión nueva (en Linux la compila; en Windows baja la ya compilada) y te muestra qué cambió. |
+| 🔄 **Actualizaciones** | Un botón busca commits nuevos en GitHub, instala la versión nueva (en Linux la compila; en Windows y en la Mac baja la ya compilada) y te muestra qué cambió. |
 | ⚡ **Rendimiento** | Tres modos en ⚙: **Bajo** (sin animaciones ni extras, para PCs con pocos recursos), **Medio** y **Alto** (iluminación cinematográfica, fondo animado, brillos que siguen al mouse y partículas). |
 | 🎛️ **Capyro Studio** | Un panel encima de la ventana para **cambiar la portada** y **editar las etiquetas** de un audio o un video (MP3, FLAC, M4A, OGG, Opus, MP4, MKV…), con **ecualizador de 15 bandas**, 10 perfiles y vista previa de un tramo. Sin recodificar: no pierde calidad. |
 | 🔁 **Capyro Converter** | Pasá un **video a audio**, un **audio a video** con la portada de fondo, achicá un video o sacale el audio tal cual. **7 perfiles** (Alta calidad, Tamaño reducido, Compatibilidad universal, Música sin pérdida, Video para celulares, Extraer audio, Crear video con portada) y **funciones avanzadas**: formato, códecs (H.264, H.265, VP9, AV1, AAC, MP3, Opus, FLAC…), calidad, resolución, fps, kbps, canales, recorte, volumen parejo y GPU. Convierte en segundo plano. |
@@ -400,13 +408,93 @@ camino todavía no está probado: el probado es desde Linux.
 > instalación y la desinstalación andan. Falta probarla en un Windows de verdad: si lo hacés,
 > ¡contanos cómo te fue!
 
-### Un sistema, sus cosas
+## Mac
 
-CMake detecta para qué sistema se compila (`-DCAPYRO_SYSTEM=auto`, `Lin` o `Win`) y **solo
-compila e instala lo de ese sistema**: en Linux, el `.desktop`, los íconos y nada de Windows;
-en Windows, el `.exe` con su ícono, las DLL y nada de Linux. Las dependencias de Rust también
-van por sistema. El código queda en la config instalada (`system = "Lin"` o `"Win"`) y el
-actualizador lo respeta.
+Desde la v0.4.0 Capyro corre en **macOS 11 (Big Sur) o más nuevo**, en las Mac con **Apple
+Silicon** (M1, M2, M3, M4…) y en las de **Intel**.
+
+### Instalar
+
+Bajá **CapyroInstaller-macos.zip** del repo [CapyroInstaller](https://github.com/CapyIsInsano/CapyroInstaller)
+(Releases), descomprimilo y abrí **CapyroInstaller**. Es el mismo instalador de Windows, con la
+misma cara:
+
+1. Elegís **dónde va** (por defecto `/Applications/Capyro.app`, o `~/Applications` si tu usuario
+   no puede escribir en la de todos) y **dónde va la configuración** (por defecto
+   `~/Library/Application Support/Capyro/capyro.lua`), y si lo querés **en el Dock**.
+2. **Instalar**: barra verde y listo. No pide tu contraseña.
+3. **¿Lanzar Capyro?** Sí o No. Después **podés borrar el instalador**.
+
+Un solo instalador para las dos clases de Mac: adentro trae el Capyro de cada una y usa el que
+corresponde. Capyro queda en **Launchpad** y **Spotlight**, y en **"Abrir con…"** del Finder para
+sus formatos. La config se crea con `system = "Mac"`.
+
+> [!IMPORTANT]
+> Ni el instalador ni Capyro están firmados por Apple (cuesta 99 USD por año), así que la
+> primera vez macOS dice que **no puede verificar al desarrollador**:
+> - **macOS 14 o más viejo**: clic derecho en CapyroInstaller → **Abrir** → **Abrir**.
+> - **macOS 15 o más nuevo**: abrilo una vez, cerrá el cartel y andá a **Ajustes del Sistema →
+>   Privacidad y seguridad** → abajo, **Abrir igual**.
+>
+> Capyro.app no pide nada de eso: el instalador lo deja listo.
+
+### En la Mac
+
+- La ventana tiene los **tres botones de colores** de macOS (cerrar, minimizar, pantalla
+  completa); el encabezado de Capyro queda al lado. Se dibuja con **Metal** (o, si no anda,
+  OpenGL: `renderer = "opengl"` en `capyro.lua`).
+- Los atajos usan **Cmd** en vez de Ctrl: **Cmd+O** abre archivos, **Cmd+E** los efectos,
+  **Cmd+Q** cierra Capyro. En `capyro.lua` se siguen escribiendo `"Ctrl+O"` (o `"Cmd+O"`).
+- **Doble clic** en un video o una canción, **"Abrir con… → Capyro"**, o soltarlos sobre el ícono
+  del Dock: Capyro los agrega y los pone a sonar.
+- **Segundo plano**: al cerrar la ventana Capyro sale del Dock y queda en la **barra de menús**
+  (arriba a la derecha). Clic en su ícono: el mini reproductor. Abrir Capyro de nuevo desde
+  Launchpad o Spotlight trae la ventana.
+- **ⓘ → Desinstalar Capyro** lo manda a la Papelera y lo saca del Dock (tu configuración y tus
+  listas quedan). También se puede arrastrar Capyro.app a la Papelera, como cualquier app.
+
+### Actualizar
+
+Como en Windows: **ⓘ → Buscar actualizaciones** baja el Capyro.app de la release
+[`macos`](https://github.com/CapyIsInsano/Capyro/releases/tag/macos) del repo
+(`capyro-macos-arm64.zip` en Apple Silicon, `capyro-macos-x64.zip` en Intel; las arma el CI en
+cada push) y lo cambia por el instalado. No compila nada. Usa `curl` y `ditto`, que vienen con
+macOS.
+
+### Compilar en la Mac
+
+El CI lo hace en Macs de verdad ([`.github/workflows/macos.yml`](.github/workflows/macos.yml)),
+y en tu Mac es así (con Xcode o sus Command Line Tools y [Homebrew](https://brew.sh)):
+
+```sh
+xcode-select --install                        # si no tenés Xcode
+brew install cmake ninja pkgconf nasm meson rust
+# el FFmpeg que va adentro del .app (para macOS 11; tarda ~15 min la primera vez)
+bash packaging/macos/build-ffmpeg.sh ffmpeg-mac
+export PKG_CONFIG_LIBDIR=$PWD/ffmpeg-mac/lib/pkgconfig
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCAPYRO_FFMPEG_DIR=$PWD/ffmpeg-mac
+cmake --build build
+cmake --install build                         # → /Applications/Capyro.app (o --prefix otra carpeta)
+```
+
+Con el FFmpeg de Homebrew (`brew install ffmpeg`, sin `CAPYRO_FFMPEG_DIR`) también compila y
+anda, pero el Capyro.app queda dependiendo de Homebrew: sirve en esa Mac, no para pasarlo a otra.
+`cmake --install` firma el Capyro.app ("ad-hoc", sin certificado: lo necesitan las Mac con Apple
+Silicon) y lo anota en el Finder.
+
+> [!NOTE]
+> La versión para la Mac todavía **no se probó en una Mac**: el código de Rust se revisó
+> compilándolo para Apple Silicon e Intel, y el CI la compila y la prueba en Macs de GitHub.
+> Si la usás, ¡contanos cómo te fue!
+
+## Un sistema, sus cosas
+
+CMake detecta para qué sistema se compila (`-DCAPYRO_SYSTEM=auto`, `Lin`, `Win` o `Mac`) y
+**solo compila e instala lo de ese sistema**: en Linux, el `.desktop`, los íconos y nada de
+Windows ni de la Mac; en Windows, el `.exe` con su ícono, las DLL y nada de Linux; en la Mac, el
+Capyro.app con su `Info.plist`, el ícono `.icns` y las librerías de FFmpeg adentro. Las
+dependencias de Rust también van por sistema. El código queda en la config instalada
+(`system = "Lin"`, `"Win"` o `"Mac"`) y el actualizador lo respeta.
 
 <img src="docs/screenshot-sistema.png" width="100%" alt="El tutorial muestra el sistema detectado: Linux o Windows 11">
 
@@ -477,6 +565,8 @@ cierra del todo, aunque esté activado.
 En Linux hace falta una bandeja que entienda StatusNotifierItem: KDE, Cinnamon, Xfce, MATE,
 LXQt, Budgie, waybar… En GNOME, con la extensión **AppIndicator**. Sin bandeja, el interruptor
 aparece en gris y cerrar la ventana cierra Capyro como siempre (`background` en `capyro.lua`).
+En la Mac el ícono va en la **barra de menús** y Capyro sale del Dock mientras tanto (clic con la
+tecla Opción: pausa; <kbd>Cmd</kbd>+<kbd>Q</kbd> cierra del todo).
 
 ### Capyro Studio y Capyro Converter
 
@@ -611,7 +701,7 @@ return {
         hide_bar_button  = true,       -- con un video: botón para ocultar la barra de abajo (tecla B)
         background       = false,      -- al cerrar, seguir sonando en la bandeja del sistema
         decoding         = "auto",     -- "auto", "gpu" o "cpu"
-        system           = "Lin",      -- "Lin" o "Win": lo pone la instalación ("auto" = detectarlo)
+        system           = "Lin",      -- "Lin", "Win" o "Mac": lo pone la instalación ("auto" = detectarlo)
         update_repo      = "",         -- "" = el repo del que lo compilaste (o el oficial)
     },
 }
@@ -622,8 +712,8 @@ función con sus teclas.
 - Tocás una tecla para quitarla y **+** para agregar otra: apretás la combinación y listo.
 - **Agregar atajo** ofrece las funciones que todavía no tienen tecla.
 - Si la tecla la usaba otra función, se la pasa y te avisa.
-- Se guarda solo en `~/.config/capyro/capyro.lua` (en Windows, en la que eligió el
-  instalador), con una copia del anterior en `capyro.lua.bak`.
+- Se guarda solo en `~/.config/capyro/capyro.lua` (en Windows y en la Mac, en la que eligió
+  el instalador), con una copia del anterior en `capyro.lua.bak`.
 
 Si editás el archivo a mano, en el mismo editor está **Recargar archivo**. Todas las
 opciones y acciones están comentadas en [`config/capyro.lua`](config/capyro.lua).
@@ -640,7 +730,18 @@ opciones y acciones están comentadas en [`config/capyro.lua`](config/capyro.lua
 | Capturas | `~/Imágenes/Capyro` (según `xdg-user-dirs`) | `Imágenes\Capyro` |
 | Actualizaciones (y `update.log`) | `~/.cache/capyro/` | `%LOCALAPPDATA%\Capyro\cache\` |
 
-En los dos, la variable `CAPYRO_CONFIG` manda sobre todo.
+En la Mac, donde las guardan las demás apps (sin carteles de permiso):
+
+| Qué | Mac |
+|---|---|
+| Configuración | La que elegiste al instalar (por defecto `~/Library/Application Support/Capyro/capyro.lua`; la ruta está en `capyro-config.txt`, en esa misma carpeta) |
+| Sesión, tutorial ya visto | `~/Library/Application Support/Capyro/state/` |
+| Playlists | `~/Library/Application Support/Capyro/playlists.lua` |
+| Capturas | `~/Pictures/Capyro` (Imágenes) |
+| Actualizaciones (y `update.log`) | `~/Library/Caches/Capyro/` |
+| Errores | `~/Library/Logs/Capyro/capyro.log` (se ven con la app Consola) |
+
+En los tres, la variable `CAPYRO_CONFIG` manda sobre todo.
 
 Sin archivo de configuración usa la que trae adentro del binario. Si el archivo tiene un
 error, te avisa en la terminal y usa la de adentro.
@@ -812,10 +913,11 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
 - **El binario sabe de dónde salió**: en cada compilación `cmake/buildinfo.cmake` guarda el
   commit, el repo, el prefijo de instalación y el sistema (`capyro --version` los muestra). El
   actualizador (`gui/src/updater.rs`) corre en su propio hilo y compara ese commit con el del repo.
-- **Un código, dos sistemas**: lo que cambia entre Linux y Windows está aislado en
+- **Un código, tres sistemas**: lo que cambia entre Linux, Windows y la Mac está aislado en
   `core/src/platform/platform.c` (hilos, reloj, archivos, versión del sistema), `gui/src/system/paths.rs`
-  (carpetas) y `gui/src/updater/` (`unix.rs` compila, `windows.rs` baja la release). Todo lo
-  demás es igual en los dos.
+  (carpetas), `gui/src/system/macos.rs` (lo de la Mac que no trae winit: archivos del Finder,
+  la barra de menús, la Papelera) y `gui/src/updater/` (`unix.rs` compila; `windows.rs` y
+  `macos.rs` bajan la release). Todo lo demás es igual en los tres.
 </details>
 
 <details>
@@ -823,7 +925,7 @@ En Gentoo se activa con el USE `lame`. Para *reproducir* mp3 no hace falta.
 
 ```
 capyro/
-├── CMakeLists.txt              # build principal (trae Corrosion; detecta Lin/Win)
+├── CMakeLists.txt              # build principal (trae Corrosion; detecta Lin/Win/Mac)
 ├── cmake/                      # buildinfo (commit y sistema) y compilar para Windows desde Linux
 ├── core/                       # ── núcleo en C ──
 │   ├── include/capyro_core.h   #    API pública (lo único que ve Rust)
@@ -858,16 +960,17 @@ capyro/
 │       │   ├── actions.rs      #      atajos, abrir archivos, volumen, capturas, sesión
 │       │   ├── sounds.rs · updates.rs · tutorial.rs
 │       ├── background.rs · background/ # segundo plano: tray_linux.rs (StatusNotifierItem), tray_windows.rs,
-│       │                       #      popup.rs (mini reproductor), instance.rs (un solo Capyro)
+│       │                       #      tray_macos.rs (barra de menús), popup.rs (mini reproductor), instance.rs
 │       ├── ui/                 #    lo que se dibuja: theme, icons, alto (modo Alto), vinyl (disco), viz (visualizador)
 │       ├── system/             #    config (capyro.lua), paths, session, playlists, cache, perf,
-│       │                       #    render, wine, errlog, changelog, uninstall
+│       │                       #    render, wine, errlog, changelog, uninstall, macos (lo de la Mac), dock
 │       ├── media/              #    formats (resúmenes), videoinfo (1080p, 4K…)
-│       └── updater.rs · updater/ #  actualizar (unix.rs: git + cmake · windows.rs: baja la release)
+│       └── updater.rs · updater/ #  actualizar (unix.rs: git + cmake · windows.rs y macos.rs: bajan la release)
 ├── config/capyro.lua           # configuración por defecto
 ├── assets/                     # logo + sounds/
 ├── packaging/                  # Linux: .desktop + íconos · windows/: .ico, .rc y manifiesto
-├── .github/workflows/          # CI: compila para Windows y publica la release "windows"
+│                               # macos/: Info.plist, capyro.icns y build-ffmpeg.sh (el FFmpeg del .app)
+├── .github/workflows/          # CI: compila para Windows y la Mac y publica las releases "windows" y "macos"
 ├── tests/                      # pruebas del núcleo (también del Converter)
 └── docs/                       # capturas e ilustraciones de este README
 ```
@@ -909,7 +1012,7 @@ más una que revisa que el sistema detectado sea el mismo para el que se compil�
 - [ ] Más opciones en el menú de ajustes
 - [ ] Hooks en Lua (`on_open`, `on_end`, acciones personalizadas)
 - [x] Windows 10 y 11
-- [ ] macOS, más adelante
+- [x] macOS 11 o más nuevo (Apple Silicon e Intel)
 
 **Lo que ya está:** [el historial completo de versiones](CHANGELOG.md).
 
