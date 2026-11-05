@@ -54,8 +54,12 @@ static void test_os(void) {
     capyro_core_os_info(&os);
     printf("sistema: %s · %s · %s\n", os.name, os.version, os.code);
     CHECK(os.name[0] != '\0');
-#ifdef _WIN32
+#if defined(_WIN32)
     CHECK(os.family == CAPYRO_OS_WINDOWS && strcmp(os.code, "Win") == 0);
+#elif defined(__APPLE__)
+    CHECK(os.family == CAPYRO_OS_MACOS && strcmp(os.code, "Mac") == 0);
+    CHECK(os.major >= 11); /* Capyro pide macOS 11 o más nuevo */
+    CHECK(strncmp(os.name, "macOS", 5) == 0);
 #else
     CHECK(os.family == CAPYRO_OS_LINUX && strcmp(os.code, "Lin") == 0);
 #endif
