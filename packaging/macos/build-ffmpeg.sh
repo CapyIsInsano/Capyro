@@ -128,7 +128,11 @@ cd "ffmpeg-$FFMPEG_VERSION"
     --enable-zlib --enable-bzlib --enable-iconv \
     --pkg-config-flags=--static \
     --extra-cflags="$FLAGS -I$PREFIX/include" \
-    --extra-ldflags="$LDFLAGS -L$PREFIX/lib"
+    --extra-ldflags="$LDFLAGS -L$PREFIX/lib" \
+    --extra-libs="-liconv"
+# -liconv: en la Mac iconv no está en la libc, está en /usr/lib/libiconv
+# (viene con macOS). El configure de FFmpeg lo da por bueno sin él y después
+# libavcodec no linkea ("_iconv_open" undefined).
 make -j"$JOBS"
 make install
 
