@@ -12,7 +12,7 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use crate::ffi::Core;
@@ -26,8 +26,11 @@ mod tray;
 #[cfg(windows)]
 #[path = "background/tray_windows.rs"]
 mod tray;
+#[cfg(target_os = "macos")]
+#[path = "background/tray_macos.rs"]
+mod tray;
 /// Otros sistemas: sin bandeja (cerrar la ventana cierra Capyro).
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 mod tray {
     pub struct Tray;
     pub fn start(_tx: std::sync::mpsc::Sender<super::Event>) -> Result<Tray, String> {
@@ -150,6 +153,40 @@ fn save_progress(core: &Core, cfg: &Config) {
     }
 }
 
+/// Lo próximo que pasó (o `Timeout` si en `wait` no pasó nada). En la Mac,
+/// mientras espera atiende los eventos del sistema (los clics en la barra de
+/// menús llegan por ahí) y los archivos que abre el Finder.
+fn next_event(rx: &Receiver<Event>, wait: Duration) -> Result<Event, RecvTimeoutError> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::mpsc::TryRecvError;
+        let poll = |rx: &Receiver<Event>| {
+            // abrieron Capyro.app de nuevo (Launchpad, Spotlight): vuelve la ventana
+            if crate::system::macos::take_reopen() {
+                return Some(Ok(Event::Open(Vec::new())));
+            }
+            let files = crate::system::macos::take_opened_files();
+            if !files.is_empty() {
+                return Some(Ok(Event::Open(files)));
+            }
+            match rx.try_recv() {
+                Ok(e) => Some(Ok(e)),
+                Err(TryRecvError::Disconnected) => Some(Err(RecvTimeoutError::Disconnected)),
+                Err(TryRecvError::Empty) => None,
+            }
+        };
+        if let Some(r) = poll(rx) {
+            return r;
+        }
+        crate::system::macos::pump(wait);
+        poll(rx).unwrap_or(Err(RecvTimeoutError::Timeout))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        rx.recv_timeout(wait)
+    }
+}
+
 /// Corre el segundo plano hasta que se pida la ventana o cerrar.
 pub fn run(core: &Core, cfg: &Config, renderer: eframe::Renderer) -> Wake {
     let (tx, rx) = mpsc::channel();
@@ -167,6 +204,12 @@ pub fn run(core: &Core, cfg: &Config, renderer: eframe::Renderer) -> Wake {
     };
     let listener = instance::listen(tx);
     eprintln!("capyro: en segundo plano (bandeja del sistema)");
+    // Mac: sin ícono en el Dock mientras tanto (queda el de la barra de menús)
+    #[cfg(target_os = "macos")]
+    {
+        crate::system::macos::set_background(true);
+        let _ = crate::system::macos::take_reopen(); // uno viejo, de con la ventana abierta
+    }
     // un video sigue sonando, pero sin decodificar la imagen
     core.set_video_enabled(false);
     // nada más que el ícono: el disco del mini reproductor arranca quieto
@@ -179,7 +222,7 @@ pub fn run(core: &Core, cfg: &Config, renderer: eframe::Renderer) -> Wake {
             last_save = Instant::now();
             save_progress(core, cfg);
         }
-        match rx.recv_timeout(Duration::from_millis(40)) {
+        match next_event(&rx, Duration::from_millis(40)) {
             // el clic que lo cerró al tocar el ícono no lo vuelve a abrir
             Ok(Event::Popup(_, _, at)) if keep.closed_by(at) => {}
             Ok(Event::Popup(x, y, _)) => match popup::show(core, cfg, renderer, &rx, (x, y), &mut keep) {
@@ -196,7 +239,12 @@ pub fn run(core: &Core, cfg: &Config, renderer: eframe::Renderer) -> Wake {
     drop(listener);
     drop(tray);
     match wake {
-        Wake::Open(_) => core.set_video_enabled(true),
+        Wake::Open(_) => {
+            core.set_video_enabled(true);
+            // Mac: vuelve el ícono del Dock y Capyro pasa al frente
+            #[cfg(target_os = "macos")]
+            crate::system::macos::set_background(false);
+        }
         Wake::Quit => save_progress(core, cfg),
     }
     wake

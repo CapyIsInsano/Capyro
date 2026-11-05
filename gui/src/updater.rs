@@ -15,6 +15,10 @@
 //! (GitHub Releases, la arma el CI) y se reemplazan los archivos de la
 //! carpeta donde está instalado.
 //!
+//! **Mac** (`updater/macos.rs`): lo mismo que en Windows. Se baja el
+//! Capyro.app de la versión para la Mac (`capyro-macos-arm64.zip` en Apple
+//! Silicon, `capyro-macos-x64.zip` en Intel) y se cambia por el instalado.
+//!
 //! Todo corre en un hilo aparte; la interfaz consulta el estado en cada frame
 //! con [`Updater::progress`] y recibe el resultado con [`Updater::poll`].
 
@@ -28,16 +32,20 @@ use crate::system::config::System;
 use crate::ffi::BuildInfo;
 
 // Cada sistema compila solo su forma de actualizarse.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 mod release;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 mod unix;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 use unix as sys;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 use windows as sys;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as sys;
 
 /// Un commit del repo, para mostrar "el parche".
 #[derive(Debug, Clone, PartialEq)]
@@ -50,8 +58,8 @@ pub struct CommitInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// (en Windows no se compila nada: no hay Building)
-#[cfg_attr(windows, allow(dead_code))]
+// (en Windows y la Mac no se compila nada: no hay Building)
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub enum Stage {
     Checking,
     Downloading,
@@ -106,7 +114,7 @@ pub const DEFAULT_REPO: &str = "CapyIsInsano/Capyro";
 /// Qué actualizar y cómo volver a compilarlo (sale de los datos del build).
 #[derive(Debug, Clone)]
 // branch, prefix, build_type... son para compilar (Linux)
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub struct Job {
     /// Para qué sistema se instala (`options.system`): solo se baja,
     /// compila e instala lo de este sistema.
@@ -209,7 +217,7 @@ pub fn install_location(info: &BuildInfo) -> Option<Install> {
 }
 
 /// "owner/repo" de una URL de GitHub (para la API de Releases).
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "macos", test))]
 pub fn github_slug(url: &str) -> Option<String> {
     let rest = url
         .trim()
@@ -430,7 +438,7 @@ pub fn classify_git(output: &str) -> FailKind {
 }
 
 /// "   Compiling eframe v0.37.0" → "eframe"; "[ 40%] Building C object core/…/player.c.o" → "player.c"
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
 pub fn progress_detail(line: &str) -> Option<String> {
     let l = line.trim();
     if let Some(rest) = l.strip_prefix("Compiling ") {
@@ -631,7 +639,7 @@ mod tests {
 
     /// De punta a punta contra un repo de git local: ve el commit nuevo
     /// (sin compilar ni instalar nada).
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn encuentra_commits_nuevos() {
         use std::process::Command;

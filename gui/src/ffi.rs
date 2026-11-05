@@ -94,15 +94,17 @@ struct RawOsInfo {
 /// El sistema en el que corre Capyro (lo muestra el tutorial).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OsInfo {
-    /// true = Windows, false = Linux
+    /// true = Windows
     pub windows: bool,
-    /// Windows: 10 u 11. Linux: 0.
+    /// true = macOS (si los dos son false, Linux)
+    pub mac: bool,
+    /// Windows: 10 u 11. macOS: 11, 12... 15, 26. Linux: 0.
     pub major: i32,
-    /// "Lin" o "Win"
+    /// "Lin", "Win" o "Mac"
     pub code: String,
-    /// "Windows 11", "Gentoo Linux"...
+    /// "Windows 11", "Gentoo Linux", "macOS 15 Sequoia"...
     pub name: String,
-    /// "23H2 · build 22631", "kernel 6.18.0"...
+    /// "23H2 · build 22631", "kernel 6.18.0", "15.5 · Apple Silicon"...
     pub version: String,
 }
 
@@ -322,7 +324,7 @@ pub struct DecodeInfo {
     pub active: bool,
     /// Lo decodifica la GPU.
     pub hw: bool,
-    /// "VA-API", "NVDEC", "VDPAU" o "CPU".
+    /// "VA-API", "NVDEC", "VDPAU", "D3D11VA", "DXVA2", "VideoToolbox" o "CPU".
     pub api: String,
     pub codec: String,
     /// Por qué no se usa la GPU ("" si se usa).
@@ -641,6 +643,7 @@ pub fn os_info() -> OsInfo {
     };
     OsInfo {
         windows: raw.family == 2,
+        mac: raw.family == 3,
         major: raw.major,
         code: text(&raw.code),
         name: text(&raw.name),

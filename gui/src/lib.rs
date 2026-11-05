@@ -19,12 +19,16 @@ mod ui {
 }
 
 /// Lo que toca el sistema: configuración, carpetas, sesión, playlists,
-/// caché, registros, rendimiento, cómo se dibuja la ventana y Wine.
+/// caché, registros, rendimiento, cómo se dibuja la ventana, Wine y la Mac.
 mod system {
     pub mod cache;
     pub mod changelog;
     pub mod config;
+    #[cfg(any(target_os = "macos", test))]
+    pub mod dock;
     pub mod errlog;
+    #[cfg(target_os = "macos")]
+    pub mod macos;
     pub mod paths;
     pub mod perf;
     pub mod playlists;
@@ -76,6 +80,10 @@ fn run(core: *mut ffi::CapyroCore) -> c_int {
     }
     let mut cfg = config::Config::load();
     eprintln!("capyro {} · config: {} · backend: {:?}", ffi::version(), cfg.source, cfg.backend);
+    // Mac: los archivos que abre el Finder (doble clic, "Abrir con…") llegan
+    // como eventos, no como argumentos: hay que estar listos antes de la ventana
+    #[cfg(target_os = "macos")]
+    system::macos::install_open_handler();
     // en Wine: que el bucle de eventos no gire en vacío (ver wine.rs)
     wine::install();
 
@@ -159,11 +167,23 @@ fn native_options(cfg: &config::Config, renderer: eframe::Renderer) -> eframe::N
         .with_app_id("Capyro") // lo que muestran la barra de tareas y el dock
         .with_inner_size([900.0, 660.0]) // v0.3.2: lugar para las tres columnas de la vista de música
         .with_min_inner_size([520.0, 430.0])
-        .with_decorations(false)
         // transparente (esquinas redondeadas) solo en Linux: en Windows
         // muchos drivers no la soportan y la ventana no aparece
-        .with_transparent(!cfg!(windows))
+        .with_transparent(!ui::theme::OPAQUE_WINDOW)
         .with_drag_and_drop(true);
+    // Linux y Windows: sin marco (el encabezado de Capyro tiene sus botones).
+    // Mac: el marco del sistema, pero invisible: quedan los tres botones de
+    // colores arriba a la izquierda (como en todas las apps de la Mac), la
+    // sombra y las esquinas redondeadas; el resto es el encabezado de Capyro.
+    viewport = if cfg!(target_os = "macos") {
+        viewport
+            .with_decorations(true)
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+    } else {
+        viewport.with_decorations(false)
+    };
     if let Some(icon) = app::window_icon() {
         viewport = viewport.with_icon(Arc::new(icon));
     }

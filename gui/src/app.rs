@@ -312,7 +312,7 @@ fn renderer_name(cc: &eframe::CreationContext<'_>) -> String {
         // SAFETY: el contexto de OpenGL está activo mientras se crea la app.
         return unsafe { gl.get_parameter_string(eframe::glow::RENDERER) };
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(rs) = cc.wgpu_render_state.as_ref() {
         let info = rs.adapter.get_info();
         let cpu = info.device_type == eframe::wgpu::DeviceType::Cpu;
@@ -333,6 +333,9 @@ impl CapyroApp {
         theme::install_fonts(&cc.egui_ctx);
         theme::apply_visuals(&cc.egui_ctx, cfg.accent);
         apply_performance(&cc.egui_ctx, cfg.performance);
+        // Mac: que un archivo abierto desde el Finder despierte a la ventana
+        #[cfg(target_os = "macos")]
+        crate::system::macos::set_wake(Some(cc.egui_ctx.clone()));
         // sin placa de video (se dibuja con el procesador): redibujar menos seguido
         let gpu = renderer_name(cc);
         crate::system::perf::set_software(crate::system::perf::is_software_renderer(&gpu));
@@ -491,6 +494,10 @@ impl CapyroApp {
             }
         }
         self.playlists = Playlists::load();
+        // Mac: Capyro se abrió con archivos desde el Finder (doble clic, "Abrir
+        // con…"): son como los de la línea de comandos
+        #[cfg(target_os = "macos")]
+        self.add_launch_files(crate::system::macos::take_opened_files());
         // primera vez: el tutorial arranca cuando termina de entrar la interfaz
         self.tutorial_pending = tutorial::first_time();
         if self.tutorial_pending {
@@ -544,6 +551,24 @@ impl CapyroApp {
         }
         // Al retomar no arranca a sonar solo: el usuario aprieta play.
         self.boot.autoplay = false;
+    }
+
+    /// Archivos con los que se abrió Capyro (en la Mac, desde el Finder): a la
+    /// lista y el primero que abra queda cargado (suena solo, como con los de
+    /// la línea de comandos).
+    #[cfg(target_os = "macos")]
+    fn add_launch_files(&mut self, files: Vec<PathBuf>) {
+        let first_new = self.core.playlist_len();
+        for f in &files {
+            if let Err(e) = self.core.playlist_add(f) {
+                eprintln!("capyro: {}: {}", f.display(), e.0);
+            }
+        }
+        for i in first_new..self.core.playlist_len() {
+            if self.core.playlist_select(i).is_ok() {
+                break;
+            }
+        }
     }
 
     /// Volver del segundo plano: los sonidos ya están en el núcleo y la
@@ -642,6 +667,8 @@ impl CapyroApp {
 impl eframe::App for CapyroApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.updater.cancel();
+        #[cfg(target_os = "macos")]
+        crate::system::macos::set_wake(None);
         crate::background::set_pending(self.goes_to_background());
         if !self.restarting {
             // al reiniciar ya se guardó antes de abrir el Capyro nuevo
@@ -650,7 +677,7 @@ impl eframe::App for CapyroApp {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        if cfg!(windows) {
+        if theme::OPAQUE_WINDOW {
             theme::BG_WINDOW.to_normalized_gamma_f32()
         } else {
             [0.0, 0.0, 0.0, 0.0] // esquinas redondeadas transparentes
@@ -709,6 +736,17 @@ impl eframe::App for CapyroApp {
         }
 
         self.core.update();
+        // Mac: archivos abiertos desde el Finder con Capyro ya abierto
+        #[cfg(target_os = "macos")]
+        if ready && self.first_pass {
+            let _ = crate::system::macos::take_reopen(); // con la ventana abierta no hace nada
+            let files = crate::system::macos::take_opened_files();
+            if !files.is_empty() {
+                let play_now = !self.panel_open();
+                self.add_paths(&ctx, files, play_now);
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
+        }
         self.refresh_now_playing();
         if ready {
             self.handle_input(&ctx);
@@ -797,7 +835,7 @@ impl eframe::App for CapyroApp {
         }
         let video_bottom = (inner.bottom() - BELOW_VIDEO * (1.0 - bar_e)).max(header.bottom() + 60.0);
         let video = Rect::from_min_max(pos2(inner.left(), header.bottom() + 12.0), pos2(inner.right(), video_bottom));
-        let logo_dest = Rect::from_min_size(header.min, vec2(46.0, 46.0));
+        let logo_dest = Rect::from_min_size(header.min + vec2(views::window::TRAFFIC_LIGHTS, 0.0), vec2(46.0, 46.0));
 
         // el fondo de la ventana, sin pintar lo que después tapa algo opaco
         // (el video o los paneles): menos trabajo para la placa de video
