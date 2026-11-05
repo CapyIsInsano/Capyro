@@ -1,6 +1,6 @@
 [package]
 name = "capyro_gui"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.95"
 description = "Interfaz gráfica de Capyro (egui) — se compila como staticlib y se linkea al núcleo en C"
@@ -11,7 +11,7 @@ publish = false
 crate-type = ["staticlib"]
 
 # Lo que es de un solo sistema se compila solo en ese sistema: en Linux no
-# entra nada de Windows (y al revés).
+# entra nada de Windows ni de la Mac (y al revés).
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -47,6 +47,46 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_LibraryLoader",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Metal (wgpu) además de OpenGL: Apple dejó OpenGL de lado, Metal es lo de la Mac
+eframe = { version = "0.37", default-features = false, features = ["wgpu"] }
+# Actualizador: lee las respuestas de la API de GitHub (Releases)
+serde_json = "1"
+# Lo de la Mac que no trae winit: abrir archivos desde el Finder, el ícono
+# en la barra de menús (segundo plano), mover Capyro a la Papelera. Las
+# mismas versiones que ya usan rfd y winit (no agregan nada al compilar).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSData",
+    "NSDate",
+    "NSError",
+    "NSFileManager",
+    "NSGeometry",
+    "NSObject",
+    "NSRunLoop",
+    "NSString",
+    "NSURL",
+] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSButton",
+    "NSCell",
+    "NSControl",
+    "NSEvent",
+    "NSGraphics",
+    "NSImage",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSScreen",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
 ] }
 
 [dev-dependencies]
