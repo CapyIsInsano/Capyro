@@ -2,7 +2,8 @@
  * Capyro — decodificación de video por GPU.
  *
  * Se usa la "copia de vuelta": FFmpeg decodifica en la GPU (VA-API para
- * Intel/AMD, NVDEC por CUDA para NVIDIA, VDPAU como último recurso) y cada
+ * Intel/AMD, NVDEC por CUDA para NVIDIA, VDPAU como último recurso; en
+ * Windows D3D11VA; en la Mac VideoToolbox, que anda en todas) y cada
  * cuadro se copia a memoria normal para convertirlo a RGBA como siempre.
  * Lo pesado (decodificar H.264/HEVC/VP9/AV1, sobre todo en 4K) lo hace la
  * GPU; la copia es barata en comparación.
@@ -23,18 +24,22 @@ static const struct {
     enum AVHWDeviceType type;
     const char         *name;
 } APIS[HWDEV_COUNT] = {
-#ifdef _WIN32
+#if defined(_WIN32)
     { AV_HWDEVICE_TYPE_D3D11VA, "D3D11VA" }, /* cualquier GPU con DirectX 11 */
     { AV_HWDEVICE_TYPE_CUDA,    "NVDEC"   },
     { AV_HWDEVICE_TYPE_DXVA2,   "DXVA2"   }, /* GPUs más viejas */
+#elif defined(__APPLE__)
+    { AV_HWDEVICE_TYPE_VIDEOTOOLBOX, "VideoToolbox" }, /* Apple Silicon e Intel */
 #else
     { AV_HWDEVICE_TYPE_VAAPI, "VA-API" },
     { AV_HWDEVICE_TYPE_CUDA,  "NVDEC"  },
     { AV_HWDEVICE_TYPE_VDPAU, "VDPAU"  },
 #endif
 };
-#ifdef _WIN32
+#if defined(_WIN32)
 #  define HW_APIS_LABEL "D3D11VA, NVDEC, DXVA2"
+#elif defined(__APPLE__)
+#  define HW_APIS_LABEL "VideoToolbox"
 #else
 #  define HW_APIS_LABEL "VA-API, NVDEC, VDPAU"
 #endif

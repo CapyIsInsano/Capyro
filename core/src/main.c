@@ -62,8 +62,10 @@ static void print_help(const char *argv0) {
     printf("  -h, --help       muestra esta ayuda\n");
     printf("  -v, --version    muestra la versión\n\n");
     printf("Los archivos pasados se agregan a la lista; el primero queda cargado.\n");
-#ifdef _WIN32
+#if defined(_WIN32)
     printf("Config: Documentos\\Capyro\\Config\\Capyro.lua (o la que elegiste al instalar)\n");
+#elif defined(__APPLE__)
+    printf("Config: ~/Library/Application Support/Capyro/capyro.lua\n");
 #else
     printf("Config: ~/.config/capyro/capyro.lua (ver config/capyro.lua)\n");
 #endif
@@ -116,6 +118,14 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 1; i < argc; i++) {
+#ifdef __APPLE__
+        /* macOS viejo le pasa "-psn_0_12345" a las apps que abre el Finder (no
+         * es un archivo). Los archivos que se abren con doble clic llegan por
+         * otro lado: los recibe la interfaz (gui/src/system/macos.rs). */
+        if (strncmp(argv[i], "-psn_", 5) == 0) {
+            continue;
+        }
+#endif
         int err = capyro_core_playlist_add(core, argv[i]);
         if (err != CAPYRO_OK) {
             fprintf(stderr, "capyro: %s: %s\n", argv[i], capyro_core_error_string(err));

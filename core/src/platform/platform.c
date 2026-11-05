@@ -1,12 +1,17 @@
 /*
  * Capyro — capa de plataforma. Dos implementaciones en el mismo archivo:
- * POSIX (Linux) y Win32 (Windows). CMake compila solo la que corresponde
- * según el sistema para el que se compila.
+ * POSIX (Linux y macOS) y Win32 (Windows). Se compila solo la que
+ * corresponde según el sistema para el que se compila; de macOS solo cambia
+ * cómo se averigua la versión del sistema (cp_os_info).
  */
 #ifndef _WIN32
 #  ifndef _POSIX_C_SOURCE
 #    define _POSIX_C_SOURCE 200809L
 #  endif
+#endif
+#ifdef __APPLE__
+/* sysctlbyname: con _POSIX_C_SOURCE solo, macOS esconde lo que no es POSIX */
+#  define _DARWIN_C_SOURCE
 #endif
 
 #include "platform.h"
@@ -150,10 +155,13 @@ void cp_os_info(CapyroOsInfo *out) {
 
 #else
 /* ====================================================================== */
-/* Linux (POSIX)                                                          */
+/* Linux y macOS (POSIX)                                                  */
 /* ====================================================================== */
 #include <sys/utsname.h>
 #include <time.h>
+#ifdef __APPLE__
+#  include <sys/sysctl.h>
+#endif
 
 static void *thread_trampoline(void *p) {
     ThreadStart s = *(ThreadStart *)p;
@@ -206,6 +214,65 @@ int cp_remove(const char *utf8_path) {
     return remove(utf8_path);
 }
 
+#ifdef __APPLE__
+/* Un valor de texto de sysctl ("15.5"); "" si no existe. */
+static void sysctl_text(const char *name, char *out, size_t cap) {
+    size_t len = cap;
+    out[0] = '\0';
+    if (sysctlbyname(name, out, &len, NULL, 0) != 0 || len == 0) {
+        out[0] = '\0';
+    } else {
+        out[len < cap ? len : cap - 1] = '\0';
+    }
+}
+
+/* Un valor numérico de sysctl; -1 si no existe. */
+static int sysctl_int(const char *name) {
+    int v = 0;
+    size_t len = sizeof(v);
+    return sysctlbyname(name, &v, &len, NULL, 0) == 0 ? v : -1;
+}
+
+void cp_os_info(CapyroOsInfo *out) {
+    memset(out, 0, sizeof(*out));
+    out->family = CAPYRO_OS_MACOS;
+    snprintf(out->code, sizeof(out->code), "Mac");
+    char ver[32];
+    sysctl_text("kern.osproductversion", ver, sizeof(ver)); /* "15.5" (macOS 10.13.4 o más nuevo) */
+    out->major = atoi(ver);
+    static const struct {
+        int         major;
+        const char *name;
+    } NAMES[] = {
+        { 11, "Big Sur" }, { 12, "Monterey" }, { 13, "Ventura" }, { 14, "Sonoma" },
+        { 15, "Sequoia" }, { 26, "Tahoe" },
+    };
+    const char *nick = NULL;
+    for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
+        if (NAMES[i].major == out->major) {
+            nick = NAMES[i].name;
+        }
+    }
+    if (out->major > 0 && nick) {
+        snprintf(out->name, sizeof(out->name), "macOS %d %s", out->major, nick);
+    } else if (out->major > 0) {
+        snprintf(out->name, sizeof(out->name), "macOS %d", out->major);
+    } else {
+        snprintf(out->name, sizeof(out->name), "macOS");
+    }
+    /* el chip: Apple Silicon o Intel (y si corre la versión de Intel con Rosetta) */
+    const char *chip = sysctl_int("hw.optional.arm64") == 1 ? "Apple Silicon" : "Intel";
+    const char *rosetta = sysctl_int("sysctl.proc_translated") == 1 ? " (Rosetta)" : "";
+    if (ver[0]) {
+        snprintf(out->version, sizeof(out->version), "%.16s · %s%s", ver, chip, rosetta);
+    } else {
+        struct utsname u;
+        if (uname(&u) == 0) {
+            snprintf(out->version, sizeof(out->version), "Darwin %.24s · %s%s", u.release, chip, rosetta);
+        }
+    }
+}
+#else
 void cp_os_info(CapyroOsInfo *out) {
     memset(out, 0, sizeof(*out));
     out->family = CAPYRO_OS_LINUX;
@@ -243,4 +310,5 @@ void cp_os_info(CapyroOsInfo *out) {
         snprintf(out->version, sizeof(out->version), "kernel %.56s", u.release);
     }
 }
+#endif /* __APPLE__ */
 #endif

@@ -22,7 +22,11 @@ struct ma_device;
 #define CAPYRO_SFX_SLOTS 16     /* efectos de sonido cargados a la vez */
 #define CAPYRO_SCOPE_LEN 4096   /* muestras guardadas para el visualizador */
 #define VQ_SLOTS (VQ_MAX + 2)   /* + el que se está mostrando + uno de repuesto */
-#define HWDEV_COUNT 3           /* Linux: VA-API, NVDEC, VDPAU · Windows: D3D11VA, NVDEC, DXVA2 */
+#ifdef __APPLE__
+#  define HWDEV_COUNT 1         /* macOS: VideoToolbox */
+#else
+#  define HWDEV_COUNT 3         /* Linux: VA-API, NVDEC, VDPAU · Windows: D3D11VA, NVDEC, DXVA2 */
+#endif
 struct AVBufferRef;
 struct AVStream;
 

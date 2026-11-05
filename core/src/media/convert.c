@@ -46,6 +46,15 @@
 /* codificadores                                                       */
 /* ------------------------------------------------------------------ */
 
+/* En la Mac, H.265 sale de VideoToolbox (el de macOS) aunque no se pida la
+ * placa de video: el FFmpeg de Capyro para Mac no trae x265, y VideoToolbox
+ * tiene uno por software para las Mac sin H.265 en el chip. */
+#ifdef __APPLE__
+#  define MAC_HEVC "hevc_videotoolbox",
+#else
+#  define MAC_HEVC
+#endif
+
 typedef struct {
     const char *codec;
     const char *gpu[5];
@@ -55,7 +64,7 @@ typedef struct {
 static const EncChain CHAINS[] = {
     { "h264", { "h264_nvenc", "h264_qsv", "h264_amf", "h264_videotoolbox", NULL },
               { "libx264", "libopenh264", "h264_mf", NULL } },
-    { "hevc", { "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox", NULL }, { "libx265", "hevc_mf", NULL } },
+    { "hevc", { "hevc_nvenc", "hevc_qsv", "hevc_amf", "hevc_videotoolbox", NULL }, { "libx265", "hevc_mf", MAC_HEVC NULL } },
     { "av1", { "av1_nvenc", "av1_qsv", "av1_amf", NULL }, { "libsvtav1", "libaom-av1", "librav1e", NULL } },
     { "vp9", { "vp9_qsv", NULL }, { "libvpx-vp9", NULL } },
     { "mpeg4", { NULL }, { "mpeg4", NULL } },
@@ -644,6 +653,13 @@ static void video_options(const char *name, const CapyroConvertOptions *o, bool 
         enc->bit_rate = br;
         enc->rc_max_rate = br * 2;
         enc->rc_buffer_size = (int)(br * 2);
+        if (strstr(name, "_videotoolbox")) {
+            /* sin el chip para ese códec, el codificador por software de macOS */
+            av_dict_set(d, "allow_sw", "1", 0);
+            if (!strcmp(name, "h264_videotoolbox")) {
+                av_dict_set(d, "profile", "high", 0);
+            }
+        }
         if (!strcmp(name, "libopenh264")) {
             av_dict_set(d, "rc_mode", "bitrate", 0);
             av_dict_set(d, "allow_skip_frames", "0", 0);
