@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Capyro.app: lo genera CMake (packaging/macos/Info.plist.in). -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Capyro</string>
+    <key>CFBundleDisplayName</key>
+    <string>Capyro</string>
+    <key>CFBundleExecutable</key>
+    <string>Capyro</string>
+    <key>CFBundleIdentifier</key>
+    <string>@CAPYRO_BUNDLE_ID@</string>
+    <key>CFBundleIconFile</key>
+    <string>capyro.icns</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <!-- la que se ve ("0.4.0-alpha") y la que compara macOS ("0.4.0") -->
+    <key>CFBundleShortVersionString</key>
+    <string>@CAPYRO_VERSION_FULL@</string>
+    <key>CFBundleVersion</key>
+    <string>@PROJECT_VERSION@</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>es</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>@CAPYRO_MIN_MACOS@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.entertainment</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Capyro · Just press play. · GPL-3.0</string>
+    <!-- Capturas en Imágenes y archivos en Descargas/Documentos: lo que dice el cartel de permiso -->
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Capyro abre la música y los videos que elegís.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Capyro abre la música y los videos que elegís.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Capyro abre la música y los videos que elegís.</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>Capyro abre la música y los videos de tus discos externos y pendrives.</string>
+    <!-- "Abrir con…" del Finder: Capyro aparece para estos formatos, sin adueñarse de ninguno -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Video</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.movie</string>
+                <string>public.mpeg-4</string>
+                <string>com.apple.quicktime-movie</string>
+                <string>public.avi</string>
+                <string>org.webmproject.webm</string>
+                <string>org.matroska.mkv</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>mp4</string>
+                <string>m4v</string>
+                <string>mov</string>
+                <string>avi</string>
+                <string>mkv</string>
+                <string>webm</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Audio</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.audio</string>
+                <string>public.mp3</string>
+                <string>public.mpeg-4-audio</string>
+                <string>com.microsoft.waveform-audio</string>
+                <string>public.aiff-audio</string>
+                <string>public.aifc-audio</string>
+                <string>org.xiph.flac</string>
+                <string>org.xiph.ogg-audio</string>
+                <string>org.xiph.opus</string>
+                <string>public.aac-audio</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>mp3</string>
+                <string>wav</string>
+                <string>ogg</string>
+                <string>oga</string>
+                <string>aac</string>
+                <string>flac</string>
+                <string>opus</string>
+                <string>m4a</string>
+                <string>aiff</string>
+                <string>aif</string>
+                <string>aifc</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
