@@ -65,7 +65,7 @@ add_library(capyro_core STATIC
     src/media/tags.c
     src/media/cover.c
     src/media/convert.c
-    # hilos, reloj, archivos y sistema (POSIX o Win32)
+    # hilos, reloj, archivos y sistema (POSIX o Win32; macOS es POSIX)
     src/platform/platform.c
 )
 # capyro_buildinfo.h lo genera el target capyro_buildinfo (CMakeLists raíz).
@@ -85,6 +85,12 @@ if(WIN32)
     target_compile_definitions(capyro_core PRIVATE MA_COINIT_VALUE=0x2)
 endif()
 target_link_libraries(capyro_core PUBLIC PkgConfig::FFMPEG)
+if(APPLE)
+    # miniaudio con Core Audio linkeado de entrada (sin dlopen en tiempo de
+    # ejecución, que es lo que pide Apple).
+    target_compile_definitions(capyro_core PRIVATE MA_NO_RUNTIME_LINKING)
+    target_link_libraries(capyro_core PUBLIC "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
+endif()
 if(WIN32)
     # Hilos y reloj de Win32 (platform.c), versión de Windows del registro
     # (advapi32) y argumentos en UTF-8 (shell32, en main.c).
