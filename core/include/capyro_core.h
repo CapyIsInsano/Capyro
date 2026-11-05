@@ -20,7 +20,7 @@
 extern "C" {
 #endif
 
-#define CAPYRO_VERSION "0.3.3-alpha"
+#define CAPYRO_VERSION "0.4.0-alpha"
 
 typedef struct CapyroCore CapyroCore;
 
@@ -150,7 +150,8 @@ void   capyro_core_set_pitch(CapyroCore *core, double semitones);
 double capyro_core_get_pitch(CapyroCore *core);
 
 /* ---------- decodificación de video: GPU o CPU ----------
- * AUTO: usa la GPU si se puede (VA-API, NVDEC/CUDA o VDPAU) y si no, la CPU.
+ * AUTO: usa la GPU si se puede (Linux: VA-API, NVDEC/CUDA o VDPAU; Windows:
+ * D3D11VA, NVDEC o DXVA2; macOS: VideoToolbox) y si no, la CPU.
  * GPU:  igual que AUTO, pero si la GPU no puede, la nota lo explica (la GUI avisa).
  * CPU:  siempre por software.
  * Cambiarlo con un video abierto rearma el decodificador y sigue donde estaba.
@@ -164,7 +165,7 @@ typedef enum {
 typedef struct CapyroDecodeInfo {
     bool     active;     /* hay un video abierto */
     bool     hw;         /* lo está decodificando la GPU */
-    char     api[16];    /* "VA-API", "NVDEC", "VDPAU" o "CPU" */
+    char     api[16];    /* "VA-API", "NVDEC", "VDPAU", "D3D11VA", "VideoToolbox" o "CPU" */
     char     codec[24];  /* "H.264", "H.265 (HEVC)", "AV1"... */
     char     note[128];  /* por qué no se usa la GPU ("" si se usa) */
     uint64_t serial;     /* cambia cada vez que se arma un decodificador */
@@ -179,18 +180,19 @@ int  capyro_core_get_hwdec(CapyroCore *core);
 void capyro_core_get_decode_info(CapyroCore *core, CapyroDecodeInfo *out);
 
 /* ---------- sistema operativo ----------
- * En qué sistema corre Capyro: Linux o Windows (10 u 11). */
+ * En qué sistema corre Capyro: Linux, Windows (10 u 11) o macOS. */
 enum {
     CAPYRO_OS_LINUX   = 1,
-    CAPYRO_OS_WINDOWS = 2
+    CAPYRO_OS_WINDOWS = 2,
+    CAPYRO_OS_MACOS   = 3
 };
 
 typedef struct CapyroOsInfo {
-    int  family;       /* CAPYRO_OS_LINUX o CAPYRO_OS_WINDOWS */
-    int  major;        /* Windows: 10 u 11; Linux: 0 */
-    char code[4];      /* "Lin" o "Win" (como en capyro.lua) */
-    char name[64];     /* "Windows 11", "Gentoo Linux", "Ubuntu 24.04 LTS"... */
-    char version[64];  /* "23H2 · build 22631", "kernel 6.18.0"... */
+    int  family;       /* CAPYRO_OS_LINUX, CAPYRO_OS_WINDOWS o CAPYRO_OS_MACOS */
+    int  major;        /* Windows: 10 u 11; macOS: 11, 12... 15, 26; Linux: 0 */
+    char code[4];      /* "Lin", "Win" o "Mac" (como en capyro.lua) */
+    char name[64];     /* "Windows 11", "Gentoo Linux", "macOS 15 Sequoia"... */
+    char version[64];  /* "23H2 · build 22631", "kernel 6.18.0", "15.5 · Apple Silicon"... */
 } CapyroOsInfo;
 
 void capyro_core_os_info(CapyroOsInfo *out);
