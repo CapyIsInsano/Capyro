@@ -1,0 +1,38 @@
+// Recursos de capyro.exe (solo Windows): ícono, versión y manifiesto.
+// CMake lo genera desde capyro.rc.in; no editar el .rc del build.
+#include <winver.h>
+
+// El primer ícono es el que muestran el Explorador y la barra de tareas.
+1 ICON "@CAPYRO_ICO@"
+
+// Manifiesto: UTF-8 como página de códigos, DPI por monitor y estilos nuevos.
+1 24 "@CAPYRO_MANIFEST@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION  @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK   0x3fL
+ FILEFLAGS       0x0L
+ FILEOS          VOS_NT_WINDOWS32
+ FILETYPE        VFT_APP
+ FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "0c0a04b0"
+        BEGIN
+            VALUE "CompanyName",      "Capy y los Capibaras"
+            VALUE "FileDescription",  "Capyro"
+            VALUE "FileVersion",      "@CAPYRO_VERSION_STRING@"
+            VALUE "InternalName",     "capyro"
+            VALUE "LegalCopyright",   "GPL-3.0-or-later"
+            VALUE "OriginalFilename", "capyro.exe"
+            VALUE "ProductName",      "Capyro"
+            VALUE "ProductVersion",   "@CAPYRO_VERSION_STRING@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0c0a, 1200
+    END
+END
