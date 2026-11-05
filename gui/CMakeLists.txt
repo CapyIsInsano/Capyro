@@ -29,9 +29,12 @@ if(WIN32)
 endif()
 if(APPLE)
     # Lo mismo en macOS: los frameworks de Apple que usan la ventana (AppKit),
-    # Metal (wgpu), el selector de archivos y el ícono de la barra de menús.
+    # Metal (wgpu), OpenGL (glutin, el render por OpenGL: CGLSetParameter...),
+    # el selector de archivos y el ícono de la barra de menús. Es la lista que
+    # da `cargo rustc --target aarch64-apple-darwin -- --print native-static-libs`
+    # (más IOKit y UniformTypeIdentifiers).
     set_property(TARGET capyro_gui-static APPEND PROPERTY INTERFACE_LINK_LIBRARIES
         "-framework AppKit" "-framework Foundation" "-framework CoreFoundation" "-framework CoreGraphics"
-        "-framework CoreVideo" "-framework IOKit" "-framework Metal" "-framework QuartzCore"
-        "-framework Carbon" "-framework UniformTypeIdentifiers" objc)
+        "-framework CoreVideo" "-framework IOKit" "-framework Metal" "-framework QuartzCore" "-framework OpenGL"
+        "-framework ApplicationServices" "-framework Carbon" "-framework UniformTypeIdentifiers" objc iconv)
 endif()
