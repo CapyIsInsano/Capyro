@@ -48,19 +48,55 @@ export PATH="$PREFIX/bin:$PATH"
 
 echo "== FFmpeg $FFMPEG_VERSION para macOS $MIN ($ARCH) en $PREFIX"
 
-fetch() { # url archivo
-    [ -s "$2" ] || curl -fL --retry 4 --retry-delay 3 -o "$2" "$1"
+# Los servidores de los proyectos a veces le cortan la conexión al CI
+# ("curl: (35) Recv failure: Connection reset by peer", que el --retry de curl
+# no reintenta). Cada dirección se prueba 3 veces y, si la oficial no anda,
+# se usa el espejo (casi siempre el oficial en GitHub).
+fetch() { # archivo url [espejo...]
+    local out=$1 url n
+    shift
+    [ -s "$out" ] && return 0
+    for url in "$@"; do
+        for n in 1 2 3; do
+            # .part: si se corta a la mitad no queda un archivo roto
+            if curl -fL --connect-timeout 30 --speed-time 60 --speed-limit 1024 \
+                -o "$out.part" "$url"; then
+                mv "$out.part" "$out"
+                return 0
+            fi
+            echo "!! no pude bajar $url (intento $n de 3)" >&2
+            [ "$n" = 3 ] || sleep $((n * 10))
+        done
+    done
+    rm -f "$out.part"
+    echo "!! no pude bajar $out de ningún lado" >&2
+    return 1
 }
 
-clone() { # url rama carpeta
-    [ -d "$3/.git" ] || git clone --depth 1 --branch "$2" "$1" "$3"
+clone() { # rama carpeta url [espejo...]
+    local branch=$1 dir=$2 url n
+    shift 2
+    [ -d "$dir/.git" ] && return 0
+    for url in "$@"; do
+        for n in 1 2 3; do
+            rm -rf "$dir"
+            git clone --depth 1 --branch "$branch" "$url" "$dir" && return 0
+            echo "!! no pude clonar $url (intento $n de 3)" >&2
+            [ "$n" = 3 ] || sleep $((n * 10))
+        done
+    done
+    echo "!! no pude bajar $dir de ningún lado" >&2
+    return 1
 }
 
 cd "$SRC"
 
 # --- LAME (MP3) -------------------------------------------------------------
 if [ ! -f "$PREFIX/lib/libmp3lame.a" ]; then
-    fetch "https://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz" lame.tar.gz
+    # espejo: el mismo .tar.gz que guarda Debian
+    fetch lame.tar.gz \
+        "https://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz" \
+        "https://deb.debian.org/debian/pool/main/l/lame/lame_$LAME_VERSION.orig.tar.gz"
     rm -rf "lame-$LAME_VERSION" && tar xf lame.tar.gz
     (cd "lame-$LAME_VERSION" &&
         ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-frontend \
@@ -70,7 +106,9 @@ fi
 
 # --- Opus -------------------------------------------------------------------
 if [ ! -f "$PREFIX/lib/libopus.a" ]; then
-    fetch "https://downloads.xiph.org/releases/opus/opus-$OPUS_VERSION.tar.gz" opus.tar.gz
+    fetch opus.tar.gz \
+        "https://downloads.xiph.org/releases/opus/opus-$OPUS_VERSION.tar.gz" \
+        "https://github.com/xiph/opus/releases/download/v$OPUS_VERSION/opus-$OPUS_VERSION.tar.gz"
     rm -rf "opus-$OPUS_VERSION" && tar xf opus.tar.gz
     (cd "opus-$OPUS_VERSION" &&
         ./configure --prefix="$PREFIX" --disable-shared --enable-static --disable-doc \
@@ -80,7 +118,8 @@ fi
 
 # --- libvpx (VP9 para WebM) ---------------------------------------------------
 if [ ! -f "$PREFIX/lib/libvpx.a" ]; then
-    clone https://chromium.googlesource.com/webm/libvpx "$VPX_VERSION" libvpx
+    clone "$VPX_VERSION" libvpx \
+        https://chromium.googlesource.com/webm/libvpx https://github.com/webmproject/libvpx.git
     # darwin20 = macOS 11: el mismo mínimo que Capyro
     VPX_TARGET=$([ "$ARCH" = arm64 ] && echo arm64-darwin20-gcc || echo x86_64-darwin20-gcc)
     (cd libvpx && make distclean >/dev/null 2>&1 || true)
@@ -93,7 +132,8 @@ fi
 
 # --- dav1d (AV1) --------------------------------------------------------------
 if [ ! -f "$PREFIX/lib/libdav1d.a" ]; then
-    clone https://code.videolan.org/videolan/dav1d.git "$DAV1D_VERSION" dav1d
+    clone "$DAV1D_VERSION" dav1d \
+        https://code.videolan.org/videolan/dav1d.git https://github.com/videolan/dav1d.git
     (cd dav1d && rm -rf build &&
         meson setup build --prefix="$PREFIX" --libdir=lib --buildtype=release \
             --default-library=static -Denable_tools=false -Denable_tests=false \
@@ -103,7 +143,8 @@ fi
 
 # --- x264 (H.264) -------------------------------------------------------------
 if [ ! -f "$PREFIX/lib/libx264.a" ]; then
-    clone https://code.videolan.org/videolan/x264.git "$X264_BRANCH" x264
+    clone "$X264_BRANCH" x264 \
+        https://code.videolan.org/videolan/x264.git https://github.com/mirror/x264.git
     (cd x264 &&
         ./configure --prefix="$PREFIX" --enable-static --disable-cli --enable-pic \
             --extra-cflags="$FLAGS" --extra-ldflags="$LDFLAGS" &&
@@ -111,8 +152,14 @@ if [ ! -f "$PREFIX/lib/libx264.a" ]; then
 fi
 
 # --- FFmpeg -------------------------------------------------------------------
-fetch "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz" ffmpeg.tar.xz
-rm -rf "ffmpeg-$FFMPEG_VERSION" && tar xf ffmpeg.tar.xz
+rm -rf "ffmpeg-$FFMPEG_VERSION"
+if fetch ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"; then
+    tar xf ffmpeg.tar.xz
+else
+    # el espejo oficial de FFmpeg en GitHub: la etiqueta n8.0.1 es la misma versión
+    echo "!! ffmpeg.org no responde: uso el espejo de GitHub" >&2
+    clone "n$FFMPEG_VERSION" "ffmpeg-$FFMPEG_VERSION" https://github.com/FFmpeg/FFmpeg.git
+fi
 cd "ffmpeg-$FFMPEG_VERSION"
 # --disable-autodetect: nada que se cuele de Homebrew (SDL, X11...); lo que
 # se usa va pedido a mano.
