@@ -1,0 +1,144 @@
+# Compila Capyro para macOS (11 Big Sur o más nuevo) en cada push a main, en
+# una Mac con Apple Silicon y en una con Intel, y lo publica en la release
+# "macos" del repo:
+#
+#   capyro-macos-arm64.zip  →  Capyro.app para Apple Silicon (M1, M2, M3…)
+#   capyro-macos-x64.zip    →  Capyro.app para las Mac con Intel
+#
+# Cada Capyro.app trae adentro su FFmpeg (packaging/macos/build-ffmpeg.sh,
+# guardado en la caché del CI: la primera vez tarda ~15 min, después no) y
+# va firmado "ad-hoc" (sin certificado de Apple).
+#
+# De ahí lo bajan el actualizador de Capyro en la Mac (ⓘ → Buscar
+# actualizaciones) y CapyroInstaller. En la descripción de la release van el
+# commit y la versión (el actualizador los lee para mostrar "el parche").
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-release
+  cancel-in-progress: true
+
+env:
+  # el más viejo en el que abre Capyro (lo usan clang, rustc y CMake)
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    name: macOS ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # el commit y su fecha van adentro del binario
+
+      - name: Herramientas (nasm, meson, ninja, pkgconf)
+        run: |
+          brew install nasm meson ninja pkgconf
+          cmake --version | head -1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: FFmpeg (de la caché)
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ffmpeg-mac
+          key: ffmpeg-mac-${{ matrix.arch }}-${{ hashFiles('packaging/macos/build-ffmpeg.sh') }}
+
+      - name: FFmpeg para macOS 11 (x264, LAME, Opus, libvpx, dav1d, VideoToolbox)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: bash packaging/macos/build-ffmpeg.sh ffmpeg-mac
+
+      - name: Compilar
+        run: |
+          # solo el FFmpeg de arriba (nada de Homebrew)
+          export PKG_CONFIG_LIBDIR="$PWD/ffmpeg-mac/lib/pkgconfig"
+          export PKG_CONFIG_PATH="$PKG_CONFIG_LIBDIR"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCAPYRO_SYSTEM=Mac \
+            -DCAPYRO_FFMPEG_DIR="$PWD/ffmpeg-mac" \
+            -DCAPYRO_BUILD_TESTS=ON
+          cmake --build build
+          ctest --test-dir build --output-on-failure
+          cmake --install build --prefix dist
+
+      - name: Revisar el Capyro.app
+        run: |
+          APP=dist/Capyro.app
+          ls -la "$APP/Contents" "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
+          plutil -lint "$APP/Contents/Info.plist"
+          otool -L "$APP/Contents/MacOS/Capyro"
+          # nada que apunte afuera del .app (Homebrew, la carpeta del CI)
+          if otool -L "$APP/Contents/MacOS/Capyro" "$APP"/Contents/Frameworks/*.dylib | grep -E '/opt/homebrew|/usr/local|ffmpeg-mac'; then
+            echo "::error::El Capyro.app depende de librerías de afuera"
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          lipo -archs "$APP/Contents/MacOS/Capyro"
+          # que abra (carga FFmpeg y todo lo de adentro) sin ventana
+          "$APP/Contents/MacOS/Capyro" --version
+
+      - name: Empaquetar
+        run: |
+          cd dist
+          # sin metadatos del Finder (la firma va adentro de los archivos)
+          ditto -c -k --norsrc --noextattr --keepParent Capyro.app ../capyro-macos-${{ matrix.arch }}.zip
+          ls -la ../capyro-macos-${{ matrix.arch }}.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capyro-macos-${{ matrix.arch }}
+          path: capyro-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: capyro-macos-*
+          path: paquetes
+          merge-multiple: true
+
+      - name: Publicar en la release "macos"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la paquetes
+          VERSION=$(sed -n 's/^#define CAPYRO_VERSION "\(.*\)"/\1/p' core/include/capyro_core.h)
+          printf 'Capyro para macOS 11 o más nuevo, compilado por el CI.\n\n- capyro-macos-arm64.zip: Apple Silicon (M1, M2, M3, M4…)\n- capyro-macos-x64.zip: Mac con Intel\n\nPara instalarlo usá CapyroInstaller.\n\ncommit: %s\nversion: %s\n' \
+            "$GITHUB_SHA" "$VERSION" > notes.md
+          gh release delete macos --yes --cleanup-tag || true
+          gh release create macos paquetes/capyro-macos-arm64.zip paquetes/capyro-macos-x64.zip \
+            --target "$GITHUB_SHA" \
+            --title "Capyro $VERSION para Mac" \
+            --notes-file notes.md \
+            --latest=false
+
+      # Opcional: avisarle al repo del instalador que hay paquete nuevo.
+      # Necesita un token con permiso sobre ese repo en el secreto INSTALLER_TOKEN.
+      - name: Avisar a CapyroInstaller
+        env:
+          GH_TOKEN: ${{ secrets.INSTALLER_TOKEN }}
+        if: env.GH_TOKEN != ''
+        run: gh api repos/${{ github.repository_owner }}/CapyroInstaller/dispatches -f event_type=capyro-macos
