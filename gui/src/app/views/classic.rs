@@ -601,7 +601,7 @@ impl CapyroApp {
         if sh.resp.clicked() {
             self.toggle_shuffle(&ctx);
         }
-        sh.resp.on_hover_text(if shuffle_on { "Aleatorio: activado (Ctrl+S)" } else { "Aleatorio: desactivado (Ctrl+S)" });
+        sh.resp.on_hover_text(crate::system::config::with_ctrl(if shuffle_on { "Aleatorio: activado (Ctrl+S)" } else { "Aleatorio: desactivado (Ctrl+S)" }));
 
         let prev_c = pos2(cx - 69.0 * spread, cy);
         let prev = Self::icon_button(ui, "prev", prev_c, 30.0);
@@ -668,11 +668,11 @@ impl CapyroApp {
         if rp.resp.clicked() {
             self.cycle_repeat(&ctx);
         }
-        rp.resp.on_hover_text(match repeat {
+        rp.resp.on_hover_text(crate::system::config::with_ctrl(match repeat {
             Repeat::Off => "Repetir: no (Ctrl+R)",
             Repeat::All => "Repetir: toda la lista (Ctrl+R)",
             Repeat::One => "Repetir: este archivo (Ctrl+R)",
-        });
+        }));
 
         repeat_c
     }
@@ -722,7 +722,7 @@ impl CapyroApp {
         if add.resp.clicked() {
             self.open_file_dialog(&ctx);
         }
-        add.resp.on_hover_text(format!("Agregar archivos ({}) a la lista (Ctrl+O)", self.formats_label(", ")));
+        add.resp.on_hover_text(format!("Agregar archivos ({}) a la lista ({}+O)", self.formats_label(", "), crate::system::config::CTRL));
     }
 
     pub(crate) fn transport(&mut self, ui: &mut Ui, video_bottom: f32, inner: Rect) {
@@ -888,7 +888,7 @@ impl CapyroApp {
             self.show_fx = open;
         }
         if !self.show_fx {
-            fxb.resp.on_hover_text("Efectos de audio (Ctrl+E)");
+            fxb.resp.on_hover_text(crate::system::config::with_ctrl("Efectos de audio (Ctrl+E)"));
         }
         vol.resp.on_hover_text("Clic: silenciar · Rueda: volumen");
 

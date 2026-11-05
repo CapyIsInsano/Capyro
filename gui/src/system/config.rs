@@ -43,6 +43,8 @@ pub enum System {
     Lin,
     /// Windows
     Win,
+    /// macOS (v0.4.0)
+    Mac,
 }
 
 impl System {
@@ -50,16 +52,19 @@ impl System {
     pub const fn current() -> Self {
         if cfg!(windows) {
             System::Win
+        } else if cfg!(target_os = "macos") {
+            System::Mac
         } else {
             System::Lin
         }
     }
 
-    /// Como se escribe en capyro.lua: "Lin" o "Win".
+    /// Como se escribe en capyro.lua: "Lin", "Win" o "Mac".
     pub fn code(self) -> &'static str {
         match self {
             System::Lin => "Lin",
             System::Win => "Win",
+            System::Mac => "Mac",
         }
     }
 
@@ -67,6 +72,7 @@ impl System {
         match self {
             System::Lin => "Linux",
             System::Win => "Windows",
+            System::Mac => "macOS",
         }
     }
 
@@ -75,6 +81,7 @@ impl System {
         match s.trim().to_ascii_lowercase().as_str() {
             "lin" | "linux" => Some(Some(System::Lin)),
             "win" | "windows" => Some(Some(System::Win)),
+            "mac" | "macos" | "osx" | "darwin" => Some(Some(System::Mac)),
             "auto" | "" => Some(None),
             _ => None,
         }
@@ -475,15 +482,29 @@ pub fn key_label(m: Modifiers, key: Key) -> String {
     };
     let mut s = String::new();
     if m.command || m.ctrl {
-        s += "Ctrl+";
+        s += CTRL;
+        s += "+";
     }
     if m.shift {
         s += "Shift+";
     }
     if m.alt {
-        s += "Alt+";
+        s += if cfg!(target_os = "macos") { "Opción+" } else { "Alt+" };
     }
     s + k
+}
+
+/// La tecla de los atajos como se llama en este sistema: Ctrl, o Cmd (⌘) en
+/// la Mac. En capyro.lua se escribe "Ctrl+" en los dos (o "Cmd+").
+pub const CTRL: &str = if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" };
+
+/// "Ctrl+S" de los textos de ayuda → "Cmd+S" en la Mac.
+pub fn with_ctrl(text: &str) -> String {
+    if cfg!(target_os = "macos") {
+        text.replace("Ctrl+", "Cmd+")
+    } else {
+        text.to_owned()
+    }
 }
 
 /// Ctrl y Command son la misma tecla en Linux: se guarda como COMMAND.
@@ -700,9 +721,10 @@ impl Config {
 
 fn candidate_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    // CAPYRO_CONFIG, ~/.config/capyro (Linux) o la del instalador (Windows)
+    // CAPYRO_CONFIG, ~/.config/capyro (Linux), la del instalador (Windows) o
+    // ~/Library/Application Support/Capyro (Mac)
     out.extend(user_config_path());
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     if let Some(home) = crate::system::paths::home() {
         out.push(home.join(".config/capyro/capyro.lua"));
     }
@@ -710,7 +732,10 @@ fn candidate_paths() -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             out.push(dir.join("config").join("capyro.lua"));
-            #[cfg(not(windows))]
+            // Capyro.app/Contents/MacOS/Capyro → Contents/Resources/config
+            #[cfg(target_os = "macos")]
+            out.push(dir.join("../Resources/config/capyro.lua"));
+            #[cfg(not(any(windows, target_os = "macos")))]
             out.push(dir.join("../share/capyro/capyro.lua"));
         }
     }
@@ -918,7 +943,7 @@ fn parse(src: &str, name: &str) -> mlua::Result<Config> {
                     }
                     cfg.system_setting = sys;
                 }
-                None => eprintln!("capyro: {name}: system desconocido '{v}' (Lin, Win o auto)"),
+                None => eprintln!("capyro: {name}: system desconocido '{v}' (Lin, Win, Mac o auto)"),
             }
         }
         if let Some(v) = opts.get::<Option<String>>("performance")? {
@@ -1116,7 +1141,8 @@ mod tests {
             let spec = key_spec(Modifiers::COMMAND | Modifiers::SHIFT, key);
             assert_eq!(parse_key_spec(&spec), Some((Modifiers::COMMAND | Modifiers::SHIFT, key)), "{spec}");
         }
-        assert_eq!(key_label(Modifiers::COMMAND, Key::ArrowRight), "Ctrl+→");
+        assert_eq!(key_label(Modifiers::COMMAND, Key::ArrowRight), format!("{CTRL}+→"));
+        assert_eq!(with_ctrl("atajo: Ctrl+E"), format!("atajo: {CTRL}+E"));
     }
 
     #[test]
@@ -1125,11 +1151,23 @@ mod tests {
         assert_eq!(parse(&lua("Lin"), "t").unwrap().system_setting, Some(System::Lin));
         assert_eq!(parse(&lua("win"), "t").unwrap().system_setting, Some(System::Win));
         assert_eq!(parse(&lua("auto"), "t").unwrap().system_setting, None);
-        assert_eq!(parse(&lua("Mac"), "t").unwrap().system_setting, None);
+        assert_eq!(parse(&lua("Mac"), "t").unwrap().system_setting, Some(System::Mac));
+        assert_eq!(parse(&lua("macOS"), "t").unwrap().system_setting, Some(System::Mac));
+        assert_eq!(parse(&lua("BeOS"), "t").unwrap().system_setting, None);
         // el que no corresponde no gana: manda el sistema real
-        let otro = if cfg!(windows) { "Lin" } else { "Win" };
-        assert_eq!(parse(&lua(otro), "t").unwrap().system(), System::current());
-        assert_eq!(System::current(), if cfg!(windows) { System::Win } else { System::Lin });
+        for otro in ["Lin", "Win", "Mac"] {
+            assert_eq!(parse(&lua(otro), "t").unwrap().system(), System::current());
+        }
+        let real = if cfg!(windows) {
+            System::Win
+        } else if cfg!(target_os = "macos") {
+            System::Mac
+        } else {
+            System::Lin
+        };
+        assert_eq!(System::current(), real);
+        assert_eq!(System::Mac.code(), "Mac");
+        assert_eq!(System::Mac.name(), "macOS");
     }
 
     #[test]

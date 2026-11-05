@@ -14,8 +14,13 @@ pub const ICON: Color32 = Color32::from_rgb(0xD6, 0xD7, 0xDB);
 pub const ICON_DIM: Color32 = Color32::from_rgb(0xA0, 0xA1, 0xA7);
 pub const ERROR: Color32 = Color32::from_rgb(0xF0, 0x5A, 0x4F);
 
-/// En Windows la ventana no es transparente: esquinas rectas.
-pub const WINDOW_RADIUS: u8 = if cfg!(windows) { 0 } else { 14 };
+/// La ventana es transparente (y se dibuja con las esquinas redondeadas)
+/// solo en Linux. En Windows es opaca, con esquinas rectas; en la Mac también
+/// es opaca, pero con el marco del sistema (que ya redondea las esquinas y
+/// pone los botones de colores arriba a la izquierda).
+pub const OPAQUE_WINDOW: bool = cfg!(any(windows, target_os = "macos"));
+
+pub const WINDOW_RADIUS: u8 = if OPAQUE_WINDOW { 0 } else { 14 };
 pub const PAD: f32 = 12.0;
 
 pub fn regular(size: f32) -> FontId {
@@ -40,17 +45,19 @@ pub fn apply_visuals(ctx: &egui::Context, accent: Color32) {
 }
 
 /// Linux: DejaVu Sans si está (se parece más al mockup y trae negrita).
-/// Windows: Segoe UI, la del sistema. Si no, quedan las fuentes de egui.
+/// Windows: Segoe UI, la del sistema. Mac: Helvetica Neue o Arial (las que
+/// vienen con macOS en un .ttf/.ttc que egui lee). Si no, quedan las fuentes
+/// de egui.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     const REGULAR: &[&str] = &[
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",          // Gentoo
         "/usr/share/fonts/TTF/DejaVuSans.ttf",             // Arch / Artix
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // Debian / Devuan / Ubuntu
     ];
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     const BOLD: &[&str] = &[
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
@@ -61,6 +68,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     const REGULAR: &[&str] = &["segoeui.ttf", "arial.ttf"];
     #[cfg(windows)]
     const BOLD: &[&str] = &["segoeuib.ttf", "arialbd.ttf"];
+    // macOS 10.15+ las trae en Supplemental; antes, en /Library/Fonts
+    #[cfg(target_os = "macos")]
+    const REGULAR: &[&str] = &["/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf"];
+    #[cfg(target_os = "macos")]
+    const BOLD: &[&str] = &["/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf"];
 
     let load = |list: &[&str]| {
         list.iter().find_map(|p| {
@@ -93,9 +105,14 @@ pub fn install_fonts(ctx: &egui::Context) {
         bold_family.insert(0, "capyro-bold".into());
     }
 
-    // Windows: los símbolos (▸, ✓...) que no trae Segoe UI salen de Segoe UI Symbol
+    // Windows: los símbolos (▸, ✓...) que no trae Segoe UI salen de Segoe UI
+    // Symbol; en la Mac, de Apple Symbols
     #[cfg(windows)]
-    if let Some(bytes) = load(&["seguisym.ttf"]) {
+    let symbols = load(&["seguisym.ttf"]);
+    #[cfg(target_os = "macos")]
+    let symbols = load(&["/System/Library/Fonts/Apple Symbols.ttf"]);
+    #[cfg(any(windows, target_os = "macos"))]
+    if let Some(bytes) = symbols {
         fonts
             .font_data
             .insert("capyro-symbols".into(), Arc::new(FontData::from_owned(bytes)));

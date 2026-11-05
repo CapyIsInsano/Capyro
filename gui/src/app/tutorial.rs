@@ -116,6 +116,9 @@ const STEPS: [Step; 16] = [
         text: if cfg!(windows) {
             "La versión, los formatos con un resumen de cada uno, y el botón para buscar actualizaciones: te \
              muestra qué commits hay de nuevo y, si querés, baja la versión para Windows y se instala solo."
+        } else if cfg!(target_os = "macos") {
+            "La versión, los formatos con un resumen de cada uno, y el botón para buscar actualizaciones: te \
+             muestra qué commits hay de nuevo y, si querés, baja la versión para la Mac y se instala solo."
         } else {
             "La versión, los formatos con un resumen de cada uno, y el botón para buscar actualizaciones: te \
              muestra qué commits hay de nuevo y, si querés, se baja, se compila y se instala solo."
@@ -526,7 +529,7 @@ impl CapyroApp {
                 if STEPS[i].target.is_some() {
                     draw_corners(&p, spot, accent, deco, k);
                 }
-                let shown = if t.revealed_all { usize::MAX } else { revealed(STEPS[i].text, (now - t.t0) as f32) };
+                let shown = if t.revealed_all { usize::MAX } else { revealed(&crate::system::config::with_ctrl(STEPS[i].text), (now - t.t0) as f32) };
                 let complete = t.complete(now);
                 let enter = ((now - t.t0) / 0.35) as f32;
                 draw_bubble(&p, full, spot, &STEPS[i], i, shown, complete, enter, accent, deco, t.rounds);
@@ -997,7 +1000,9 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     let mut pi = p.clone();
     pi.multiply_opacity(pop);
     let ic = icon_c - vec2(0.0, bounce);
-    if os.windows {
+    if os.mac {
+        icons::mac_window(&pi, ic, side, Color32::from_gray(200), accent);
+    } else if os.windows {
         icons::app_window(&pi, ic, side, Color32::from_gray(200), accent, os.major >= 11);
         if os.major >= 10 {
             // la versión en una pastillita, en la esquina del ícono
@@ -1014,8 +1019,11 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     let mut pt = p.clone();
     pt.multiply_opacity(ease_out((t - 0.15) / 0.35));
     pt.text(pos2(cx, card.top() + 136.0), Align2::CENTER_CENTER, "Sistema detectado", regular(12.5), TEXT_FAINT);
-    // grande: la familia ("Linux", "Windows 11"); chico: distro o versión
-    let (big, small) = if os.windows {
+    // grande: la familia ("Linux", "Windows 11", "macOS 15 Sequoia"); chico: distro o versión
+    let (big, small) = if os.mac {
+        let big = if os.name.is_empty() { "macOS".to_owned() } else { os.name.clone() };
+        (big, os.version.clone())
+    } else if os.windows {
         let big = if os.name.is_empty() { "Windows".to_owned() } else { os.name.clone() };
         (big, os.version.clone())
     } else {
@@ -1039,7 +1047,13 @@ fn draw_system(p: &egui::Painter, full: Rect, os: &OsInfo, since: f32, now: f64,
     pb.multiply_opacity(ease_out((t - 0.45) / 0.35));
     let line = format!(
         "Capyro está compilado para {} ({}): las actualizaciones instalan solo lo de tu sistema.",
-        if os.windows { "Windows" } else { "Linux" },
+        if os.mac {
+            "macOS"
+        } else if os.windows {
+            "Windows"
+        } else {
+            "Linux"
+        },
         os.code
     );
     let g = pb.layout_job(centered_job(&line, regular(11.5), TEXT_FAINT, card.width() - 56.0));
@@ -1181,7 +1195,9 @@ fn draw_bubble(
 ) {
     let w = 340.0_f32.min(full.width() - 24.0);
     let inner = w - 32.0;
-    let full_text = p.layout(step.text.to_owned(), regular(13.0), TEXT, inner);
+    // "Ctrl+O" en Linux y Windows, "Cmd+O" en la Mac
+    let step_text = crate::system::config::with_ctrl(step.text);
+    let full_text = p.layout(step_text.clone(), regular(13.0), TEXT, inner);
     let h = 16.0 + 22.0 + 10.0 + full_text.size().y + 14.0 + 18.0 + 14.0;
     // abajo de lo iluminado si entra; si no, arriba; sin foco, al centro
     let focused = spot.width() > 1.0;
@@ -1218,8 +1234,8 @@ fn draw_bubble(
     p.text(pos2(chip.right() + 8.0, ty), Align2::LEFT_CENTER, title, bold(14.0), TEXT);
 
     // el texto, escribiéndose
-    let mut text: String = step.text.chars().take(shown).collect();
-    if shown < step.text.chars().count() {
+    let mut text: String = step_text.chars().take(shown).collect();
+    if shown < step_text.chars().count() {
         text.push('▌');
     }
     let g = p.layout(text, regular(13.0), TEXT, inner);

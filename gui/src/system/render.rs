@@ -9,7 +9,9 @@
 //! abrir Capyro con el otro modo.
 //!
 //! Se fuerza uno con `renderer = "opengl"` / `"direct3d"` en capyro.lua o con
-//! la variable `CAPYRO_RENDERER`. En Linux siempre es OpenGL.
+//! la variable `CAPYRO_RENDERER`. En Linux siempre es OpenGL. En la Mac, Metal
+//! (por wgpu, como Direct3D en Windows: `"metal"` es lo mismo que
+//! `"direct3d"`) y si no abre, OpenGL.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -33,7 +35,7 @@ impl Pref {
         match s.trim().to_ascii_lowercase().as_str() {
             "auto" | "" => Some(Pref::Auto),
             "opengl" | "gl" | "glow" => Some(Pref::OpenGl),
-            "direct3d" | "d3d" | "d3d12" | "directx" | "wgpu" => Some(Pref::Direct3d),
+            "direct3d" | "d3d" | "d3d12" | "directx" | "wgpu" | "metal" => Some(Pref::Direct3d),
             _ => None,
         }
     }
@@ -66,7 +68,18 @@ pub fn order(cfg_pref: Pref) -> Vec<eframe::Renderer> {
             },
         }
     }
-    #[cfg(not(windows))]
+    // Mac: Metal; OpenGL anda en todas (Apple lo dejó de actualizar, pero sigue)
+    #[cfg(target_os = "macos")]
+    {
+        use eframe::Renderer::{Glow, Wgpu};
+        let env = std::env::var("CAPYRO_RENDERER").ok().and_then(|v| Pref::parse(&v));
+        match env.unwrap_or(cfg_pref) {
+            Pref::OpenGl => vec![Glow],
+            Pref::Direct3d => vec![Wgpu],
+            Pref::Auto => vec![Wgpu, Glow],
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = cfg_pref;
         vec![eframe::Renderer::Glow]
@@ -156,7 +169,8 @@ mod tests {
         }
         assert_eq!(Pref::parse("D3D"), Some(Pref::Direct3d));
         assert_eq!(Pref::parse("vulkan"), None);
-        if !cfg!(windows) {
+        assert_eq!(Pref::parse("metal"), Some(Pref::Direct3d));
+        if !cfg!(any(windows, target_os = "macos")) {
             assert_eq!(order(Pref::Direct3d), vec![eframe::Renderer::Glow]);
         }
     }

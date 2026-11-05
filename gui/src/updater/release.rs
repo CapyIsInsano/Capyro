@@ -1,24 +1,46 @@
-//! La versión para Windows publicada en GitHub (Releases): qué trae y qué
-//! cambió desde la que está instalada. Solo se compila para Windows (y para
-//! las pruebas, que corren en cualquier sistema).
+//! La versión para Windows o para la Mac publicada en GitHub (Releases): qué
+//! trae y qué cambió desde la que está instalada. Solo se compila para
+//! Windows y la Mac (y para las pruebas, que corren en cualquier sistema).
 //!
-//! El CI del repo (`.github/workflows/windows.yml`) compila Capyro para
-//! Windows en cada push y lo publica en la release con la etiqueta
-//! [`WINDOWS_TAG`], con el zip [`WINDOWS_ASSET`] y en la descripción:
+//! El CI del repo (`.github/workflows/windows.yml` y `macos.yml`) compila
+//! Capyro en cada push y lo publica en la release con la etiqueta
+//! [`WINDOWS_TAG`] (el zip [`WINDOWS_ASSET`]) o [`MACOS_TAG`] (un zip por
+//! arquitectura, [`macos_asset`]), y en la descripción:
 //!
 //! ```text
 //! commit: <hash completo>
 //! version: 0.3.0-alpha
 //! ```
 
+// En las pruebas de Linux no se usa todo (es lo de Windows y la Mac).
+#![cfg_attr(all(test, not(any(windows, target_os = "macos"))), allow(dead_code))]
+
 use serde_json::Value;
 
 use super::CommitInfo;
 
 /// Etiqueta de la release que mantiene el CI (siempre la última de `main`).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub const WINDOWS_TAG: &str = "windows";
 /// El paquete: capyro.exe, las DLL y config\capyro.lua.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub const WINDOWS_ASSET: &str = "capyro-windows-x64.zip";
+/// La de la Mac.
+#[cfg_attr(windows, allow(dead_code))]
+pub const MACOS_TAG: &str = "macos";
+/// El Capyro.app de la Mac, uno por arquitectura.
+pub const MACOS_ASSET_ARM64: &str = "capyro-macos-arm64.zip";
+pub const MACOS_ASSET_X64: &str = "capyro-macos-x64.zip";
+
+/// El paquete de la Mac que va con este Capyro (Apple Silicon o Intel).
+#[cfg_attr(windows, allow(dead_code))]
+pub fn macos_asset() -> &'static str {
+    if cfg!(target_arch = "aarch64") {
+        MACOS_ASSET_ARM64
+    } else {
+        MACOS_ASSET_X64
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Release {
@@ -46,7 +68,8 @@ fn body_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
-pub fn parse_release(json: &str) -> Result<Release, String> {
+/// La release de `json`, con el paquete que se llama `asset`.
+pub fn parse_release(json: &str, asset: &str) -> Result<Release, String> {
     let v: Value = serde_json::from_str(json).map_err(|e| format!("respuesta rara de GitHub: {e}"))?;
     if let Some(msg) = v.get("message").and_then(Value::as_str) {
         if v.get("assets").is_none() {
@@ -60,11 +83,12 @@ pub fn parse_release(json: &str) -> Result<Release, String> {
         .filter(|c| is_hash(c))
         .or_else(|| body_field(body, "commit").filter(|c| is_hash(c)))
         .map(|c| c.to_ascii_lowercase());
+    let wanted = asset;
     let asset = v
         .get("assets")
         .and_then(Value::as_array)
-        .and_then(|a| a.iter().find(|x| x.get("name").and_then(Value::as_str) == Some(WINDOWS_ASSET)))
-        .ok_or_else(|| format!("la versión publicada no trae {WINDOWS_ASSET}"))?;
+        .and_then(|a| a.iter().find(|x| x.get("name").and_then(Value::as_str) == Some(wanted)))
+        .ok_or_else(|| format!("la versión publicada no trae {wanted}"))?;
     Ok(Release {
         commit,
         version: body_field(body, "version").map(str::to_owned).filter(|s| !s.is_empty()),
@@ -161,7 +185,7 @@ mod tests {
 
     #[test]
     fn release() {
-        let r = parse_release(RELEASE).unwrap();
+        let r = parse_release(RELEASE, WINDOWS_ASSET).unwrap();
         assert_eq!(r.commit.as_deref(), Some("0123456789abcdef0123456789abcdef01234567"));
         assert_eq!(r.version.as_deref(), Some("0.3.0-alpha"));
         assert_eq!(r.asset_size, 31_457_280);
@@ -169,11 +193,20 @@ mod tests {
         assert_eq!(r.published, 1_793_024_700);
         // target_commitish con hash gana
         let other = RELEASE.replace("\"main\"", "\"fedcba9876543210fedcba9876543210fedcba98\"");
-        assert_eq!(parse_release(&other).unwrap().commit.as_deref(), Some("fedcba9876543210fedcba9876543210fedcba98"));
+        assert_eq!(
+            parse_release(&other, WINDOWS_ASSET).unwrap().commit.as_deref(),
+            Some("fedcba9876543210fedcba9876543210fedcba98")
+        );
         // sin el zip
-        assert!(parse_release(&RELEASE.replace("capyro-windows-x64.zip\"", "otro.zip\"")).is_err());
+        assert!(parse_release(&RELEASE.replace("capyro-windows-x64.zip\"", "otro.zip\""), WINDOWS_ASSET).is_err());
         // 404 de la API
-        assert_eq!(parse_release(r#"{"message":"Not Found","status":"404"}"#).unwrap_err(), "Not Found");
+        assert_eq!(parse_release(r#"{"message":"Not Found","status":"404"}"#, WINDOWS_ASSET).unwrap_err(), "Not Found");
+        // la de la Mac: cada arquitectura con su zip
+        let mac = RELEASE.replace("capyro-windows-x64.zip", MACOS_ASSET_ARM64).replace("\"windows\"", "\"macos\"");
+        let mac = mac.replace("otra-cosa.txt", MACOS_ASSET_X64);
+        assert!(parse_release(&mac, MACOS_ASSET_ARM64).unwrap().asset_url.ends_with("/capyro-macos-arm64.zip"));
+        assert_eq!(parse_release(&mac, MACOS_ASSET_X64).unwrap().asset_size, 3);
+        assert!(macos_asset().starts_with("capyro-macos-"));
     }
 
     #[test]

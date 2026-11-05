@@ -8,10 +8,23 @@
 //! | caché          | `~/.cache/capyro/`                  | `%LOCALAPPDATA%\Capyro\cache\`            |
 //! | capturas       | Imágenes (xdg-user-dirs)`/Capyro`   | Imágenes`\Capyro`                         |
 //!
-//! (*) o la que se eligió en el instalador: queda anotada en
-//! `capyro-config.txt`, al lado de `capyro.exe`.
+//! En la Mac, como las demás apps (sin carteles de permiso, que macOS pide
+//! para Documentos y Escritorio):
 //!
-//! Las variables `XDG_*` se respetan en Linux; `CAPYRO_CONFIG` en los dos.
+//! | qué            | macOS                                               |
+//! |----------------|-----------------------------------------------------|
+//! | config         | `~/Library/Application Support/Capyro/capyro.lua` (*) |
+//! | listas         | `~/Library/Application Support/Capyro/`             |
+//! | sesión, marcas | `~/Library/Application Support/Capyro/state/`       |
+//! | caché          | `~/Library/Caches/Capyro/`                          |
+//! | capturas       | `~/Pictures/Capyro` (Imágenes)                      |
+//!
+//! (*) o la que se eligió en el instalador: queda anotada en
+//! `capyro-config.txt`, al lado de `capyro.exe` (en la Mac, en
+//! `~/Library/Application Support/Capyro/`: el Capyro.app no se toca, está
+//! firmado).
+//!
+//! Las variables `XDG_*` se respetan en Linux; `CAPYRO_CONFIG` en los tres.
 
 use std::path::{Path, PathBuf};
 
@@ -27,8 +40,23 @@ pub fn home() -> Option<PathBuf> {
     }
 }
 
+/// `~/Library/Application Support/Capyro` (Mac).
+#[cfg(target_os = "macos")]
+pub fn app_support() -> Option<PathBuf> {
+    home().map(|h| h.join("Library/Application Support/Capyro"))
+}
+
+/// Mac: los mensajes de error (`~/Library/Logs/Capyro`, los muestra la app
+/// Consola).
+#[cfg(target_os = "macos")]
+pub fn log_file() -> PathBuf {
+    home()
+        .map(|h| h.join("Library/Logs/Capyro/capyro.log"))
+        .unwrap_or_else(|| std::env::temp_dir().join("capyro.log"))
+}
+
 /// `$XDG_<VAR>` si es absoluta; si no `~/<fallback>`.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn xdg(var: &str, fallback: &str) -> Option<PathBuf> {
     std::env::var_os(var)
         .map(PathBuf::from)
@@ -42,16 +70,18 @@ fn local_app_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("Capyro"))
 }
 
-/// Archivo junto al ejecutable donde el instalador de Windows anota la
-/// ruta de la config que eligió el usuario.
-#[cfg(windows)]
+/// Archivo donde el instalador anota la ruta de la config que eligió el
+/// usuario: al lado de capyro.exe (Windows) o en Application Support (Mac).
+#[cfg(any(windows, target_os = "macos"))]
 pub const CONFIG_POINTER: &str = "capyro-config.txt";
 
-/// La ruta de la config que dejó anotada el instalador (Windows).
-#[cfg(windows)]
+/// La ruta de la config que dejó anotada el instalador (Windows y Mac).
+#[cfg(any(windows, target_os = "macos"))]
 pub fn installer_config_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let txt = std::fs::read_to_string(exe.parent()?.join(CONFIG_POINTER)).ok()?;
+    #[cfg(windows)]
+    let txt = std::fs::read_to_string(std::env::current_exe().ok()?.parent()?.join(CONFIG_POINTER)).ok()?;
+    #[cfg(target_os = "macos")]
+    let txt = std::fs::read_to_string(app_support()?.join(CONFIG_POINTER)).ok()?;
     let line = txt.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#'))?;
     Some(PathBuf::from(line))
 }
@@ -65,7 +95,11 @@ pub fn user_config() -> Option<PathBuf> {
     {
         installer_config_path().or_else(|| dirs::document_dir().map(|d| d.join("Capyro").join("Config").join("Capyro.lua")))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        installer_config_path().or_else(|| app_support().map(|d| d.join("capyro.lua")))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         xdg("XDG_CONFIG_HOME", ".config").map(|b| b.join("capyro").join("capyro.lua"))
     }
@@ -77,7 +111,11 @@ pub fn data_dir() -> Option<PathBuf> {
     {
         dirs::document_dir().map(|d| d.join("Capyro"))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        app_support()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         xdg("XDG_DATA_HOME", ".local/share").map(|b| b.join("capyro"))
     }
@@ -89,7 +127,11 @@ pub fn state_dir() -> Option<PathBuf> {
     {
         local_app_dir().map(|d| d.join("state"))
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        app_support().map(|d| d.join("state"))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         xdg("XDG_STATE_HOME", ".local/state").map(|b| b.join("capyro"))
     }
@@ -99,7 +141,9 @@ pub fn state_dir() -> Option<PathBuf> {
 pub fn cache_dir() -> PathBuf {
     #[cfg(windows)]
     let base = local_app_dir().map(|d| d.join("cache"));
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let base = home().map(|h| h.join("Library/Caches/Capyro"));
+    #[cfg(not(any(windows, target_os = "macos")))]
     let base = xdg("XDG_CACHE_HOME", ".cache").map(|b| b.join("capyro"));
     base.unwrap_or_else(|| std::env::temp_dir().join("capyro"))
 }
@@ -113,7 +157,11 @@ pub fn default_screenshot_dir() -> PathBuf {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("Capyro")
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        home().unwrap_or_else(|| PathBuf::from(".")).join("Pictures").join("Capyro")
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         // según xdg-user-dirs (XDG_PICTURES_DIR en ~/.config/user-dirs.dirs)
         let home = home().unwrap_or_else(|| PathBuf::from("."));
@@ -162,8 +210,9 @@ pub fn open_url(url: &str) -> std::io::Result<()> {
         // explorer.exe abre URLs con el navegador por defecto y carpetas con el Explorador
         std::process::Command::new("explorer.exe").arg(url).creation_flags(CREATE_NO_WINDOW).spawn()
     };
+    // macOS: open (URLs con el navegador, carpetas con el Finder)
     #[cfg(not(windows))]
-    let r = std::process::Command::new("xdg-open")
+    let r = std::process::Command::new(if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" })
         .arg(url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -191,6 +240,8 @@ mod tests {
         let cfg = user_config().unwrap();
         if cfg!(windows) {
             assert!(cfg.ends_with("Capyro.lua") || std::env::var_os("CAPYRO_CONFIG").is_some());
+        } else if cfg!(target_os = "macos") {
+            assert!(cfg.ends_with("capyro.lua"));
         } else if std::env::var_os("CAPYRO_CONFIG").is_none() {
             assert!(cfg.ends_with("capyro/capyro.lua"));
         }

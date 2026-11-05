@@ -3,6 +3,10 @@
 
 use crate::app::*;
 
+/// Mac: lo que ocupan los tres botones de colores del sistema (cerrar,
+/// minimizar, pantalla completa) arriba a la izquierda. El logo va después.
+pub(crate) const TRAFFIC_LIGHTS: f32 = if cfg!(target_os = "macos") { 64.0 } else { 0.0 };
+
 pub(crate) struct Toast {
     text: String,
     start: f64,
@@ -15,8 +19,10 @@ impl CapyroApp {
         let ctx = ui.ctx().clone();
         let painter = ui.painter().clone();
 
-        // Zona para arrastrar la ventana (todo el header menos los botones).
-        let drag_rect = Rect::from_min_max(rect.min, pos2(rect.right() - 80.0, rect.bottom()));
+        // Zona para arrastrar la ventana (todo el header menos los botones;
+        // en la Mac los botones son los del sistema, a la izquierda).
+        let buttons_w = if cfg!(target_os = "macos") { 0.0 } else { 80.0 };
+        let drag_rect = Rect::from_min_max(rect.min, pos2(rect.right() - buttons_w, rect.bottom()));
         let drag = ui.interact(drag_rect, Id::unique("capyro-titlebar"), Sense::click_and_drag());
         if drag.double_clicked() {
             ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
@@ -25,7 +31,7 @@ impl CapyroApp {
         }
 
         // Logo: al tocarlo suena un capibara y rebota.
-        let logo_rect = Rect::from_min_size(rect.min, vec2(46.0, 46.0));
+        let logo_rect = Rect::from_min_size(rect.min + vec2(TRAFFIC_LIGHTS, 0.0), vec2(46.0, 46.0));
         self.ui_rects.insert("logo", logo_rect);
         let logo_btn = animate_button(ui, Id::unique("capyro-logo"), logo_rect, true);
         let now = ctx.input(|i| i.time);
@@ -62,6 +68,10 @@ impl CapyroApp {
             TEXT_DIM,
         );
 
+        // Mac: minimizar, maximizar y cerrar son los del sistema
+        if cfg!(target_os = "macos") {
+            return;
+        }
         let cy = rect.center().y;
         let close_c = pos2(rect.right() - 8.0, cy);
         let max_c = close_c - vec2(24.0, 0.0);
@@ -161,7 +171,11 @@ impl CapyroApp {
     }
 
     /// Ventana sin bordes del sistema → bordes de 6px para redimensionar.
+    /// (En la Mac la ventana tiene el marco del sistema: se agranda sola.)
     pub(crate) fn resize_handles(ui: &mut Ui, full: Rect) {
+        if cfg!(target_os = "macos") {
+            return;
+        }
         const B: f32 = 6.0;
         let (l, r, t, b) = (full.left(), full.right(), full.top(), full.bottom());
         let zones = [

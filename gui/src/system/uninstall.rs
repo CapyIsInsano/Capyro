@@ -6,10 +6,15 @@
 //!   /usr/local hace falta permiso de administrador: no lo pedimos en silencio
 //!   (sin un agente de contraseña eso no hace nada); se copia el comando para
 //!   pegarlo en una terminal.
+//! - Mac: como se desinstala una app en la Mac, Capyro.app va a la Papelera
+//!   (y sale del Dock si lo había puesto el instalador). No hace falta un
+//!   desinstalador aparte.
 
+#[cfg(not(target_os = "macos"))]
 use std::path::{Path, PathBuf};
 
 /// El desinstalador que está al lado del ejecutable, si está.
+#[cfg(not(target_os = "macos"))]
 pub fn uninstaller() -> Option<PathBuf> {
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     let p = dir.join(if cfg!(windows) { "uninstall.exe" } else { "capyro-uninstall" });
@@ -21,10 +26,23 @@ pub enum Outcome {
     /// Ya corrió (o se abrió el desinstalador de Windows): Capyro se cierra.
     Done,
     /// Hace falta permiso: este es el comando que hay que correr en una terminal.
+    // (Windows y la Mac nunca piden permiso de administrador)
+    #[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
     NeedsRoot(String),
 }
 
+/// Mac: Capyro.app a la Papelera. Capyro sigue abierto hasta que se cierra
+/// (macOS lo permite: el programa ya está cargado).
+#[cfg(target_os = "macos")]
+pub fn launch() -> Result<Outcome, String> {
+    let app = crate::system::macos::bundle_path().ok_or("Este Capyro no corre desde un Capyro.app")?;
+    crate::system::macos::move_to_trash(&app).map_err(|e| format!("No pude moverlo a la Papelera: {e}"))?;
+    crate::system::macos::remove_from_dock(&app);
+    Ok(Outcome::Done)
+}
+
 /// Lo hace. Error = texto para mostrar al usuario.
+#[cfg(not(target_os = "macos"))]
 pub fn launch() -> Result<Outcome, String> {
     let Some(prog) = uninstaller() else {
         return Err(if cfg!(windows) {
@@ -51,7 +69,7 @@ fn run(prog: &Path) -> Result<Outcome, String> {
         .map_err(|e| format!("No pude abrir el desinstalador: {e}"))
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn run(prog: &Path) -> Result<Outcome, String> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     if !home.is_some_and(|h| prog.starts_with(&h)) {

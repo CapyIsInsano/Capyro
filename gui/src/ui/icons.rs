@@ -462,6 +462,36 @@ pub fn terminal(pt: &Painter, c: Pos2, s: f32, frame: Color32, accent: Color32, 
 
 /// Ventana genérica de escritorio (Windows en el tutorial): barra de título
 /// con minimizar, maximizar y cerrar. `rounded` = esquinas redondeadas.
+/// Una ventana de la Mac: esquinas redondeadas y los tres botones de colores
+/// arriba a la izquierda (cerrar, minimizar, pantalla completa).
+pub fn mac_window(pt: &Painter, c: Pos2, s: f32, frame: Color32, accent: Color32) {
+    let r = Rect::from_center_size(c, vec2(s, s * 0.78));
+    let round = s * 0.1;
+    pt.rect_filled(r, round, Color32::from_rgb(0x1B, 0x1D, 0x22));
+    pt.rect_stroke(r, round, Stroke::new(s * 0.035, frame), StrokeKind::Inside);
+    let bar = s * 0.17;
+    let by = r.top() + bar / 2.0 + s * 0.015;
+    for (i, col) in [
+        Color32::from_rgb(0xFF, 0x5F, 0x57),
+        Color32::from_rgb(0xFE, 0xBC, 0x2E),
+        Color32::from_rgb(0x28, 0xC8, 0x40),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        pt.circle_filled(pos2(r.left() + s * (0.1 + 0.085 * i as f32), by), s * 0.03, col);
+    }
+    // contenido: un bloque de color y unas líneas de "texto"
+    let top = r.top() + bar + s * 0.08;
+    let block = Rect::from_min_size(pos2(r.left() + s * 0.1, top), vec2(s * 0.3, s * 0.36));
+    pt.rect_filled(block, s * 0.05, accent.gamma_multiply(0.85));
+    for (i, w) in [0.38f32, 0.3, 0.34, 0.2].iter().enumerate() {
+        let y = top + s * (0.03 + 0.1 * i as f32);
+        let x = block.right() + s * 0.08;
+        pt.line_segment([pos2(x, y), pos2(x + s * w, y)], Stroke::new(s * 0.035, Color32::from_white_alpha(70)));
+    }
+}
+
 pub fn app_window(pt: &Painter, c: Pos2, s: f32, frame: Color32, accent: Color32, rounded: bool) {
     let r = Rect::from_center_size(c, vec2(s, s * 0.78));
     let round = if rounded { s * 0.12 } else { s * 0.025 };

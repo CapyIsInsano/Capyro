@@ -191,7 +191,7 @@ impl Worker {
         let json = self
             .curl_get(&url)
             .map_err(|(c, o)| Self::api_fail(c, &o, "El repo todavía no tiene una versión para Windows publicada"))?;
-        let rel: Release = release::parse_release(&json).map_err(|e| (FailKind::Repo, e))?;
+        let rel: Release = release::parse_release(&json, WINDOWS_ASSET).map_err(|e| (FailKind::Repo, e))?;
         self.logln(&format!(
             "publicado: {} · commit {} · versión {}",
             rel.name,

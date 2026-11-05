@@ -146,6 +146,8 @@ impl CapyroApp {
         let mut sub_col = TEXT_FAINT;
         let mut tooltip = if cfg!(windows) {
             "Busca la última versión para Windows en el repo de GitHub; si hay, la baja y la instala sola".to_owned()
+        } else if cfg!(target_os = "macos") {
+            "Busca la última versión para la Mac en el repo de GitHub; si hay, la baja y la instala sola".to_owned()
         } else {
             "Busca commits nuevos en el repo de GitHub; si hay, los baja, compila e instala solo".to_owned()
         };
@@ -178,6 +180,8 @@ impl CapyroApp {
                             } else {
                                 if cfg!(windows) {
                                     "Para que se actualice solo, instalá Capyro con CapyroInstaller".to_owned()
+                                } else if cfg!(target_os = "macos") {
+                                    "Para que se actualice solo, instalá Capyro con CapyroInstaller (en Aplicaciones)".to_owned()
                                 } else {
                                     "Para que se actualice solo, instalá Capyro (cmake --install build)".to_owned()
                                 }

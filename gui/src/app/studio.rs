@@ -312,7 +312,11 @@ impl CapyroApp {
                 Some((text, true, _)) => Status::Error(text),
                 Some((text, false, _)) => Status::Done(text),
                 None if dirty => Status::Pending("Cambios sin guardar"),
-                None => Status::Hint("Doble clic en una banda: 0 dB · Ctrl+S: guardar"),
+                None => Status::Hint(if cfg!(target_os = "macos") {
+                    "Doble clic en una banda: 0 dB · Cmd+S: guardar"
+                } else {
+                    "Doble clic en una banda: 0 dB · Ctrl+S: guardar"
+                }),
             }
         };
         overlay::status(&ov, accent, now, status, status_w);

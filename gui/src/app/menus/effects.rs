@@ -444,7 +444,7 @@ impl CapyroApp {
             self.close_menus();
             self.show_fx = !was;
         }
-        open.resp.on_hover_text("Todos los efectos: graves, medios, agudos, tono, estéreo y modo noche (Ctrl+E)");
+        open.resp.on_hover_text(crate::system::config::with_ctrl("Todos los efectos: graves, medios, agudos, tono, estéreo y modo noche (Ctrl+E)"));
 
         // interruptor general
         if switch(ui, painter, "master-compact", pos2(x1 - 17.0, y), fx.enabled, accent, true) {

@@ -7,9 +7,27 @@ use crate::system::config::{DiscViz, VizMode};
 /// Alto de todo el contenido del menú ⚙.
 pub(crate) const SETTINGS_H: f32 = 712.0;
 
+/// ⚙ → Segundo plano: dónde queda el ícono en cada sistema.
+const BACKGROUND_HINT: &str = if cfg!(target_os = "macos") {
+    "Al cerrar la ventana, Capyro sigue sonando en la barra de menús (con un video, solo el audio) y sale del Dock. Clic en su ícono: el mini reproductor"
+} else {
+    "Al cerrar la ventana, Capyro sigue sonando en la bandeja del sistema (con un video, solo el audio). Clic en su ícono: el mini reproductor"
+};
+
+/// ⚙ → Decodificación → GPU: con qué decodifica cada sistema.
+const GPU_HINT: &str = if cfg!(windows) {
+    "Decodifica en la placa de video (D3D11VA, NVDEC o DXVA2). Si no se puede, te avisa y usa la CPU"
+} else if cfg!(target_os = "macos") {
+    "Decodifica con VideoToolbox (el chip de video de la Mac). Si no se puede, te avisa y usa la CPU"
+} else {
+    "Decodifica en la placa de video (VA-API, NVDEC o VDPAU). Si no se puede, te avisa y usa la CPU"
+};
+
 /// Sin bandeja del sistema (Linux), el segundo plano no tiene dónde quedarse.
 const NO_TRAY: &str = if cfg!(windows) {
     "Windows no aceptó el ícono en el área de notificación"
+} else if cfg!(target_os = "macos") {
+    "macOS no aceptó el ícono en la barra de menús"
 } else {
     "No encontré la bandeja del sistema: hace falta una (KDE, Cinnamon, Xfce, MATE, waybar… en GNOME, la extensión AppIndicator). Sin ella, cerrar la ventana cierra Capyro"
 };
@@ -164,7 +182,7 @@ impl CapyroApp {
             }
             chip.resp.on_hover_text(match m {
                 ffi::Hwdec::Auto => "Usa la GPU si se puede; si no, la CPU",
-                ffi::Hwdec::Gpu => "Decodifica en la placa de video (VA-API, NVDEC o VDPAU). Si no se puede, te avisa y usa la CPU",
+                ffi::Hwdec::Gpu => GPU_HINT,
                 ffi::Hwdec::Cpu => "Siempre por software (como hasta la v0.2.8)",
             });
         }
@@ -368,13 +386,14 @@ impl CapyroApp {
         let tray = crate::background::available_cached();
         let r = painter.text(pos2(x0, y), Align2::LEFT_CENTER, "Segundo plano", regular(12.5), if tray { TEXT_DIM } else { TEXT_FAINT });
         ui.interact(r.expand(4.0), Id::unique("capyro-background-label"), Sense::hover()).on_hover_text(if tray {
-            "Al cerrar la ventana, Capyro sigue sonando en la bandeja del sistema (con un video, solo el audio). Clic en su ícono: el mini reproductor"
+            BACKGROUND_HINT
         } else {
             NO_TRAY
         });
         if switch(ui, &painter, "background", pos2(x1 - 17.0, y), self.cfg.background, accent, interactive) {
             self.cfg.background = !self.cfg.background;
             let msg = match (self.cfg.background, tray) {
+                (true, true) if cfg!(target_os = "macos") => "Segundo plano activado: al cerrar, Capyro sigue sonando en la barra de menús",
                 (true, true) => "Segundo plano activado: al cerrar, Capyro sigue sonando en la bandeja",
                 (true, false) => "Segundo plano activado, pero no encontré la bandeja del sistema",
                 (false, _) => "Segundo plano desactivado: cerrar la ventana cierra Capyro",

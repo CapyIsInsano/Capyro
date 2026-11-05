@@ -254,6 +254,14 @@ impl eframe::App for Mini<'_> {
                 }
             }
         }
+        // Mac: archivos abiertos desde el Finder → vuelve la ventana con ellos
+        #[cfg(target_os = "macos")]
+        {
+            let files = crate::system::macos::take_opened_files();
+            if !files.is_empty() {
+                self.finish(&ctx, Out::Open(files));
+            }
+        }
 
         // primer cuadro: al lado del ícono, con el tamaño de pantalla real
         let (focused, monitor, ppp) = ctx.input(|i| (i.viewport().focused, i.viewport().monitor_size, i.viewport().native_pixels_per_point));
@@ -399,6 +407,10 @@ pub fn show(core: &Core, cfg: &Config, renderer: eframe::Renderer, rx: &Receiver
         keep.vel = crate::ui::vinyl::RPS * core.speed() as f32;
     }
     keep.blurred_at = None;
+    // Mac: sin ícono en el Dock Capyro no está "al frente": que lo pase, así
+    // el mini reproductor recibe el foco (y se cierra al tocar afuera)
+    #[cfg(target_os = "macos")]
+    crate::system::macos::activate();
     let out = RefCell::new(None);
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Capyro")

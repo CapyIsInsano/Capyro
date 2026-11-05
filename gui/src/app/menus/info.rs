@@ -305,6 +305,8 @@ impl CapyroApp {
         }
         let btn_resp = btn.resp.on_hover_text(if cfg!(windows) {
             "Abre el desinstalador de Windows (el mismo de Aplicaciones instaladas)"
+        } else if cfg!(target_os = "macos") {
+            "Mueve Capyro.app a la Papelera y lo saca del Dock. Tu configuración y tus listas quedan"
         } else {
             "Abre el desinstalador de Capyro (capyro-uninstall, junto al programa)"
         });
