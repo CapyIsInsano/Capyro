@@ -8,6 +8,22 @@
 
 ---
 
+## v0.4.0-alpha · Capyro en la Mac
+
+- **Capyro llega a macOS** (11 Big Sur o más nuevo), en **Apple Silicon** (M1, M2, M3, M4…) y en las **Mac con Intel**. Es un **Capyro.app** de verdad: va en Aplicaciones, aparece en Launchpad y Spotlight, y trae adentro todo lo que necesita (FFmpeg incluido): no hace falta Homebrew ni nada.
+- **Se instala con CapyroInstaller**, el mismo de Windows (0.1.4) y con la misma cara: elegís dónde va (Aplicaciones) y la configuración, si lo querés en el Dock, tocás Instalar y listo. Un solo instalador para las dos clases de Mac: adentro trae la versión de cada una y usa la que corresponde.
+- **`system = "Mac"`** en `capyro.lua`, junto a `"Lin"` y `"Win"`. Como con Windows, **cada sistema compila e instala solo lo suyo**: en la Mac no entra nada de Linux ni de Windows (y al revés). CMake lo detecta solo (`-DCAPYRO_SYSTEM=Mac`).
+- **Con la cara de la Mac**: la ventana tiene los tres botones de colores del sistema arriba a la izquierda (cerrar, minimizar, pantalla completa), la sombra y las esquinas redondeadas de macOS; el logo y el encabezado de Capyro quedan al lado. Se dibuja con **Metal** (y si no anda, con OpenGL).
+- **Los atajos usan Cmd** (Cmd+O, Cmd+E, Cmd+Q…): en `capyro.lua` se siguen escribiendo `Ctrl+` (o `Cmd+`) y en la Mac son con Cmd. El editor de atajos, los carteles y el tutorial dicen "Cmd".
+- **Abrir con el Finder**: doble clic en un video o una canción, **"Abrir con… → Capyro"**, o soltarlos sobre el ícono del Dock. Capyro aparece para mp4, m4v, mov, avi, mkv, webm, mp3, wav, ogg, aac, flac, opus, m4a y aiff, sin adueñarse de ninguno.
+- **Decodifica con VideoToolbox**, el chip de video de la Mac (H.264, H.265, ProRes, y AV1 en los M3 o más nuevos). En **Capyro Converter**, "Usar la placa de video" codifica H.264 y H.265 con VideoToolbox; H.265 anda aunque esté apagado (en las Mac sin H.265 en el chip, por software).
+- **Segundo plano en la Mac**: al cerrar la ventana, Capyro sale del Dock y queda en la **barra de menús**, arriba a la derecha. Clic (o clic derecho) en su ícono: el mismo mini reproductor que en Linux y Windows; clic con la tecla Opción: pausa. Abrir Capyro de nuevo (Launchpad, Spotlight, el Finder) trae la ventana de vuelta.
+- **Se actualiza solo**, como en Windows: ⓘ → Buscar actualizaciones baja el Capyro.app de la última versión para tu Mac (la release `macos` del repo, que arma el CI) y lo cambia por el instalado.
+- **Desinstalar** (ⓘ): Capyro.app va a la Papelera y sale del Dock, como se hace en la Mac. Tu configuración y tus listas quedan.
+- En la Mac todo se guarda donde lo guardan las demás apps, sin carteles de permiso: la config en `~/Library/Application Support/Capyro/capyro.lua`, las listas y la sesión ahí mismo, la caché en `~/Library/Caches/Capyro` y las capturas en Imágenes → Capyro. Los errores, en `~/Library/Logs/Capyro/capyro.log` (se ven con la app Consola).
+- ⓘ dice en qué Mac corre: "macOS 15 Sequoia · 15.5 · Apple Silicon" (y "Rosetta" si es la versión de Intel en una Apple Silicon).
+- **CI nuevo** (`.github/workflows/macos.yml`): en cada push compila Capyro en una Mac con Apple Silicon y en una con Intel, con un FFmpeg propio para macOS 11 (x264, LAME, Opus, libvpx y dav1d adentro, VideoToolbox y AudioToolbox), firma el Capyro.app y lo publica en la release `macos` (`capyro-macos-arm64.zip` y `capyro-macos-x64.zip`). El FFmpeg se arma con `packaging/macos/build-ffmpeg.sh`, que también sirve en tu Mac.
+
 ## v0.3.3-alpha · Capyro Studio
 
 - **Capyro Studio**: un botón en la burbuja de funciones (vista de música) o abajo a la izquierda, al lado de ⓘ y Novedades (con un video), abre un **panel encima de la ventana** (no otra ventana). Arriba, la **portada** a la izquierda y el **nombre de la canción** en grande, con el artista y el resto de los datos al lado; abajo, la vista previa y el ecualizador. Se cierra con ✕, con Esc o tocando afuera. Cerrado, no queda nada cargado en memoria (ni las imágenes): Capyro no se vuelve un traga RAM.
