@@ -27,3 +27,11 @@ if(WIN32)
         imm32 advapi32 bcrypt ntdll userenv ws2_32 winmm version propsys shlwapi dbghelp
         synchronization)
 endif()
+if(APPLE)
+    # Lo mismo en macOS: los frameworks de Apple que usan la ventana (AppKit),
+    # Metal (wgpu), el selector de archivos y el ícono de la barra de menús.
+    set_property(TARGET capyro_gui-static APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+        "-framework AppKit" "-framework Foundation" "-framework CoreFoundation" "-framework CoreGraphics"
+        "-framework CoreVideo" "-framework IOKit" "-framework Metal" "-framework QuartzCore"
+        "-framework Carbon" "-framework UniformTypeIdentifiers" objc)
+endif()
