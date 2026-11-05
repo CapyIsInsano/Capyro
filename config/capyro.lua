@@ -118,26 +118,29 @@ local options = {
 
     -- Decodificación de video: "auto" (GPU si se puede, si no CPU),
     -- "gpu" (Linux: VA-API / NVDEC / VDPAU; Windows: D3D11VA / NVDEC / DXVA2;
-    -- si no hay, avisa y usa la CPU) o "cpu".
+    -- Mac: VideoToolbox; si no hay, avisa y usa la CPU) o "cpu".
     -- También se cambia en ⚙ → Decodificación.
     decoding         = "auto",
 
-    -- Solo Windows: con qué se dibuja la ventana. "auto" (prueba Direct3D y
-    -- OpenGL y se queda con el que ande), "direct3d" u "opengl". Si Capyro no
-    -- abre o se ve negro, probá forzar el otro (y reabrí Capyro).
+    -- Windows y Mac: con qué se dibuja la ventana. "auto" (Windows: prueba
+    -- Direct3D y OpenGL y se queda con el que ande; Mac: Metal, y si no anda
+    -- OpenGL), "direct3d" (en la Mac también "metal") u "opengl". Si Capyro
+    -- no abre o se ve negro, probá forzar el otro (y reabrí Capyro).
     renderer         = "auto",
 
-    -- Sistema para el que está compilado e instalado Capyro: "Lin" (Linux)
-    -- o "Win" (Windows). Lo escribe la instalación según el sistema que
-    -- detecta, y el actualizador lo usa para instalar solo lo de ese sistema
-    -- (en Linux nada de Windows y al revés). "auto" = detectarlo al abrir.
+    -- Sistema para el que está compilado e instalado Capyro: "Lin" (Linux),
+    -- "Win" (Windows) o "Mac" (macOS). Lo escribe la instalación según el
+    -- sistema que detecta, y el actualizador lo usa para instalar solo lo de
+    -- ese sistema (en Linux nada de Windows ni de Mac, y así con cada uno).
+    -- "auto" = detectarlo al abrir.
     system        = "auto",
 
     -- Actualizaciones (menú ⓘ → "Buscar actualizaciones").
     -- Vacío = el repo de git desde el que se compiló Capyro. Si lo compilaste
     -- desde un .zip, poné el tuyo: "usuario/Capyro" o la URL completa.
     -- En Windows se baja el capyro-windows-x64.zip de la última versión
-    -- publicada (Releases) del repo.
+    -- publicada (Releases) del repo; en la Mac, el capyro-macos-arm64.zip
+    -- (Apple Silicon) o capyro-macos-x64.zip (Intel).
     update_repo   = "",
     update_branch = "",        -- vacío = la rama principal del repo
 
