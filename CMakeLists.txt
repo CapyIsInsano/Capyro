@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
+# macOS: el más viejo en el que abre Capyro (Big Sur, el primero con Apple
+# Silicon). Tiene que ir antes de project(). En Linux y Windows no hace nada.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "macOS más viejo en el que abre Capyro")
 project(capyro
-    VERSION 0.3.3
+    VERSION 0.4.0
     DESCRIPTION "Capyro — Just press play."
     LANGUAGES C)
 
@@ -9,19 +12,22 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# --- sistema: Linux ("Lin") o Windows ("Win") -----------------------------
+# --- sistema: Linux ("Lin"), Windows ("Win") o macOS ("Mac") --------------
 # Se detecta solo según para qué se compila. Todo lo que es de un sistema
-# (scripts, íconos, .desktop, DLL, recursos .rc...) solo se compila e instala
-# en ese sistema. El código queda guardado en la config instalada
-# (options.system) y el actualizador lo usa para instalar solo lo que va.
-set(CAPYRO_SYSTEM "auto" CACHE STRING "Sistema destino: auto, Lin o Win")
-set_property(CACHE CAPYRO_SYSTEM PROPERTY STRINGS auto Lin Win)
+# (scripts, íconos, .desktop, DLL, recursos .rc, el Capyro.app...) solo se
+# compila e instala en ese sistema. El código queda guardado en la config
+# instalada (options.system) y el actualizador lo usa para instalar solo lo
+# que va.
+set(CAPYRO_SYSTEM "auto" CACHE STRING "Sistema destino: auto, Lin, Win o Mac")
+set_property(CACHE CAPYRO_SYSTEM PROPERTY STRINGS auto Lin Win Mac)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(_capyro_detected Lin)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(_capyro_detected Win)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(_capyro_detected Mac)
 else()
-    message(FATAL_ERROR "Capyro se compila en Linux o Windows (este es ${CMAKE_SYSTEM_NAME}).")
+    message(FATAL_ERROR "Capyro se compila en Linux, Windows o macOS (este es ${CMAKE_SYSTEM_NAME}).")
 endif()
 string(TOLOWER "${CAPYRO_SYSTEM}" _capyro_req)
 if(_capyro_req STREQUAL "auto" OR _capyro_req STREQUAL "")
@@ -30,13 +36,20 @@ elseif(_capyro_req MATCHES "^(lin|linux)$")
     set(CAPYRO_SYSTEM_CODE Lin)
 elseif(_capyro_req MATCHES "^(win|windows)$")
     set(CAPYRO_SYSTEM_CODE Win)
+elseif(_capyro_req MATCHES "^(mac|macos|osx|darwin)$")
+    set(CAPYRO_SYSTEM_CODE Mac)
 else()
-    message(FATAL_ERROR "CAPYRO_SYSTEM='${CAPYRO_SYSTEM}': usá auto, Lin o Win")
+    message(FATAL_ERROR "CAPYRO_SYSTEM='${CAPYRO_SYSTEM}': usá auto, Lin, Win o Mac")
 endif()
 if(NOT CAPYRO_SYSTEM_CODE STREQUAL _capyro_detected)
     message(FATAL_ERROR "CAPYRO_SYSTEM=${CAPYRO_SYSTEM_CODE} pero se está compilando para "
         "${CMAKE_SYSTEM_NAME} (${_capyro_detected}). Para Windows desde Linux usá "
-        "-DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake")
+        "-DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake; macOS se compila en una Mac")
+endif()
+# macOS: `cmake --install build` deja Capyro.app en /Aplicaciones (salvo
+# que se pida otro lugar con --prefix).
+if(APPLE AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/Applications" CACHE PATH "Dónde va Capyro.app" FORCE)
 endif()
 message(STATUS "Capyro: sistema ${CAPYRO_SYSTEM_CODE} (${CMAKE_SYSTEM_NAME})")
 
@@ -119,6 +132,11 @@ add_subdirectory(core)
 add_subdirectory(gui)
 
 # --- ejecutable final ---------------------------------------------------
+# La versión completa ("0.4.0-alpha"): para el instalador y el Capyro.app.
+file(STRINGS core/include/capyro_core.h _capyro_ver_line REGEX "#define CAPYRO_VERSION ")
+string(REGEX REPLACE ".*\"(.*)\".*" "\\1" CAPYRO_VERSION_FULL "${_capyro_ver_line}")
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/generated/version.txt "${CAPYRO_VERSION_FULL}\n")
+
 if(WIN32)
     # Ícono, versión y manifiesto dentro del .exe. WIN32 = sin consola negra
     # (si se le pasan opciones, main.c se engancha a la consola que lo abrió).
@@ -127,24 +145,49 @@ if(WIN32)
     set(CAPYRO_VERSION_STRING ${PROJECT_VERSION})
     configure_file(packaging/windows/capyro.rc.in ${CMAKE_CURRENT_BINARY_DIR}/generated/capyro.rc @ONLY)
     add_executable(capyro WIN32 core/src/main.c ${CMAKE_CURRENT_BINARY_DIR}/generated/capyro.rc)
+elseif(APPLE)
+    # macOS: Capyro.app. Adentro, en Contents/: el ejecutable (MacOS/Capyro),
+    # Info.plist (nombre, ícono y los formatos que abre: "Abrir con…" del
+    # Finder), Resources/ (ícono, config de ejemplo, versión, licencia) y
+    # Frameworks/ (las librerías de FFmpeg, al instalar).
+    set(CAPYRO_ICNS ${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/capyro.icns)
+    set(CAPYRO_APP_CONFIG ${CMAKE_CURRENT_BINARY_DIR}/generated/capyro.lua)
+    set(CAPYRO_APP_VERSION ${CMAKE_CURRENT_BINARY_DIR}/generated/version.txt)
+    set_source_files_properties(${CAPYRO_ICNS} ${CAPYRO_APP_VERSION} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_source_files_properties(${CAPYRO_APP_CONFIG} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/config GENERATED TRUE)
+    set(CAPYRO_BUNDLE_ID "io.github.capyisinsano.capyro")
+    set(CAPYRO_MIN_MACOS ${CMAKE_OSX_DEPLOYMENT_TARGET})
+    configure_file(packaging/macos/Info.plist.in ${CMAKE_CURRENT_BINARY_DIR}/generated/Info.plist @ONLY)
+    add_executable(capyro MACOSX_BUNDLE core/src/main.c ${CAPYRO_ICNS} ${CAPYRO_APP_CONFIG} ${CAPYRO_APP_VERSION})
+    set_target_properties(capyro PROPERTIES
+        OUTPUT_NAME Capyro
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_BINARY_DIR}/generated/Info.plist
+        # las librerías de FFmpeg van en Capyro.app/Contents/Frameworks
+        INSTALL_RPATH "@executable_path/../Frameworks")
 else()
     add_executable(capyro core/src/main.c)
 endif()
 target_link_libraries(capyro PRIVATE capyro_gui capyro_core)
 # Tirar el código que nadie usa (de las dependencias de Rust sobre todo) y,
 # en Release, sacar los símbolos: el ejecutable pasa de ~21 MB a ~10 MB.
-target_link_options(capyro PRIVATE -Wl,--gc-sections -Wl,-O1
-    $<$<CONFIG:Release,MinSizeRel>:-s>)
+if(APPLE)
+    # el linker de Apple: -dead_strip tira lo que no se usa; en Release,
+    # sin símbolos locales ni de depuración
+    target_link_options(capyro PRIVATE -Wl,-dead_strip $<$<CONFIG:Release,MinSizeRel>:-Wl,-S,-x>)
+else()
+    target_link_options(capyro PRIVATE -Wl,--gc-sections -Wl,-O1
+        $<$<CONFIG:Release,MinSizeRel>:-s>)
+endif()
 if(WIN32)
     # libgcc y winpthread adentro del .exe: dos DLL menos para llevar.
     target_link_options(capyro PRIVATE -static-libgcc
         -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic)
-else()
+elseif(NOT APPLE)
     target_link_options(capyro PRIVATE -Wl,--as-needed)
 endif()
 
 # --- config instalada: la de ejemplo + el sistema detectado --------------
-# options.system = "auto" → "Lin" o "Win". Se regenera si cambia la de ejemplo.
+# options.system = "auto" → "Lin", "Win" o "Mac". Se regenera si cambia la de ejemplo.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/config/capyro.lua)
 file(READ config/capyro.lua _capyro_cfg)
 string(REGEX REPLACE "(\n[ \t]*system[ \t]*=[ \t]*)\"[A-Za-z]*\"" "\\1\"${CAPYRO_SYSTEM_CODE}\""
@@ -201,9 +244,6 @@ if(WIN32)
         endif()
     endforeach()
     # La versión, para el instalador (CapyroInstaller la muestra al terminar).
-    file(STRINGS core/include/capyro_core.h _capyro_ver_line REGEX "#define CAPYRO_VERSION ")
-    string(REGEX REPLACE ".*\"(.*)\".*" "\\1" CAPYRO_VERSION_FULL "${_capyro_ver_line}")
-    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/generated/version.txt "${CAPYRO_VERSION_FULL}\n")
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/version.txt DESTINATION .)
     # Las DLL que necesita capyro.exe (FFmpeg y lo que FFmpeg pida), sacadas
     # de las carpetas bin/ de FFmpeg y del compilador. Las de Windows no.
@@ -247,6 +287,86 @@ if(WIN32)
                 message(WARNING "Capyro: no encontré ${_m} (agregá su carpeta a CAPYRO_DLL_DIRS)")
             endif()
         endforeach()
+    ]])
+elseif(APPLE)
+    # macOS: todo adentro de Capyro.app (por defecto en /Aplicaciones). La
+    # config de ejemplo, la versión y el ícono ya van en Contents/Resources.
+    install(TARGETS capyro BUNDLE DESTINATION .)
+    install(FILES LICENSE DESTINATION Capyro.app/Contents/Resources RENAME LICENSE.txt)
+    # Las librerías de FFmpeg adentro del .app (Contents/Frameworks), así
+    # Capyro abre en una Mac que no tiene FFmpeg. Con -DCAPYRO_FFMPEG_DIR
+    # (el FFmpeg que arma packaging/macos/build-ffmpeg.sh, como en el CI).
+    # Sin eso se usa el FFmpeg del sistema (Homebrew): anda en esa Mac.
+    if(CAPYRO_FFMPEG_DIR)
+        set(_capyro_ff_lib "${CAPYRO_FFMPEG_DIR}/lib")
+        install(CODE "set(CAPYRO_FF_LIB \"${_capyro_ff_lib}\")")
+        install(CODE [[
+            set(_app "${CMAKE_INSTALL_PREFIX}/Capyro.app")
+            set(_fw "${_app}/Contents/Frameworks")
+            file(MAKE_DIRECTORY "${_fw}")
+            find_program(_int install_name_tool REQUIRED)
+            set(_names "")
+            foreach(_l avutil avcodec avformat avfilter swscale swresample postproc avdevice)
+                # libavcodec.62.dylib (el nombre con el que se linkea; es un enlace)
+                file(GLOB _cands "${CAPYRO_FF_LIB}/lib${_l}.*.dylib")
+                foreach(_c IN LISTS _cands)
+                    get_filename_component(_n "${_c}" NAME)
+                    if(_n MATCHES "^lib${_l}\.[0-9]+\.dylib$")
+                        file(REAL_PATH "${_c}" _real)
+                        file(COPY_FILE "${_real}" "${_fw}/${_n}")
+                        execute_process(COMMAND "${_int}" -id "@rpath/${_n}" "${_fw}/${_n}" ERROR_QUIET)
+                        list(APPEND _names "${_n}")
+                        message(STATUS "Capyro: ${_n} → Contents/Frameworks")
+                    endif()
+                endforeach()
+            endforeach()
+            if(NOT _names)
+                message(FATAL_ERROR "Capyro: no encontré las librerías de FFmpeg en ${CAPYRO_FF_LIB}")
+            endif()
+            # que todo las busque adentro del .app (@rpath = Contents/Frameworks)
+            set(_bins "${_app}/Contents/MacOS/Capyro")
+            foreach(_n IN LISTS _names)
+                list(APPEND _bins "${_fw}/${_n}")
+            endforeach()
+            foreach(_b IN LISTS _bins)
+                execute_process(COMMAND otool -L "${_b}" OUTPUT_VARIABLE _deps ERROR_QUIET)
+                string(REPLACE "
+" ";" _deps "${_deps}")
+                foreach(_d IN LISTS _deps)
+                    string(STRIP "${_d}" _d)
+                    string(REGEX REPLACE " \(compatibility.*$" "" _d "${_d}")
+                    get_filename_component(_dn "${_d}" NAME)
+                    list(FIND _names "${_dn}" _i)
+                    if(NOT _i EQUAL -1 AND NOT _d STREQUAL "@rpath/${_dn}")
+                        execute_process(COMMAND "${_int}" -change "${_d}" "@rpath/${_dn}" "${_b}" ERROR_QUIET)
+                    endif()
+                endforeach()
+            endforeach()
+        ]])
+    endif()
+    # Firma "ad-hoc" (sin certificado): en las Mac con Apple Silicon un
+    # programa sin firmar no abre, y cambiar las rutas de arriba rompe la del
+    # linker. Va al final, cuando el .app ya está completo.
+    install(CODE [[
+        find_program(_codesign codesign)
+        if(_codesign)
+            set(_app "${CMAKE_INSTALL_PREFIX}/Capyro.app")
+            file(GLOB _libs "${_app}/Contents/Frameworks/*.dylib")
+            foreach(_l IN LISTS _libs)
+                execute_process(COMMAND "${_codesign}" --force --sign - "${_l}" OUTPUT_QUIET ERROR_QUIET)
+            endforeach()
+            execute_process(COMMAND "${_codesign}" --force --sign - "${_app}" RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_VARIABLE _err)
+            if(_rc EQUAL 0)
+                message(STATUS "Capyro: Capyro.app firmado (ad-hoc)")
+            else()
+                message(WARNING "Capyro: no pude firmar Capyro.app: ${_err}")
+            endif()
+            # que el Finder lo anote en "Abrir con…" sin tener que abrirlo antes
+            set(_lsregister "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+            if(EXISTS "${_lsregister}" AND "$ENV{DESTDIR}" STREQUAL "")
+                execute_process(COMMAND "${_lsregister}" -f "${_app}" OUTPUT_QUIET ERROR_QUIET)
+            endif()
+        endif()
     ]])
 else()
     # Linux: binario, config de ejemplo, .desktop e íconos. Nada de Windows.
